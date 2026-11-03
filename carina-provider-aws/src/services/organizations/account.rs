@@ -22,18 +22,21 @@ use crate::send_models_generated::{
 const ACCOUNT_RENAME_SETUP_ERROR: &str = "Failed to rename account: AccessDenied can mean either a missing IAM permission account:PutAccountName or that Account Management trusted access is not enabled. Enable trusted access with `aws organizations enable-aws-service-access --service-principal account.amazonaws.com`";
 
 fn organizations_account_create_poll_state(
-    status: Option<&aws_sdk_organizations::types::CreateAccountStatus>,
+    status: Option<&carina_aws_types::sdk::organizations::types::CreateAccountStatus>,
 ) -> CreatePoll<Option<String>> {
     match status.and_then(|status| status.state()) {
-        Some(aws_sdk_organizations::types::CreateAccountState::Succeeded) => CreatePoll::Ready(
-            status
-                .and_then(|status| status.account_id())
-                .map(str::to_string),
-        ),
-        Some(aws_sdk_organizations::types::CreateAccountState::Failed) => CreatePoll::Failed,
-        Some(aws_sdk_organizations::types::CreateAccountState::InProgress) | None => {
-            CreatePoll::Pending
+        Some(carina_aws_types::sdk::organizations::types::CreateAccountState::Succeeded) => {
+            CreatePoll::Ready(
+                status
+                    .and_then(|status| status.account_id())
+                    .map(str::to_string),
+            )
         }
+        Some(carina_aws_types::sdk::organizations::types::CreateAccountState::Failed) => {
+            CreatePoll::Failed
+        }
+        Some(carina_aws_types::sdk::organizations::types::CreateAccountState::InProgress)
+        | None => CreatePoll::Pending,
         // The SDK enum is non-exhaustive. An unrecognized state is not proof
         // that account creation ended, so retain the continuation.
         Some(_unrecognized_state) => CreatePoll::Pending,
@@ -136,8 +139,9 @@ impl AwsProvider {
             .email(&email);
 
         if let Some(iam_billing) = iam_user_access_to_billing {
-            let val =
-                aws_sdk_organizations::types::IamUserAccessToBilling::from(iam_billing.as_str());
+            let val = carina_aws_types::sdk::organizations::types::IamUserAccessToBilling::from(
+                iam_billing.as_str(),
+            );
             req = req.iam_user_access_to_billing(val);
         }
 
@@ -148,7 +152,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
-                    let tag = aws_sdk_organizations::types::Tag::builder()
+                    let tag = carina_aws_types::sdk::organizations::types::Tag::builder()
                         .key(key)
                         .value(val.expose_plaintext())
                         .build()
@@ -356,7 +360,7 @@ impl AwsProvider {
                     _ => true,
                 };
                 if should_add {
-                    let tag = aws_sdk_organizations::types::Tag::builder()
+                    let tag = carina_aws_types::sdk::organizations::types::Tag::builder()
                         .key(key)
                         .value(val.expose_plaintext())
                         .build()
@@ -388,7 +392,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod pending_tests {
     use super::*;
-    use aws_sdk_organizations::types::{CreateAccountState, CreateAccountStatus};
+    use carina_aws_types::sdk::organizations::types::{CreateAccountState, CreateAccountStatus};
 
     fn status(state: CreateAccountState, account_id: Option<&str>) -> CreateAccountStatus {
         CreateAccountStatus::builder()

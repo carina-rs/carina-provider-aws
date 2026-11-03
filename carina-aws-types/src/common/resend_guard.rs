@@ -19,6 +19,7 @@ use aws_smithy_types::error::ErrorMetadata;
 use aws_smithy_types::retry::{ErrorKind, RetryConfig};
 use regex::Regex;
 
+use super::ServiceErrorCode;
 use super::send_outcome::{
     AttemptOutcome, AttemptPhase, FinalAttempt, Idempotency, OperationSendFailure,
     OperationVerdict, SendClassification, not_sent_transience,
@@ -152,20 +153,6 @@ fn find_source<'a, T: std::error::Error + 'static>(
     None
 }
 
-// Admit complete ASCII codes before they can enter retry output. Rejected
-// values are omitted, rather than shortened or passed through redaction.
-struct RetryErrorCode<'a>(&'a str);
-
-impl<'a> RetryErrorCode<'a> {
-    fn parse(value: &'a str) -> Option<Self> {
-        ((1..=64).contains(&value.len())
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b".:_-".contains(&byte)))
-        .then_some(Self(value))
-    }
-}
-
 /// Retry diagnostics use only typed fields, never error Display/Debug text.
 fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
     if (error.is_response_error() || error.is_operation_error())
@@ -181,10 +168,10 @@ fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpRespons
             .or_else(|| find_source::<ErrorMetadata>(error));
         if let Some(code) = metadata
             .and_then(ErrorMetadata::code)
-            .and_then(RetryErrorCode::parse)
+            .and_then(ServiceErrorCode::parse)
         {
             summary.push(' ');
-            summary.push_str(code.0);
+            summary.push_str(code.as_str());
         }
         return summary;
     }

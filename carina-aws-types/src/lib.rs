@@ -4,12 +4,15 @@
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
 
+mod assume_role;
 mod catalog;
 mod common;
 #[cfg(any(target_arch = "wasm32", test))]
 mod host_credentials;
 pub mod kms_reference;
 mod read_back;
+pub mod sdk;
+mod sdk_config;
 mod services;
 
 /// Implementation details used by exported catalog macros.
@@ -18,11 +21,13 @@ pub mod __private {
     pub use carina_core::schema::{AttributeType, TypeIdentity};
 }
 
+pub use assume_role::{AssumeRoleFailure, GuardedAssumeRoleProvider};
 pub use catalog::*;
 pub use common::*;
 #[cfg(any(target_arch = "wasm32", test))]
 pub use host_credentials::HostCredentialsProvider;
 pub use read_back::ReadBackPredicate;
+pub use sdk_config::load_sdk_config;
 pub use services::*;
 
 #[cfg(test)]

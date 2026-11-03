@@ -9,9 +9,9 @@ use crate::read_models_generated::S3BucketVersioningReadModel;
 use crate::send_models_generated::{S3BucketVersioningCreateInput, S3BucketVersioningUpdateInput};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 use crate::services::s3::{InvalidBucketStateReason, classify_invalid_bucket_state};
-use aws_sdk_s3::error::ProvideErrorMetadata;
-use aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError;
-use aws_sdk_s3::types::{BucketVersioningStatus, VersioningConfiguration};
+use carina_aws_types::sdk::s3::error::ProvideErrorMetadata;
+use carina_aws_types::sdk::s3::operation::put_bucket_versioning::PutBucketVersioningError;
+use carina_aws_types::sdk::s3::types::{BucketVersioningStatus, VersioningConfiguration};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{
@@ -184,7 +184,7 @@ fn finish_s3_bucket_versioning_suspend<Failure>(
     id: ResourceId,
     identifier: &str,
     result: Result<
-        aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningOutput,
+        carina_aws_types::sdk::s3::operation::put_bucket_versioning::PutBucketVersioningOutput,
         Failure,
     >,
 ) -> ProviderResult<()>
@@ -227,10 +227,10 @@ fn write_suspension_warning(mut writer: impl Write, bucket: &str) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_s3::error::SdkError;
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
+    use carina_aws_types::sdk::s3::error::SdkError;
 
     fn suspension_service_error(code: &str, message: &str) -> SdkError<PutBucketVersioningError> {
         let error = PutBucketVersioningError::generic(

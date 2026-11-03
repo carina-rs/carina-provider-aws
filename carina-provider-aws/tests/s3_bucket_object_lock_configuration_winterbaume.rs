@@ -3,8 +3,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_s3::types::{
+use carina_aws_types::Idempotency;
+use carina_aws_types::sdk::s3::S3Client;
+use carina_aws_types::sdk::s3::types::{
     BucketVersioningStatus, DefaultRetention, ObjectLockConfiguration, ObjectLockRetentionMode,
     ObjectLockRule, VersioningConfiguration,
 };
@@ -41,13 +42,12 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
     )
 }
 
-// This test-only raw client stages winterbaume prerequisites outside the
-// provider; provider operations still use the generated guarded wrapper.
-#[allow(clippy::disallowed_methods)]
+// The guarded facade also stages winterbaume prerequisites. Its conservative
+// lookup never grants resend permission to a possibly sent setup operation.
 async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
-    let s3_client = S3Client::new(&sdk_config);
+    let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
     (provider_from_config(sdk_config), s3_client)
 }
 
@@ -59,6 +59,7 @@ async fn provider_without_services() -> AwsProvider {
 
 async fn create_bucket(client: &S3Client, bucket: &str) {
     client
+        .inner()
         .create_bucket()
         .bucket(bucket)
         .send()
@@ -68,6 +69,7 @@ async fn create_bucket(client: &S3Client, bucket: &str) {
 
 async fn enable_versioning(client: &S3Client, bucket: &str) {
     client
+        .inner()
         .put_bucket_versioning()
         .bucket(bucket)
         .versioning_configuration(
@@ -366,6 +368,7 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
         .expect("create Object Lock configuration from DSL enum identifiers");
 
     let stored = client
+        .inner()
         .get_object_lock_configuration()
         .bucket(bucket)
         .send()
@@ -427,6 +430,7 @@ async fn read_treats_rule_without_required_enabled_as_not_found() {
     create_bucket(&client, bucket).await;
     enable_versioning(&client, bucket).await;
     client
+        .inner()
         .put_object_lock_configuration()
         .bucket(bucket)
         .object_lock_configuration(
@@ -638,6 +642,7 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     let recreate = create_outcome_for_test(&provider, &id, request).await;
 
     let stored = client
+        .inner()
         .get_object_lock_configuration()
         .bucket(bucket)
         .send()

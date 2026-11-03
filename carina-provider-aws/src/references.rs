@@ -1,10 +1,11 @@
 //! KMS reference batching for the initialized provider instance.
 
 use crate::{AwsProvider, BoundedSdkConfig};
+use carina_aws_types::Idempotency;
 use carina_aws_types::kms_reference::{
     DescribeKeyClient, DescribeKeyFailure, describe_key_failure, resolve_reference_batch,
 };
-use carina_aws_types::{Idempotency, ResendGuard};
+use carina_aws_types::sdk::kms;
 use carina_core::provider::BoxFuture;
 use carina_provider_protocol::types::{ReferenceError, ReferenceOutcome, ReferenceRequest};
 
@@ -23,26 +24,21 @@ impl KmsClient {
         }
     }
 
-    // Raw SDK constructors are confined to client wrappers, as for generated clients.
-    #[allow(clippy::disallowed_methods)]
-    fn client_in_region(&self, region: &str) -> aws_sdk_kms::Client {
+    fn client_in_region(&self, region: &str) -> kms::KmsClient {
         let config = self.config.in_region(region);
-        aws_sdk_kms::Client::from_conf(
-            aws_sdk_kms::config::Builder::from(config.sdk_config())
-                .interceptor(ResendGuard::new(|operation| match operation {
-                    // DescribeKey may initialize a managed key; a repeat is still safe.
-                    "DescribeKey" => Idempotency::ReadOnly,
-                    _ => Idempotency::NotIdempotent,
-                }))
-                .build(),
-        )
+        kms::KmsClient::new(config.sdk_config(), |operation| {
+            // DescribeKey may initialize a managed key; a repeat is still safe.
+            if operation == "DescribeKey" {
+                Idempotency::ReadOnly
+            } else {
+                Idempotency::NotIdempotent
+            }
+        })
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> aws_sdk_kms::Config {
+    pub(crate) fn guarded_client(&self) -> kms::KmsClient {
         self.client_in_region(self.config.sdk_config().region().unwrap().as_ref())
-            .config()
-            .clone()
     }
 }
 
@@ -55,6 +51,7 @@ impl DescribeKeyClient for KmsClient {
         Box::pin(async move {
             let output = self
                 .client_in_region(region)
+                .inner()
                 .describe_key()
                 .key_id(raw)
                 .send()

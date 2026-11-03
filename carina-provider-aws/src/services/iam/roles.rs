@@ -4,7 +4,7 @@
 //! `name_regex` filter client-side (matching Terraform's `data.aws_iam_roles`
 //! behavior). Returns `arns` and `names` as parallel `list(String)` outputs.
 
-use aws_sdk_iam::types::Role;
+use carina_aws_types::sdk::iam::types::Role;
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
     AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, State, Value,

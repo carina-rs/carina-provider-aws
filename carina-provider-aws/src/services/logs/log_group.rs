@@ -138,7 +138,7 @@ impl AwsProvider {
         }
 
         if let Some(class) = log_group_class {
-            use aws_sdk_cloudwatchlogs::types::LogGroupClass;
+            use carina_aws_types::sdk::cloudwatchlogs::types::LogGroupClass;
             req = req.log_group_class(LogGroupClass::from(class.as_str()));
         }
 

@@ -21,7 +21,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -83,7 +83,7 @@ impl AwsProvider {
         let mut req = self.ec2_client.allocate_address().tag_specifications(
             build_tag_specification_with_create_token(
                 tags.as_ref(),
-                aws_sdk_ec2::types::ResourceType::ElasticIp,
+                carina_aws_types::sdk::ec2::types::ResourceType::ElasticIp,
                 client_token,
             ),
         );
@@ -96,11 +96,11 @@ impl AwsProvider {
         }
 
         if let Some(domain) = domain {
-            use aws_sdk_ec2::types::DomainType;
+            use carina_aws_types::sdk::ec2::types::DomainType;
             req = req.domain(DomainType::from(domain.as_str()));
         } else {
             // Default to VPC
-            req = req.domain(aws_sdk_ec2::types::DomainType::Vpc);
+            req = req.domain(carina_aws_types::sdk::ec2::types::DomainType::Vpc);
         }
 
         let result = req.send().await;

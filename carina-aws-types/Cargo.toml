@@ -5,18 +5,12 @@ edition = "2024"
 license = "MIT"
 description = "AWS type definitions for Carina infrastructure management tool"
 
-
-
-[lib]
-doctest = false
-
 [features]
 test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils", "dep:wasi"]
 
 [dev-dependencies]
 carina-core = { workspace = true, features = ["test-support"] }
 aws-smithy-async = { version = "1", features = ["test-util"] }
-aws-smithy-runtime = { version = "1", features = ["client"] }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
 indexmap = "2"
@@ -24,7 +18,22 @@ tokio = { version = "1", features = ["macros", "rt", "test-util", "time"] }
 wasi = "0.14"
 
 [dependencies]
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-sdk-account = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-acm = { version = "1.125.0", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-cloudwatchlogs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-ec2 = { version = "1.273.0", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-iam = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-identitystore = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-kms = { version = "1.127.0", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-organizations = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-route53 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-sqs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest"] }
+aws-types = { version = "1" }
 aws-runtime = { version = "1" }
+aws-smithy-runtime = { version = "1", features = ["client"] }
 aws-credential-types = { version = "1" }
 aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
 aws-smithy-types = { version = "1" }

@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::{
+use carina_aws_types::sdk::s3::types::{
     Event, EventBridgeConfiguration, FilterRule, FilterRuleName, LambdaFunctionConfiguration,
     NotificationConfiguration, NotificationConfigurationFilter, QueueConfiguration, S3KeyFilter,
     TopicConfiguration,

@@ -1,10 +1,10 @@
 use std::io::{self, Write};
 
-use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
-use aws_sdk_s3::operation::put_object_lock_configuration::{
+use carina_aws_types::sdk::s3::error::{ProvideErrorMetadata, SdkError};
+use carina_aws_types::sdk::s3::operation::put_object_lock_configuration::{
     PutObjectLockConfigurationError, PutObjectLockConfigurationOutput,
 };
-use aws_sdk_s3::types::{
+use carina_aws_types::sdk::s3::types::{
     BucketVersioningStatus, DefaultRetention, ObjectLockConfiguration, ObjectLockEnabled,
     ObjectLockRetentionMode, ObjectLockRule,
 };

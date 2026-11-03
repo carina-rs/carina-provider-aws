@@ -1,10 +1,10 @@
-use aws_sdk_s3::types::{
+use aws_smithy_types::{DateTime, date_time::Format};
+use carina_aws_types::sdk::s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, ExpirationStatus,
     LifecycleExpiration, LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter,
     NoncurrentVersionExpiration, NoncurrentVersionTransition, Tag, Transition,
     TransitionStorageClass,
 };
-use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{

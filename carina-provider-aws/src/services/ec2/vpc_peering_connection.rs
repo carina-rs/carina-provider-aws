@@ -107,7 +107,7 @@ impl AwsProvider {
 
         req = req.tag_specifications(build_tag_specification_with_create_token(
             tags.as_ref(),
-            aws_sdk_ec2::types::ResourceType::VpcPeeringConnection,
+            carina_aws_types::sdk::ec2::types::ResourceType::VpcPeeringConnection,
             client_token,
         ));
 

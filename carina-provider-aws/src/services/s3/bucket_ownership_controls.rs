@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
+use carina_aws_types::sdk::s3::types::{ObjectOwnership, OwnershipControls, OwnershipControlsRule};
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{

@@ -5,7 +5,7 @@ use std::future::Future;
 
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
-use carina_aws_types::{Idempotency, ResendGuard};
+use carina_aws_types::Idempotency;
 
 use crate::aws_operation::{
     AwsOperation, ClientToken, DecidedOperationError, DecidedSend, NoToken, TokenBearing,
@@ -22,35 +22,30 @@ use crate::sdk_config::BoundedSdkConfig;
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct AccountClient {
-    inner: aws_sdk_account::Client,
+    inner: carina_aws_types::sdk::account::AccountClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl AccountClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_account::Client::from_conf(
-                aws_sdk_account::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(account_idempotency))
-                    .build(),
+            inner: carina_aws_types::sdk::account::AccountClient::new(
+                config.sdk_config(),
+                account_idempotency,
             ),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_account::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::account::AccountClient {
+        &self.inner
     }
 
     /// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
-    pub(crate) fn put_account_name(
-        &self,
-    ) -> aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder {
-        self.inner.put_account_name()
+    pub(crate) fn put_account_name(&self) -> carina_aws_types::sdk::account::operation::put_account_name::builders::PutAccountNameFluentBuilder{
+        self.inner.inner().put_account_name()
     }
 }
 
@@ -69,76 +64,57 @@ pub(crate) fn account_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct AcmClient {
-    inner: aws_sdk_acm::Client,
+    inner: carina_aws_types::sdk::acm::AcmClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl AcmClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_acm::Client::from_conf(
-                aws_sdk_acm::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(acm_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::acm::AcmClient::new(config.sdk_config(), acm_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_acm::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::acm::AcmClient {
+        &self.inner
     }
 
     /// AddTagsToCertificate: sets tag keys on one certificate; repeating the same key/value pairs has no additional effect
-    pub(crate) fn add_tags_to_certificate(
-        &self,
-    ) -> aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder
-    {
-        self.inner.add_tags_to_certificate()
+    pub(crate) fn add_tags_to_certificate(&self) -> carina_aws_types::sdk::acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder{
+        self.inner.inner().add_tags_to_certificate()
     }
 
     /// DeleteCertificate: the provider does not accept an already-absent certificate as success
-    pub(crate) fn delete_certificate(
-        &self,
-    ) -> aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder {
-        self.inner.delete_certificate()
+    pub(crate) fn delete_certificate(&self) -> carina_aws_types::sdk::acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder{
+        self.inner.inner().delete_certificate()
     }
 
     /// DescribeCertificate: reads certificate state and has no side effects
-    pub(crate) fn describe_certificate(
-        &self,
-    ) -> aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder
-    {
-        self.inner.describe_certificate()
+    pub(crate) fn describe_certificate(&self) -> carina_aws_types::sdk::acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder{
+        self.inner.inner().describe_certificate()
     }
 
     /// ListTagsForCertificate: reads certificate tags and has no side effects
-    pub(crate) fn list_tags_for_certificate(&self) -> aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder{
-        self.inner.list_tags_for_certificate()
+    pub(crate) fn list_tags_for_certificate(&self) -> carina_aws_types::sdk::acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder{
+        self.inner.inner().list_tags_for_certificate()
     }
 
     /// RemoveTagsFromCertificate: removes named tag keys; repeating the removal leaves the same state
-    pub(crate) fn remove_tags_from_certificate(&self) -> aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder{
-        self.inner.remove_tags_from_certificate()
+    pub(crate) fn remove_tags_from_certificate(&self) -> carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder{
+        self.inner.inner().remove_tags_from_certificate()
     }
 
     /// RequestCertificate: the IdempotencyToken identifies one certificate request within ACM's token window
-    pub(crate) fn request_certificate(
-        &self,
-    ) -> TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
-        aws_sdk_acm::Client,
-    > {
-        TokenOperation::new(aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder::default(), self.inner.clone())
+    pub(crate) fn request_certificate(&self) -> TokenOperation<carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder, carina_aws_types::sdk::acm::AcmClient>{
+        TokenOperation::new(carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder::default(), self.inner.clone())
     }
 
     /// UpdateCertificateOptions: replaces the requested certificate option values keyed by certificate ARN
-    pub(crate) fn update_certificate_options(&self) -> aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder{
-        self.inner.update_certificate_options()
+    pub(crate) fn update_certificate_options(&self) -> carina_aws_types::sdk::acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder{
+        self.inner.inner().update_certificate_options()
     }
 }
 
@@ -163,117 +139,97 @@ pub(crate) fn acm_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct CloudWatchLogsClient {
-    inner: aws_sdk_cloudwatchlogs::Client,
+    inner: carina_aws_types::sdk::cloudwatchlogs::CloudWatchLogsClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl CloudWatchLogsClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_cloudwatchlogs::Client::from_conf(
-                aws_sdk_cloudwatchlogs::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(cloudwatchlogs_idempotency))
-                    .build(),
+            inner: carina_aws_types::sdk::cloudwatchlogs::CloudWatchLogsClient::new(
+                config.sdk_config(),
+                cloudwatchlogs_idempotency,
             ),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_cloudwatchlogs::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(
+        &self,
+    ) -> &carina_aws_types::sdk::cloudwatchlogs::CloudWatchLogsClient {
+        &self.inner
     }
 
     /// AssociateKmsKey: sets the KMS-key association for one log group
-    pub(crate) fn associate_kms_key(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder
-    {
-        self.inner.associate_kms_key()
+    pub(crate) fn associate_kms_key(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder{
+        self.inner.inner().associate_kms_key()
     }
 
     /// CreateLogGroup: creates a top-level resource without an idempotency token
-    pub(crate) fn create_log_group(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder
-    {
-        self.inner.create_log_group()
+    pub(crate) fn create_log_group(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder{
+        self.inner.inner().create_log_group()
     }
 
     /// DeleteLogGroup: the provider does not accept an already-absent log group as success
-    pub(crate) fn delete_log_group(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder
-    {
-        self.inner.delete_log_group()
+    pub(crate) fn delete_log_group(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder{
+        self.inner.inner().delete_log_group()
     }
 
     /// DeleteRetentionPolicy: removes the single retention policy keyed by log group
-    pub(crate) fn delete_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder{
-        self.inner.delete_retention_policy()
+    pub(crate) fn delete_retention_policy(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder{
+        self.inner.inner().delete_retention_policy()
     }
 
     /// DescribeLogGroups: reads log-group state and has no side effects
-    pub(crate) fn describe_log_groups(&self) -> aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder{
-        self.inner.describe_log_groups()
+    pub(crate) fn describe_log_groups(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder{
+        self.inner.inner().describe_log_groups()
     }
 
     /// DisassociateKmsKey: removes the KMS-key association from one log group
-    pub(crate) fn disassociate_kms_key(&self) -> aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder{
-        self.inner.disassociate_kms_key()
+    pub(crate) fn disassociate_kms_key(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder{
+        self.inner.inner().disassociate_kms_key()
     }
 
     /// ListTagsForResource: reads resource tags and has no side effects
-    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
-        self.inner.list_tags_for_resource()
+    pub(crate) fn list_tags_for_resource(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.inner().list_tags_for_resource()
     }
 
     /// ListTagsLogGroup: reads log-group tags and has no side effects
-    pub(crate) fn list_tags_log_group(&self) -> aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder{
-        self.inner.list_tags_log_group()
+    pub(crate) fn list_tags_log_group(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder{
+        self.inner.inner().list_tags_log_group()
     }
 
     /// PutLogGroupDeletionProtection: sets one boolean on the identified log group
-    pub(crate) fn put_log_group_deletion_protection(&self) -> aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder{
-        self.inner.put_log_group_deletion_protection()
+    pub(crate) fn put_log_group_deletion_protection(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder{
+        self.inner.inner().put_log_group_deletion_protection()
     }
 
     /// PutRetentionPolicy: replaces the single retention policy keyed by log group
-    pub(crate) fn put_retention_policy(&self) -> aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder{
-        self.inner.put_retention_policy()
+    pub(crate) fn put_retention_policy(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder{
+        self.inner.inner().put_retention_policy()
     }
 
     /// TagLogGroup: sets tag keys on one log group; repeating the same values has no additional effect
-    pub(crate) fn tag_log_group(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder {
-        self.inner.tag_log_group()
+    pub(crate) fn tag_log_group(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder{
+        self.inner.inner().tag_log_group()
     }
 
     /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
-    pub(crate) fn tag_resource(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder {
-        self.inner.tag_resource()
+    pub(crate) fn tag_resource(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder{
+        self.inner.inner().tag_resource()
     }
 
     /// UntagLogGroup: removes named tag keys; repeating the removal leaves the same state
-    pub(crate) fn untag_log_group(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder
-    {
-        self.inner.untag_log_group()
+    pub(crate) fn untag_log_group(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder{
+        self.inner.inner().untag_log_group()
     }
 
     /// UntagResource: removes named tag keys; repeating the removal leaves the same state
-    pub(crate) fn untag_resource(
-        &self,
-    ) -> aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder
-    {
-        self.inner.untag_resource()
+    pub(crate) fn untag_resource(&self) -> carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder{
+        self.inner.inner().untag_resource()
     }
 }
 
@@ -305,472 +261,373 @@ pub(crate) fn cloudwatchlogs_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct Ec2Client {
-    inner: aws_sdk_ec2::Client,
+    inner: carina_aws_types::sdk::ec2::Ec2Client,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl Ec2Client {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_ec2::Client::from_conf(
-                aws_sdk_ec2::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(ec2_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::ec2::Ec2Client::new(config.sdk_config(), ec2_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_ec2::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::ec2::Ec2Client {
+        &self.inner
     }
 
     /// AllocateAddress: each successful call can allocate another address and the API has no client token
-    pub(crate) fn allocate_address(
-        &self,
-    ) -> aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder {
-        self.inner.allocate_address()
+    pub(crate) fn allocate_address(&self) -> carina_aws_types::sdk::ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder{
+        self.inner.inner().allocate_address()
     }
 
     /// AssociateRouteTable: creates an association without an idempotency token
-    pub(crate) fn associate_route_table(
-        &self,
-    ) -> aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder
-    {
-        self.inner.associate_route_table()
+    pub(crate) fn associate_route_table(&self) -> carina_aws_types::sdk::ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder{
+        self.inner.inner().associate_route_table()
     }
 
     /// AttachInternetGateway: attaches a resource and has no idempotency token
-    pub(crate) fn attach_internet_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder
-    {
-        self.inner.attach_internet_gateway()
+    pub(crate) fn attach_internet_gateway(&self) -> carina_aws_types::sdk::ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder{
+        self.inner.inner().attach_internet_gateway()
     }
 
     /// AttachVpnGateway: attaches a resource and has no idempotency token
-    pub(crate) fn attach_vpn_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder {
-        self.inner.attach_vpn_gateway()
+    pub(crate) fn attach_vpn_gateway(&self) -> carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder{
+        self.inner.inner().attach_vpn_gateway()
     }
 
     /// AuthorizeSecurityGroupEgress: authorizes rules without an idempotency token
-    pub(crate) fn authorize_security_group_egress(&self) -> aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder{
-        self.inner.authorize_security_group_egress()
+    pub(crate) fn authorize_security_group_egress(&self) -> carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder{
+        self.inner.inner().authorize_security_group_egress()
     }
 
     /// AuthorizeSecurityGroupIngress: authorizes rules without an idempotency token
-    pub(crate) fn authorize_security_group_ingress(&self) -> aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder{
-        self.inner.authorize_security_group_ingress()
+    pub(crate) fn authorize_security_group_ingress(&self) -> carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder{
+        self.inner.inner().authorize_security_group_ingress()
     }
 
     /// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
-    pub(crate) fn create_egress_only_internet_gateway(&self) -> TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client>{
-        TokenOperation::new(aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder::default(), self.inner.clone())
+    pub(crate) fn create_egress_only_internet_gateway(&self) -> TokenOperation<carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client>{
+        TokenOperation::new(carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateFlowLogs: ClientToken identifies one flow-log creation request
-    pub(crate) fn create_flow_logs(
-        &self,
-    ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
-        aws_sdk_ec2::Client,
-    > {
-        TokenOperation::new(
-            aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder::default(
-            ),
-            self.inner.clone(),
-        )
+    pub(crate) fn create_flow_logs(&self) -> TokenOperation<carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder, carina_aws_types::sdk::ec2::Ec2Client>{
+        TokenOperation::new(carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateInternetGateway: each successful call creates a new gateway and the API has no client token
-    pub(crate) fn create_internet_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder
-    {
-        self.inner.create_internet_gateway()
+    pub(crate) fn create_internet_gateway(&self) -> carina_aws_types::sdk::ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder{
+        self.inner.inner().create_internet_gateway()
     }
 
     /// CreateNatGateway: the model's ClientToken identifies one NAT-gateway creation request
-    pub(crate) fn create_nat_gateway(
-        &self,
-    ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
-        aws_sdk_ec2::Client,
-    > {
-        TokenOperation::new(aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder::default(), self.inner.clone())
+    pub(crate) fn create_nat_gateway(&self) -> TokenOperation<carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client>{
+        TokenOperation::new(carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateRoute: creates a route without an idempotency token
     pub(crate) fn create_route(
         &self,
-    ) -> aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder {
-        self.inner.create_route()
+    ) -> carina_aws_types::sdk::ec2::operation::create_route::builders::CreateRouteFluentBuilder
+    {
+        self.inner.inner().create_route()
     }
 
     /// CreateRouteTable: the model's ClientToken identifies one route-table creation request
-    pub(crate) fn create_route_table(
-        &self,
-    ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
-        aws_sdk_ec2::Client,
-    > {
-        TokenOperation::new(aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder::default(), self.inner.clone())
+    pub(crate) fn create_route_table(&self) -> TokenOperation<carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder, carina_aws_types::sdk::ec2::Ec2Client>{
+        TokenOperation::new(carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateSecurityGroup: creates a security group without an idempotency token
-    pub(crate) fn create_security_group(
-        &self,
-    ) -> aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder
-    {
-        self.inner.create_security_group()
+    pub(crate) fn create_security_group(&self) -> carina_aws_types::sdk::ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder{
+        self.inner.inner().create_security_group()
     }
 
     /// CreateSubnet: each successful call can create a new subnet and the API has no client token
     pub(crate) fn create_subnet(
         &self,
-    ) -> aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder {
-        self.inner.create_subnet()
+    ) -> carina_aws_types::sdk::ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder
+    {
+        self.inner.inner().create_subnet()
     }
 
     /// CreateTags: sets tag keys on named resources; repeating the same values has no additional effect
     pub(crate) fn create_tags(
         &self,
-    ) -> aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
-        self.inner.create_tags()
+    ) -> carina_aws_types::sdk::ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
+        self.inner.inner().create_tags()
     }
 
     /// CreateTransitGateway: each successful call creates a new transit gateway and the API has no client token
-    pub(crate) fn create_transit_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder
-    {
-        self.inner.create_transit_gateway()
+    pub(crate) fn create_transit_gateway(&self) -> carina_aws_types::sdk::ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder{
+        self.inner.inner().create_transit_gateway()
     }
 
     /// CreateTransitGatewayVpcAttachment: creates an attachment without an idempotency token
-    pub(crate) fn create_transit_gateway_vpc_attachment(&self) -> aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder{
-        self.inner.create_transit_gateway_vpc_attachment()
+    pub(crate) fn create_transit_gateway_vpc_attachment(&self) -> carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder{
+        self.inner.inner().create_transit_gateway_vpc_attachment()
     }
 
     /// CreateVpc: each successful call creates a new VPC and the API has no client token
     pub(crate) fn create_vpc(
         &self,
-    ) -> aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder {
-        self.inner.create_vpc()
+    ) -> carina_aws_types::sdk::ec2::operation::create_vpc::builders::CreateVpcFluentBuilder {
+        self.inner.inner().create_vpc()
     }
 
     /// CreateVpcEndpoint: ClientToken identifies one endpoint creation request
-    pub(crate) fn create_vpc_endpoint(
-        &self,
-    ) -> TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
-        aws_sdk_ec2::Client,
-    > {
-        TokenOperation::new(aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder::default(), self.inner.clone())
+    pub(crate) fn create_vpc_endpoint(&self) -> TokenOperation<carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder, carina_aws_types::sdk::ec2::Ec2Client>{
+        TokenOperation::new(carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder::default(), self.inner.clone())
     }
 
     /// CreateVpcPeeringConnection: creates a peering connection without an idempotency token
-    pub(crate) fn create_vpc_peering_connection(&self) -> aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder{
-        self.inner.create_vpc_peering_connection()
+    pub(crate) fn create_vpc_peering_connection(&self) -> carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder{
+        self.inner.inner().create_vpc_peering_connection()
     }
 
     /// CreateVpnGateway: each successful call creates a new gateway and the API has no client token
-    pub(crate) fn create_vpn_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder {
-        self.inner.create_vpn_gateway()
+    pub(crate) fn create_vpn_gateway(&self) -> carina_aws_types::sdk::ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder{
+        self.inner.inner().create_vpn_gateway()
     }
 
     /// DeleteEgressOnlyInternetGateway: the provider does not accept an already-absent gateway as success
-    pub(crate) fn delete_egress_only_internet_gateway(&self) -> aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder{
-        self.inner.delete_egress_only_internet_gateway()
+    pub(crate) fn delete_egress_only_internet_gateway(&self) -> carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder{
+        self.inner.inner().delete_egress_only_internet_gateway()
     }
 
     /// DeleteFlowLogs: the provider reports unsuccessful already-absent items as errors
-    pub(crate) fn delete_flow_logs(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder {
-        self.inner.delete_flow_logs()
+    pub(crate) fn delete_flow_logs(&self) -> carina_aws_types::sdk::ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder{
+        self.inner.inner().delete_flow_logs()
     }
 
     /// DeleteInternetGateway: the provider does not accept an already-absent gateway as success
-    pub(crate) fn delete_internet_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder
-    {
-        self.inner.delete_internet_gateway()
+    pub(crate) fn delete_internet_gateway(&self) -> carina_aws_types::sdk::ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder{
+        self.inner.inner().delete_internet_gateway()
     }
 
     /// DeleteNatGateway: the provider does not accept an already-absent NAT gateway as success
-    pub(crate) fn delete_nat_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder {
-        self.inner.delete_nat_gateway()
+    pub(crate) fn delete_nat_gateway(&self) -> carina_aws_types::sdk::ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder{
+        self.inner.inner().delete_nat_gateway()
     }
 
     /// DeleteRoute: the provider does not accept an already-absent route as success
     pub(crate) fn delete_route(
         &self,
-    ) -> aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder {
-        self.inner.delete_route()
+    ) -> carina_aws_types::sdk::ec2::operation::delete_route::builders::DeleteRouteFluentBuilder
+    {
+        self.inner.inner().delete_route()
     }
 
     /// DeleteRouteTable: the provider does not accept an already-absent route table as success
-    pub(crate) fn delete_route_table(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder {
-        self.inner.delete_route_table()
+    pub(crate) fn delete_route_table(&self) -> carina_aws_types::sdk::ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder{
+        self.inner.inner().delete_route_table()
     }
 
     /// DeleteSecurityGroup: the provider does not accept an already-absent security group as success
-    pub(crate) fn delete_security_group(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder
-    {
-        self.inner.delete_security_group()
+    pub(crate) fn delete_security_group(&self) -> carina_aws_types::sdk::ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder{
+        self.inner.inner().delete_security_group()
     }
 
     /// DeleteSubnet: the provider does not accept an already-absent subnet as success
     pub(crate) fn delete_subnet(
         &self,
-    ) -> aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder {
-        self.inner.delete_subnet()
+    ) -> carina_aws_types::sdk::ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder
+    {
+        self.inner.inner().delete_subnet()
     }
 
     /// DeleteTags: removes named tag keys; repeating the removal leaves the same state
     pub(crate) fn delete_tags(
         &self,
-    ) -> aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
-        self.inner.delete_tags()
+    ) -> carina_aws_types::sdk::ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
+        self.inner.inner().delete_tags()
     }
 
     /// DeleteTransitGateway: the provider does not accept an already-deleting or absent transit gateway as success
-    pub(crate) fn delete_transit_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder
-    {
-        self.inner.delete_transit_gateway()
+    pub(crate) fn delete_transit_gateway(&self) -> carina_aws_types::sdk::ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder{
+        self.inner.inner().delete_transit_gateway()
     }
 
     /// DeleteTransitGatewayVpcAttachment: the provider does not accept an already-deleting or absent attachment as success
-    pub(crate) fn delete_transit_gateway_vpc_attachment(&self) -> aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder{
-        self.inner.delete_transit_gateway_vpc_attachment()
+    pub(crate) fn delete_transit_gateway_vpc_attachment(&self) -> carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder{
+        self.inner.inner().delete_transit_gateway_vpc_attachment()
     }
 
     /// DeleteVpc: the provider does not accept an already-absent VPC as success
     pub(crate) fn delete_vpc(
         &self,
-    ) -> aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder {
-        self.inner.delete_vpc()
+    ) -> carina_aws_types::sdk::ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder {
+        self.inner.inner().delete_vpc()
     }
 
     /// DeleteVpcEndpoints: the provider reports unsuccessful already-absent items as errors
-    pub(crate) fn delete_vpc_endpoints(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder
-    {
-        self.inner.delete_vpc_endpoints()
+    pub(crate) fn delete_vpc_endpoints(&self) -> carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder{
+        self.inner.inner().delete_vpc_endpoints()
     }
 
     /// DeleteVpcPeeringConnection: the provider does not accept an already-absent connection as success
-    pub(crate) fn delete_vpc_peering_connection(&self) -> aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder{
-        self.inner.delete_vpc_peering_connection()
+    pub(crate) fn delete_vpc_peering_connection(&self) -> carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder{
+        self.inner.inner().delete_vpc_peering_connection()
     }
 
     /// DeleteVpnGateway: the provider does not accept an already-absent gateway as success
-    pub(crate) fn delete_vpn_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder {
-        self.inner.delete_vpn_gateway()
+    pub(crate) fn delete_vpn_gateway(&self) -> carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder{
+        self.inner.inner().delete_vpn_gateway()
     }
 
     /// DescribeAddresses: reads address state and has no side effects
-    pub(crate) fn describe_addresses(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder {
-        self.inner.describe_addresses()
+    pub(crate) fn describe_addresses(&self) -> carina_aws_types::sdk::ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder{
+        self.inner.inner().describe_addresses()
     }
 
     /// DescribeEgressOnlyInternetGateways: reads gateway state and has no side effects
-    pub(crate) fn describe_egress_only_internet_gateways(&self) -> aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder{
-        self.inner.describe_egress_only_internet_gateways()
+    pub(crate) fn describe_egress_only_internet_gateways(&self) -> carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder{
+        self.inner.inner().describe_egress_only_internet_gateways()
     }
 
     /// DescribeFlowLogs: reads flow-log state and has no side effects
-    pub(crate) fn describe_flow_logs(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder {
-        self.inner.describe_flow_logs()
+    pub(crate) fn describe_flow_logs(&self) -> carina_aws_types::sdk::ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder{
+        self.inner.inner().describe_flow_logs()
     }
 
     /// DescribeInternetGateways: reads gateway state and has no side effects
-    pub(crate) fn describe_internet_gateways(&self) -> aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder{
-        self.inner.describe_internet_gateways()
+    pub(crate) fn describe_internet_gateways(&self) -> carina_aws_types::sdk::ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder{
+        self.inner.inner().describe_internet_gateways()
     }
 
     /// DescribeNatGateways: reads NAT-gateway state and has no side effects
-    pub(crate) fn describe_nat_gateways(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder
-    {
-        self.inner.describe_nat_gateways()
+    pub(crate) fn describe_nat_gateways(&self) -> carina_aws_types::sdk::ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder{
+        self.inner.inner().describe_nat_gateways()
     }
 
     /// DescribeRouteTables: reads route-table state and has no side effects
-    pub(crate) fn describe_route_tables(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder
-    {
-        self.inner.describe_route_tables()
+    pub(crate) fn describe_route_tables(&self) -> carina_aws_types::sdk::ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder{
+        self.inner.inner().describe_route_tables()
     }
 
     /// DescribeSecurityGroupRules: reads security-group rules and has no side effects
-    pub(crate) fn describe_security_group_rules(&self) -> aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder{
-        self.inner.describe_security_group_rules()
+    pub(crate) fn describe_security_group_rules(&self) -> carina_aws_types::sdk::ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder{
+        self.inner.inner().describe_security_group_rules()
     }
 
     /// DescribeSecurityGroups: reads security-group state and has no side effects
-    pub(crate) fn describe_security_groups(&self) -> aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder{
-        self.inner.describe_security_groups()
+    pub(crate) fn describe_security_groups(&self) -> carina_aws_types::sdk::ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder{
+        self.inner.inner().describe_security_groups()
     }
 
     /// DescribeSubnets: reads subnet state and has no side effects
-    pub(crate) fn describe_subnets(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder {
-        self.inner.describe_subnets()
+    pub(crate) fn describe_subnets(&self) -> carina_aws_types::sdk::ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder{
+        self.inner.inner().describe_subnets()
     }
 
     /// DescribeTransitGatewayVpcAttachments: reads attachment state and has no side effects
-    pub(crate) fn describe_transit_gateway_vpc_attachments(&self) -> aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder{
-        self.inner.describe_transit_gateway_vpc_attachments()
+    pub(crate) fn describe_transit_gateway_vpc_attachments(&self) -> carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder{
+        self.inner
+            .inner()
+            .describe_transit_gateway_vpc_attachments()
     }
 
     /// DescribeTransitGateways: reads transit-gateway state and has no side effects
-    pub(crate) fn describe_transit_gateways(&self) -> aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder{
-        self.inner.describe_transit_gateways()
+    pub(crate) fn describe_transit_gateways(&self) -> carina_aws_types::sdk::ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder{
+        self.inner.inner().describe_transit_gateways()
     }
 
     /// DescribeVpcAttribute: reads one VPC attribute and has no side effects
-    pub(crate) fn describe_vpc_attribute(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder
-    {
-        self.inner.describe_vpc_attribute()
+    pub(crate) fn describe_vpc_attribute(&self) -> carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder{
+        self.inner.inner().describe_vpc_attribute()
     }
 
     /// DescribeVpcEndpoints: reads endpoint state and has no side effects
-    pub(crate) fn describe_vpc_endpoints(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder
-    {
-        self.inner.describe_vpc_endpoints()
+    pub(crate) fn describe_vpc_endpoints(&self) -> carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder{
+        self.inner.inner().describe_vpc_endpoints()
     }
 
     /// DescribeVpcPeeringConnections: reads peering state and has no side effects
-    pub(crate) fn describe_vpc_peering_connections(&self) -> aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder{
-        self.inner.describe_vpc_peering_connections()
+    pub(crate) fn describe_vpc_peering_connections(&self) -> carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder{
+        self.inner.inner().describe_vpc_peering_connections()
     }
 
     /// DescribeVpcs: reads VPC state and has no side effects
     pub(crate) fn describe_vpcs(
         &self,
-    ) -> aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder {
-        self.inner.describe_vpcs()
+    ) -> carina_aws_types::sdk::ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder
+    {
+        self.inner.inner().describe_vpcs()
     }
 
     /// DescribeVpnGateways: reads VPN-gateway state and has no side effects
-    pub(crate) fn describe_vpn_gateways(
-        &self,
-    ) -> aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder
-    {
-        self.inner.describe_vpn_gateways()
+    pub(crate) fn describe_vpn_gateways(&self) -> carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder{
+        self.inner.inner().describe_vpn_gateways()
     }
 
     /// DetachInternetGateway: detaches a resource and the provider does not accept an already-detached result as success
-    pub(crate) fn detach_internet_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder
-    {
-        self.inner.detach_internet_gateway()
+    pub(crate) fn detach_internet_gateway(&self) -> carina_aws_types::sdk::ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder{
+        self.inner.inner().detach_internet_gateway()
     }
 
     /// DetachVpnGateway: detaches a resource and the provider does not accept an already-detached result as success
-    pub(crate) fn detach_vpn_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder {
-        self.inner.detach_vpn_gateway()
+    pub(crate) fn detach_vpn_gateway(&self) -> carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder{
+        self.inner.inner().detach_vpn_gateway()
     }
 
     /// DisassociateRouteTable: removes an association and the provider does not accept an already-removed result as success
-    pub(crate) fn disassociate_route_table(&self) -> aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder{
-        self.inner.disassociate_route_table()
+    pub(crate) fn disassociate_route_table(&self) -> carina_aws_types::sdk::ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder{
+        self.inner.inner().disassociate_route_table()
     }
 
     /// ModifySubnetAttribute: sets one named subnet attribute to a complete value
-    pub(crate) fn modify_subnet_attribute(
-        &self,
-    ) -> aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder
-    {
-        self.inner.modify_subnet_attribute()
+    pub(crate) fn modify_subnet_attribute(&self) -> carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder{
+        self.inner.inner().modify_subnet_attribute()
     }
 
     /// ModifyTransitGateway: sets the complete transit-gateway description value
-    pub(crate) fn modify_transit_gateway(
-        &self,
-    ) -> aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
-    {
-        self.inner.modify_transit_gateway()
+    pub(crate) fn modify_transit_gateway(&self) -> carina_aws_types::sdk::ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder{
+        self.inner.inner().modify_transit_gateway()
     }
 
     /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
-    pub(crate) fn modify_vpc_attribute(
-        &self,
-    ) -> aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder
-    {
-        self.inner.modify_vpc_attribute()
+    pub(crate) fn modify_vpc_attribute(&self) -> carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder{
+        self.inner.inner().modify_vpc_attribute()
     }
 
     /// ModifyVpcEndpoint: applies incremental add/remove sets and a replay is not guaranteed to be accepted
-    pub(crate) fn modify_vpc_endpoint(
-        &self,
-    ) -> aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder {
-        self.inner.modify_vpc_endpoint()
+    pub(crate) fn modify_vpc_endpoint(&self) -> carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder{
+        self.inner.inner().modify_vpc_endpoint()
     }
 
     /// ReleaseAddress: the provider does not accept an already-released address as success
     pub(crate) fn release_address(
         &self,
-    ) -> aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder {
-        self.inner.release_address()
+    ) -> carina_aws_types::sdk::ec2::operation::release_address::builders::ReleaseAddressFluentBuilder
+    {
+        self.inner.inner().release_address()
     }
 
     /// ReplaceRoute: replaces the complete route target keyed by route table and destination
     pub(crate) fn replace_route(
         &self,
-    ) -> aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder {
-        self.inner.replace_route()
+    ) -> carina_aws_types::sdk::ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder
+    {
+        self.inner.inner().replace_route()
     }
 
     /// ReplaceRouteTableAssociation: a successful call replaces the association identifier consumed by the request
-    pub(crate) fn replace_route_table_association(&self) -> aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder{
-        self.inner.replace_route_table_association()
+    pub(crate) fn replace_route_table_association(&self) -> carina_aws_types::sdk::ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder{
+        self.inner.inner().replace_route_table_association()
     }
 
     /// RevokeSecurityGroupEgress: revokes rules and the provider does not accept already-absent rules as success
-    pub(crate) fn revoke_security_group_egress(&self) -> aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder{
-        self.inner.revoke_security_group_egress()
+    pub(crate) fn revoke_security_group_egress(&self) -> carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder{
+        self.inner.inner().revoke_security_group_egress()
     }
 
     /// RevokeSecurityGroupIngress: revokes rules and the provider does not accept already-absent rules as success
-    pub(crate) fn revoke_security_group_ingress(&self) -> aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder{
-        self.inner.revoke_security_group_ingress()
+    pub(crate) fn revoke_security_group_ingress(&self) -> carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder{
+        self.inner.inner().revoke_security_group_ingress()
     }
 }
 
@@ -852,82 +709,76 @@ pub(crate) fn ec2_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct IamClient {
-    inner: aws_sdk_iam::Client,
+    inner: carina_aws_types::sdk::iam::IamClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl IamClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_iam::Client::from_conf(
-                aws_sdk_iam::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(iam_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::iam::IamClient::new(config.sdk_config(), iam_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_iam::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::iam::IamClient {
+        &self.inner
     }
 
     /// CreateRole: creates a top-level resource without an idempotency token
     pub(crate) fn create_role(
         &self,
-    ) -> aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder {
-        self.inner.create_role()
+    ) -> carina_aws_types::sdk::iam::operation::create_role::builders::CreateRoleFluentBuilder {
+        self.inner.inner().create_role()
     }
 
     /// DeleteRole: the provider does not accept an already-absent role as success
     pub(crate) fn delete_role(
         &self,
-    ) -> aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
-        self.inner.delete_role()
+    ) -> carina_aws_types::sdk::iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
+        self.inner.inner().delete_role()
     }
 
     /// GetRole: reads role state and has no side effects
     pub(crate) fn get_role(
         &self,
-    ) -> aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder {
-        self.inner.get_role()
+    ) -> carina_aws_types::sdk::iam::operation::get_role::builders::GetRoleFluentBuilder {
+        self.inner.inner().get_role()
     }
 
     /// ListRoles: reads role state and has no side effects
     pub(crate) fn list_roles(
         &self,
-    ) -> aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder {
-        self.inner.list_roles()
+    ) -> carina_aws_types::sdk::iam::operation::list_roles::builders::ListRolesFluentBuilder {
+        self.inner.inner().list_roles()
     }
 
     /// TagRole: sets tag keys on one role; repeating the same values has no additional effect
     pub(crate) fn tag_role(
         &self,
-    ) -> aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder {
-        self.inner.tag_role()
+    ) -> carina_aws_types::sdk::iam::operation::tag_role::builders::TagRoleFluentBuilder {
+        self.inner.inner().tag_role()
     }
 
     /// UntagRole: removes named tag keys; repeating the removal leaves the same state
     pub(crate) fn untag_role(
         &self,
-    ) -> aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder {
-        self.inner.untag_role()
+    ) -> carina_aws_types::sdk::iam::operation::untag_role::builders::UntagRoleFluentBuilder {
+        self.inner.inner().untag_role()
     }
 
     /// UpdateAssumeRolePolicy: replaces the whole trust policy keyed by role name
-    pub(crate) fn update_assume_role_policy(&self) -> aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder{
-        self.inner.update_assume_role_policy()
+    pub(crate) fn update_assume_role_policy(&self) -> carina_aws_types::sdk::iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder{
+        self.inner.inner().update_assume_role_policy()
     }
 
     /// UpdateRole: sets complete mutable role attributes keyed by role name
     pub(crate) fn update_role(
         &self,
-    ) -> aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder {
-        self.inner.update_role()
+    ) -> carina_aws_types::sdk::iam::operation::update_role::builders::UpdateRoleFluentBuilder {
+        self.inner.inner().update_role()
     }
 }
 
@@ -953,42 +804,37 @@ pub(crate) fn iam_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct IdentityStoreClient {
-    inner: aws_sdk_identitystore::Client,
+    inner: carina_aws_types::sdk::identitystore::IdentityStoreClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl IdentityStoreClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_identitystore::Client::from_conf(
-                aws_sdk_identitystore::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(identitystore_idempotency))
-                    .build(),
+            inner: carina_aws_types::sdk::identitystore::IdentityStoreClient::new(
+                config.sdk_config(),
+                identitystore_idempotency,
             ),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_identitystore::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(
+        &self,
+    ) -> &carina_aws_types::sdk::identitystore::IdentityStoreClient {
+        &self.inner
     }
 
     /// DescribeUser: the model marks this read operation @readonly
-    pub(crate) fn describe_user(
-        &self,
-    ) -> aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder {
-        self.inner.describe_user()
+    pub(crate) fn describe_user(&self) -> carina_aws_types::sdk::identitystore::operation::describe_user::builders::DescribeUserFluentBuilder{
+        self.inner.inner().describe_user()
     }
 
     /// GetUserId: the model marks this read operation @readonly
-    pub(crate) fn get_user_id(
-        &self,
-    ) -> aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder {
-        self.inner.get_user_id()
+    pub(crate) fn get_user_id(&self) -> carina_aws_types::sdk::identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder{
+        self.inner.inner().get_user_id()
     }
 }
 
@@ -1008,105 +854,87 @@ pub(crate) fn identitystore_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct OrganizationsClient {
-    inner: aws_sdk_organizations::Client,
+    inner: carina_aws_types::sdk::organizations::OrganizationsClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl OrganizationsClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_organizations::Client::from_conf(
-                aws_sdk_organizations::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(organizations_idempotency))
-                    .build(),
+            inner: carina_aws_types::sdk::organizations::OrganizationsClient::new(
+                config.sdk_config(),
+                organizations_idempotency,
             ),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_organizations::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(
+        &self,
+    ) -> &carina_aws_types::sdk::organizations::OrganizationsClient {
+        &self.inner
     }
 
     /// CloseAccount: starts a top-level account transition and has no idempotency token
-    pub(crate) fn close_account(
-        &self,
-    ) -> aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder {
-        self.inner.close_account()
+    pub(crate) fn close_account(&self) -> carina_aws_types::sdk::organizations::operation::close_account::builders::CloseAccountFluentBuilder{
+        self.inner.inner().close_account()
     }
 
     /// CreateAccount: starts an account creation request without an idempotency token
-    pub(crate) fn create_account(
-        &self,
-    ) -> aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder
-    {
-        self.inner.create_account()
+    pub(crate) fn create_account(&self) -> carina_aws_types::sdk::organizations::operation::create_account::builders::CreateAccountFluentBuilder{
+        self.inner.inner().create_account()
     }
 
     /// CreateOrganization: creates a top-level organization without an idempotency token
-    pub(crate) fn create_organization(&self) -> aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder{
-        self.inner.create_organization()
+    pub(crate) fn create_organization(&self) -> carina_aws_types::sdk::organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder{
+        self.inner.inner().create_organization()
     }
 
     /// DeleteOrganization: the provider does not accept an already-absent organization as success
-    pub(crate) fn delete_organization(&self) -> aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder{
-        self.inner.delete_organization()
+    pub(crate) fn delete_organization(&self) -> carina_aws_types::sdk::organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder{
+        self.inner.inner().delete_organization()
     }
 
     /// DescribeAccount: reads account state and has no side effects
-    pub(crate) fn describe_account(
-        &self,
-    ) -> aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder
-    {
-        self.inner.describe_account()
+    pub(crate) fn describe_account(&self) -> carina_aws_types::sdk::organizations::operation::describe_account::builders::DescribeAccountFluentBuilder{
+        self.inner.inner().describe_account()
     }
 
     /// DescribeCreateAccountStatus: reads request state and has no side effects
-    pub(crate) fn describe_create_account_status(&self) -> aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder{
-        self.inner.describe_create_account_status()
+    pub(crate) fn describe_create_account_status(&self) -> carina_aws_types::sdk::organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder{
+        self.inner.inner().describe_create_account_status()
     }
 
     /// DescribeOrganization: reads organization state and has no side effects
-    pub(crate) fn describe_organization(&self) -> aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder{
-        self.inner.describe_organization()
+    pub(crate) fn describe_organization(&self) -> carina_aws_types::sdk::organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder{
+        self.inner.inner().describe_organization()
     }
 
     /// ListParents: reads account parents and has no side effects
-    pub(crate) fn list_parents(
-        &self,
-    ) -> aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder {
-        self.inner.list_parents()
+    pub(crate) fn list_parents(&self) -> carina_aws_types::sdk::organizations::operation::list_parents::builders::ListParentsFluentBuilder{
+        self.inner.inner().list_parents()
     }
 
     /// ListTagsForResource: reads resource tags and has no side effects
-    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
-        self.inner.list_tags_for_resource()
+    pub(crate) fn list_tags_for_resource(&self) -> carina_aws_types::sdk::organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.inner().list_tags_for_resource()
     }
 
     /// MoveAccount: consumes the source parent relationship and a replay is not guaranteed to be accepted
-    pub(crate) fn move_account(
-        &self,
-    ) -> aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder {
-        self.inner.move_account()
+    pub(crate) fn move_account(&self) -> carina_aws_types::sdk::organizations::operation::move_account::builders::MoveAccountFluentBuilder{
+        self.inner.inner().move_account()
     }
 
     /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
-    pub(crate) fn tag_resource(
-        &self,
-    ) -> aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder {
-        self.inner.tag_resource()
+    pub(crate) fn tag_resource(&self) -> carina_aws_types::sdk::organizations::operation::tag_resource::builders::TagResourceFluentBuilder{
+        self.inner.inner().tag_resource()
     }
 
     /// UntagResource: removes named tag keys; repeating the removal leaves the same state
-    pub(crate) fn untag_resource(
-        &self,
-    ) -> aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder
-    {
-        self.inner.untag_resource()
+    pub(crate) fn untag_resource(&self) -> carina_aws_types::sdk::organizations::operation::untag_resource::builders::UntagResourceFluentBuilder{
+        self.inner.inner().untag_resource()
     }
 }
 
@@ -1136,43 +964,40 @@ pub(crate) fn organizations_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct Route53Client {
-    inner: aws_sdk_route53::Client,
+    inner: carina_aws_types::sdk::route53::Route53Client,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl Route53Client {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_route53::Client::from_conf(
-                aws_sdk_route53::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(route53_idempotency))
-                    .build(),
+            inner: carina_aws_types::sdk::route53::Route53Client::new(
+                config.sdk_config(),
+                route53_idempotency,
             ),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_route53::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::route53::Route53Client {
+        &self.inner
     }
 
     /// ChangeResourceRecordSets: applies a change batch without an idempotency token
-    pub(crate) fn change_resource_record_sets(&self) -> aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder{
-        self.inner.change_resource_record_sets()
+    pub(crate) fn change_resource_record_sets(&self) -> carina_aws_types::sdk::route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder{
+        self.inner.inner().change_resource_record_sets()
     }
 
     /// ListResourceRecordSets: reads record-set state and has no side effects
-    pub(crate) fn list_resource_record_sets(&self) -> aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder{
-        self.inner.list_resource_record_sets()
+    pub(crate) fn list_resource_record_sets(&self) -> carina_aws_types::sdk::route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder{
+        self.inner.inner().list_resource_record_sets()
     }
 
     /// ListTagsForResource: reads hosted-zone tags and has no side effects
-    pub(crate) fn list_tags_for_resource(&self) -> aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
-        self.inner.list_tags_for_resource()
+    pub(crate) fn list_tags_for_resource(&self) -> carina_aws_types::sdk::route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder{
+        self.inner.inner().list_tags_for_resource()
     }
 }
 
@@ -1193,311 +1018,255 @@ pub(crate) fn route53_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct S3Client {
-    inner: aws_sdk_s3::Client,
+    inner: carina_aws_types::sdk::s3::S3Client,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl S3Client {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_s3::Client::from_conf(
-                aws_sdk_s3::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(s3_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::s3::S3Client::new(config.sdk_config(), s3_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_s3::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::s3::S3Client {
+        &self.inner
     }
 
     /// CreateBucket: creates a top-level bucket without an idempotency token
     pub(crate) fn create_bucket(
         &self,
-    ) -> aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder {
-        self.inner.create_bucket()
+    ) -> carina_aws_types::sdk::s3::operation::create_bucket::builders::CreateBucketFluentBuilder
+    {
+        self.inner.inner().create_bucket()
     }
 
     /// DeleteBucket: the provider does not accept an already-absent bucket as success
     pub(crate) fn delete_bucket(
         &self,
-    ) -> aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder {
-        self.inner.delete_bucket()
+    ) -> carina_aws_types::sdk::s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder
+    {
+        self.inner.inner().delete_bucket()
     }
 
     /// DeleteBucketCors: removes the whole CORS sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_cors(
-        &self,
-    ) -> aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder {
-        self.inner.delete_bucket_cors()
+    pub(crate) fn delete_bucket_cors(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder{
+        self.inner.inner().delete_bucket_cors()
     }
 
     /// DeleteBucketEncryption: removes the whole encryption sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_encryption(&self) -> aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder{
-        self.inner.delete_bucket_encryption()
+    pub(crate) fn delete_bucket_encryption(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder{
+        self.inner.inner().delete_bucket_encryption()
     }
 
     /// DeleteBucketLifecycle: removes the whole lifecycle sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_lifecycle(
-        &self,
-    ) -> aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder
-    {
-        self.inner.delete_bucket_lifecycle()
+    pub(crate) fn delete_bucket_lifecycle(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder{
+        self.inner.inner().delete_bucket_lifecycle()
     }
 
     /// DeleteBucketOwnershipControls: removes the whole ownership-controls sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder{
-        self.inner.delete_bucket_ownership_controls()
+    pub(crate) fn delete_bucket_ownership_controls(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder{
+        self.inner.inner().delete_bucket_ownership_controls()
     }
 
     /// DeleteBucketPolicy: removes the whole policy sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_policy(
-        &self,
-    ) -> aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder
-    {
-        self.inner.delete_bucket_policy()
+    pub(crate) fn delete_bucket_policy(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder{
+        self.inner.inner().delete_bucket_policy()
     }
 
     /// DeleteBucketReplication: removes the whole replication sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_replication(&self) -> aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder{
-        self.inner.delete_bucket_replication()
+    pub(crate) fn delete_bucket_replication(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder{
+        self.inner.inner().delete_bucket_replication()
     }
 
     /// DeleteBucketTagging: removes the whole tag set keyed by bucket
-    pub(crate) fn delete_bucket_tagging(
-        &self,
-    ) -> aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder
-    {
-        self.inner.delete_bucket_tagging()
+    pub(crate) fn delete_bucket_tagging(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder{
+        self.inner.inner().delete_bucket_tagging()
     }
 
     /// DeleteBucketWebsite: removes the whole website sub-configuration keyed by bucket
-    pub(crate) fn delete_bucket_website(
-        &self,
-    ) -> aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder
-    {
-        self.inner.delete_bucket_website()
+    pub(crate) fn delete_bucket_website(&self) -> carina_aws_types::sdk::s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder{
+        self.inner.inner().delete_bucket_website()
     }
 
     /// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
     pub(crate) fn delete_objects(
         &self,
-    ) -> aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder {
-        self.inner.delete_objects()
+    ) -> carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
+    {
+        self.inner.inner().delete_objects()
     }
 
     /// DeletePublicAccessBlock: removes the whole public-access-block sub-configuration keyed by bucket
-    pub(crate) fn delete_public_access_block(&self) -> aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder{
-        self.inner.delete_public_access_block()
+    pub(crate) fn delete_public_access_block(&self) -> carina_aws_types::sdk::s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder{
+        self.inner.inner().delete_public_access_block()
     }
 
     /// GetBucketAcl: reads bucket ACL state and has no side effects
     pub(crate) fn get_bucket_acl(
         &self,
-    ) -> aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder {
-        self.inner.get_bucket_acl()
+    ) -> carina_aws_types::sdk::s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder
+    {
+        self.inner.inner().get_bucket_acl()
     }
 
     /// GetBucketCors: reads bucket CORS state and has no side effects
     pub(crate) fn get_bucket_cors(
         &self,
-    ) -> aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder {
-        self.inner.get_bucket_cors()
+    ) -> carina_aws_types::sdk::s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder
+    {
+        self.inner.inner().get_bucket_cors()
     }
 
     /// GetBucketEncryption: reads bucket encryption state and has no side effects
-    pub(crate) fn get_bucket_encryption(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder
-    {
-        self.inner.get_bucket_encryption()
+    pub(crate) fn get_bucket_encryption(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder{
+        self.inner.inner().get_bucket_encryption()
     }
 
     /// GetBucketLifecycleConfiguration: reads bucket lifecycle state and has no side effects
-    pub(crate) fn get_bucket_lifecycle_configuration(&self) -> aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder{
-        self.inner.get_bucket_lifecycle_configuration()
+    pub(crate) fn get_bucket_lifecycle_configuration(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder{
+        self.inner.inner().get_bucket_lifecycle_configuration()
     }
 
     /// GetBucketLogging: reads bucket logging state and has no side effects
-    pub(crate) fn get_bucket_logging(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder {
-        self.inner.get_bucket_logging()
+    pub(crate) fn get_bucket_logging(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder{
+        self.inner.inner().get_bucket_logging()
     }
 
     /// GetBucketNotificationConfiguration: reads bucket notification state and has no side effects
-    pub(crate) fn get_bucket_notification_configuration(&self) -> aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder{
-        self.inner.get_bucket_notification_configuration()
+    pub(crate) fn get_bucket_notification_configuration(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder{
+        self.inner.inner().get_bucket_notification_configuration()
     }
 
     /// GetBucketOwnershipControls: reads bucket ownership-control state and has no side effects
-    pub(crate) fn get_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder{
-        self.inner.get_bucket_ownership_controls()
+    pub(crate) fn get_bucket_ownership_controls(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder{
+        self.inner.inner().get_bucket_ownership_controls()
     }
 
     /// GetBucketPolicy: reads bucket policy state and has no side effects
-    pub(crate) fn get_bucket_policy(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder {
-        self.inner.get_bucket_policy()
+    pub(crate) fn get_bucket_policy(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder{
+        self.inner.inner().get_bucket_policy()
     }
 
     /// GetBucketReplication: reads bucket replication state and has no side effects
-    pub(crate) fn get_bucket_replication(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder
-    {
-        self.inner.get_bucket_replication()
+    pub(crate) fn get_bucket_replication(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder{
+        self.inner.inner().get_bucket_replication()
     }
 
     /// GetBucketTagging: reads bucket tags and has no side effects
-    pub(crate) fn get_bucket_tagging(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder {
-        self.inner.get_bucket_tagging()
+    pub(crate) fn get_bucket_tagging(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder{
+        self.inner.inner().get_bucket_tagging()
     }
 
     /// GetBucketVersioning: reads bucket versioning state and has no side effects
-    pub(crate) fn get_bucket_versioning(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder
-    {
-        self.inner.get_bucket_versioning()
+    pub(crate) fn get_bucket_versioning(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder{
+        self.inner.inner().get_bucket_versioning()
     }
 
     /// GetBucketWebsite: reads bucket website state and has no side effects
-    pub(crate) fn get_bucket_website(
-        &self,
-    ) -> aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder {
-        self.inner.get_bucket_website()
+    pub(crate) fn get_bucket_website(&self) -> carina_aws_types::sdk::s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder{
+        self.inner.inner().get_bucket_website()
     }
 
     /// GetObjectLockConfiguration: reads object-lock state and has no side effects
-    pub(crate) fn get_object_lock_configuration(&self) -> aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder{
-        self.inner.get_object_lock_configuration()
+    pub(crate) fn get_object_lock_configuration(&self) -> carina_aws_types::sdk::s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder{
+        self.inner.inner().get_object_lock_configuration()
     }
 
     /// GetPublicAccessBlock: reads public-access-block state and has no side effects
-    pub(crate) fn get_public_access_block(
-        &self,
-    ) -> aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder
-    {
-        self.inner.get_public_access_block()
+    pub(crate) fn get_public_access_block(&self) -> carina_aws_types::sdk::s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder{
+        self.inner.inner().get_public_access_block()
     }
 
     /// HeadBucket: reads bucket existence and region metadata and has no side effects
     pub(crate) fn head_bucket(
         &self,
-    ) -> aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
-        self.inner.head_bucket()
+    ) -> carina_aws_types::sdk::s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
+        self.inner.inner().head_bucket()
     }
 
     /// ListObjectVersions: reads object-version state and has no side effects
-    pub(crate) fn list_object_versions(
-        &self,
-    ) -> aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder
-    {
-        self.inner.list_object_versions()
+    pub(crate) fn list_object_versions(&self) -> carina_aws_types::sdk::s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder{
+        self.inner.inner().list_object_versions()
     }
 
     /// PutBucketAcl: replaces the whole ACL keyed by bucket
     pub(crate) fn put_bucket_acl(
         &self,
-    ) -> aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder {
-        self.inner.put_bucket_acl()
+    ) -> carina_aws_types::sdk::s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder
+    {
+        self.inner.inner().put_bucket_acl()
     }
 
     /// PutBucketCors: replaces the whole CORS sub-configuration keyed by bucket
     pub(crate) fn put_bucket_cors(
         &self,
-    ) -> aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder {
-        self.inner.put_bucket_cors()
+    ) -> carina_aws_types::sdk::s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder
+    {
+        self.inner.inner().put_bucket_cors()
     }
 
     /// PutBucketEncryption: replaces the whole encryption sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_encryption(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder
-    {
-        self.inner.put_bucket_encryption()
+    pub(crate) fn put_bucket_encryption(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder{
+        self.inner.inner().put_bucket_encryption()
     }
 
     /// PutBucketLifecycleConfiguration: replaces the whole lifecycle sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_lifecycle_configuration(&self) -> aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder{
-        self.inner.put_bucket_lifecycle_configuration()
+    pub(crate) fn put_bucket_lifecycle_configuration(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder{
+        self.inner.inner().put_bucket_lifecycle_configuration()
     }
 
     /// PutBucketLogging: replaces the whole logging sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_logging(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder {
-        self.inner.put_bucket_logging()
+    pub(crate) fn put_bucket_logging(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder{
+        self.inner.inner().put_bucket_logging()
     }
 
     /// PutBucketNotificationConfiguration: replaces the whole notification sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_notification_configuration(&self) -> aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder{
-        self.inner.put_bucket_notification_configuration()
+    pub(crate) fn put_bucket_notification_configuration(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder{
+        self.inner.inner().put_bucket_notification_configuration()
     }
 
     /// PutBucketOwnershipControls: replaces the whole ownership-controls sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_ownership_controls(&self) -> aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder{
-        self.inner.put_bucket_ownership_controls()
+    pub(crate) fn put_bucket_ownership_controls(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder{
+        self.inner.inner().put_bucket_ownership_controls()
     }
 
     /// PutBucketPolicy: replaces the whole policy keyed by bucket
-    pub(crate) fn put_bucket_policy(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder {
-        self.inner.put_bucket_policy()
+    pub(crate) fn put_bucket_policy(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder{
+        self.inner.inner().put_bucket_policy()
     }
 
     /// PutBucketReplication: replaces the whole replication sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_replication(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder
-    {
-        self.inner.put_bucket_replication()
+    pub(crate) fn put_bucket_replication(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder{
+        self.inner.inner().put_bucket_replication()
     }
 
     /// PutBucketTagging: replaces the whole tag set keyed by bucket
-    pub(crate) fn put_bucket_tagging(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder {
-        self.inner.put_bucket_tagging()
+    pub(crate) fn put_bucket_tagging(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder{
+        self.inner.inner().put_bucket_tagging()
     }
 
     /// PutBucketVersioning: sets the complete versioning state keyed by bucket
-    pub(crate) fn put_bucket_versioning(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder
-    {
-        self.inner.put_bucket_versioning()
+    pub(crate) fn put_bucket_versioning(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder{
+        self.inner.inner().put_bucket_versioning()
     }
 
     /// PutBucketWebsite: replaces the whole website sub-configuration keyed by bucket
-    pub(crate) fn put_bucket_website(
-        &self,
-    ) -> aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder {
-        self.inner.put_bucket_website()
+    pub(crate) fn put_bucket_website(&self) -> carina_aws_types::sdk::s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder{
+        self.inner.inner().put_bucket_website()
     }
 
     /// PutObjectLockConfiguration: replaces the whole object-lock sub-configuration keyed by bucket
-    pub(crate) fn put_object_lock_configuration(&self) -> aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder{
-        self.inner.put_object_lock_configuration()
+    pub(crate) fn put_object_lock_configuration(&self) -> carina_aws_types::sdk::s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder{
+        self.inner.inner().put_object_lock_configuration()
     }
 
     /// PutPublicAccessBlock: replaces the whole public-access-block sub-configuration keyed by bucket
-    pub(crate) fn put_public_access_block(
-        &self,
-    ) -> aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder
-    {
-        self.inner.put_public_access_block()
+    pub(crate) fn put_public_access_block(&self) -> carina_aws_types::sdk::s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder{
+        self.inner.inner().put_public_access_block()
     }
 }
 
@@ -1557,79 +1326,70 @@ pub(crate) fn s3_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct SqsClient {
-    inner: aws_sdk_sqs::Client,
+    inner: carina_aws_types::sdk::sqs::SqsClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl SqsClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_sqs::Client::from_conf(
-                aws_sdk_sqs::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(sqs_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::sqs::SqsClient::new(config.sdk_config(), sqs_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_sqs::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::sqs::SqsClient {
+        &self.inner
     }
 
     /// CreateQueue: creates a top-level queue without an idempotency token
     pub(crate) fn create_queue(
         &self,
-    ) -> aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder {
-        self.inner.create_queue()
+    ) -> carina_aws_types::sdk::sqs::operation::create_queue::builders::CreateQueueFluentBuilder
+    {
+        self.inner.inner().create_queue()
     }
 
     /// DeleteQueue: the provider does not accept an already-absent queue as success
     pub(crate) fn delete_queue(
         &self,
-    ) -> aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder {
-        self.inner.delete_queue()
+    ) -> carina_aws_types::sdk::sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder
+    {
+        self.inner.inner().delete_queue()
     }
 
     /// GetQueueAttributes: reads queue state and has no side effects
-    pub(crate) fn get_queue_attributes(
-        &self,
-    ) -> aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder
-    {
-        self.inner.get_queue_attributes()
+    pub(crate) fn get_queue_attributes(&self) -> carina_aws_types::sdk::sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder{
+        self.inner.inner().get_queue_attributes()
     }
 
     /// ListQueueTags: reads queue tags and has no side effects
     pub(crate) fn list_queue_tags(
         &self,
-    ) -> aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder {
-        self.inner.list_queue_tags()
+    ) -> carina_aws_types::sdk::sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
+    {
+        self.inner.inner().list_queue_tags()
     }
 
     /// SetQueueAttributes: sets complete values for named queue attributes
-    pub(crate) fn set_queue_attributes(
-        &self,
-    ) -> aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder
-    {
-        self.inner.set_queue_attributes()
+    pub(crate) fn set_queue_attributes(&self) -> carina_aws_types::sdk::sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder{
+        self.inner.inner().set_queue_attributes()
     }
 
     /// TagQueue: sets tag keys on one queue; repeating the same values has no additional effect
     pub(crate) fn tag_queue(
         &self,
-    ) -> aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
-        self.inner.tag_queue()
+    ) -> carina_aws_types::sdk::sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
+        self.inner.inner().tag_queue()
     }
 
     /// UntagQueue: removes named tag keys; repeating the removal leaves the same state
     pub(crate) fn untag_queue(
         &self,
-    ) -> aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
-        self.inner.untag_queue()
+    ) -> carina_aws_types::sdk::sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
+        self.inner.inner().untag_queue()
     }
 }
 
@@ -1654,35 +1414,27 @@ pub(crate) fn sqs_idempotency(operation: &str) -> Idempotency {
 /// Token-bearing operations return `TokenOperation` and must be sent via
 /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.
 pub(crate) struct StsClient {
-    inner: aws_sdk_sts::Client,
+    inner: carina_aws_types::sdk::sts::StsClient,
 }
 
 // Decisions can outlive their current call sites; every decided operation remains
 // available through the closed generated client API.
 #[allow(dead_code)]
 impl StsClient {
-    // Raw SDK client construction is confined to generated guarded wrappers.
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {
         Self {
-            inner: aws_sdk_sts::Client::from_conf(
-                aws_sdk_sts::config::Builder::from(config.sdk_config())
-                    .interceptor(ResendGuard::new(sts_idempotency))
-                    .build(),
-            ),
+            inner: carina_aws_types::sdk::sts::StsClient::new(config.sdk_config(), sts_idempotency),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn config(&self) -> &aws_sdk_sts::Config {
-        self.inner.config()
+    pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::sts::StsClient {
+        &self.inner
     }
 
     /// GetCallerIdentity: reads caller identity and has no side effects
-    pub(crate) fn get_caller_identity(
-        &self,
-    ) -> aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder {
-        self.inner.get_caller_identity()
+    pub(crate) fn get_caller_identity(&self) -> carina_aws_types::sdk::sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder{
+        self.inner.inner().get_caller_identity()
     }
 }
 
@@ -1694,143 +1446,125 @@ pub(crate) fn sts_idempotency(operation: &str) -> Idempotency {
 }
 
 /// PutAccountName: sets the name of the identified account; repeating the same account ID and name has no additional effect
-impl AwsOperation
-    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::account::operation::put_account_name::builders::PutAccountNameFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_account::operation::put_account_name::PutAccountNameOutput;
-    type Error = aws_sdk_account::operation::put_account_name::PutAccountNameError;
+    type Output = carina_aws_types::sdk::account::operation::put_account_name::PutAccountNameOutput;
+    type Error = carina_aws_types::sdk::account::operation::put_account_name::PutAccountNameError;
 
     const NAME: &'static str = "account.PutAccountName";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_account::operation::put_account_name::PutAccountNameError {
-    const NAME: &'static str = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::account::operation::put_account_name::PutAccountNameError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::account::operation::put_account_name::builders::PutAccountNameFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_account::operation::put_account_name::builders::PutAccountNameFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::account::operation::put_account_name::builders::PutAccountNameFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// AddTagsToCertificate: sets tag keys on one certificate; repeating the same key/value pairs has no additional effect
-impl AwsOperation
-    for aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::add_tags_to_certificate::AddTagsToCertificateOutput;
-    type Error = aws_sdk_acm::operation::add_tags_to_certificate::AddTagsToCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::add_tags_to_certificate::AddTagsToCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::add_tags_to_certificate::AddTagsToCertificateError;
 
     const NAME: &'static str = "acm.AddTagsToCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_acm::operation::add_tags_to_certificate::AddTagsToCertificateError
+    for carina_aws_types::sdk::acm::operation::add_tags_to_certificate::AddTagsToCertificateError
 {
-    const NAME: &'static str = <aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::add_tags_to_certificate::builders::AddTagsToCertificateFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteCertificate: the provider does not accept an already-absent certificate as success
-impl AwsOperation
-    for aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::delete_certificate::DeleteCertificateOutput;
-    type Error = aws_sdk_acm::operation::delete_certificate::DeleteCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::delete_certificate::DeleteCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::delete_certificate::DeleteCertificateError;
 
     const NAME: &'static str = "acm.DeleteCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_acm::operation::delete_certificate::DeleteCertificateError {
-    const NAME: &'static str = <aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::acm::operation::delete_certificate::DeleteCertificateError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::delete_certificate::builders::DeleteCertificateFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeCertificate: reads certificate state and has no side effects
-impl AwsOperation
-    for aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::describe_certificate::DescribeCertificateOutput;
-    type Error = aws_sdk_acm::operation::describe_certificate::DescribeCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::describe_certificate::DescribeCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::describe_certificate::DescribeCertificateError;
 
     const NAME: &'static str = "acm.DescribeCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_acm::operation::describe_certificate::DescribeCertificateError
+    for carina_aws_types::sdk::acm::operation::describe_certificate::DescribeCertificateError
 {
-    const NAME: &'static str = <aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::describe_certificate::builders::DescribeCertificateFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ListTagsForCertificate: reads certificate tags and has no side effects
-impl AwsOperation for aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::list_tags_for_certificate::ListTagsForCertificateOutput;
-    type Error = aws_sdk_acm::operation::list_tags_for_certificate::ListTagsForCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::list_tags_for_certificate::ListTagsForCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::list_tags_for_certificate::ListTagsForCertificateError;
 
     const NAME: &'static str = "acm.ListTagsForCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_acm::operation::list_tags_for_certificate::ListTagsForCertificateError
-{
-    const NAME: &'static str = <aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::acm::operation::list_tags_for_certificate::ListTagsForCertificateError {
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::list_tags_for_certificate::builders::ListTagsForCertificateFluentBuilder {
     fn send(
         self,
         (): (),
@@ -1840,23 +1574,21 @@ impl DecidedSend<()> for aws_sdk_acm::operation::list_tags_for_certificate::buil
 }
 
 /// RemoveTagsFromCertificate: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation for aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateOutput;
-    type Error = aws_sdk_acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateError;
 
     const NAME: &'static str = "acm.RemoveTagsFromCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateError
-{
-    const NAME: &'static str = <aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::RemoveTagsFromCertificateError {
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::remove_tags_from_certificate::builders::RemoveTagsFromCertificateFluentBuilder {
     fn send(
         self,
         (): (),
@@ -1866,680 +1598,29 @@ impl DecidedSend<()> for aws_sdk_acm::operation::remove_tags_from_certificate::b
 }
 
 /// RequestCertificate: the IdempotencyToken identifies one certificate request within ACM's token window
-impl AwsOperation
-    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder {
     type Resend = WithToken;
-    type Output = aws_sdk_acm::operation::request_certificate::RequestCertificateOutput;
-    type Error = aws_sdk_acm::operation::request_certificate::RequestCertificateError;
+    type Output = carina_aws_types::sdk::acm::operation::request_certificate::RequestCertificateOutput;
+    type Error = carina_aws_types::sdk::acm::operation::request_certificate::RequestCertificateError;
 
     const NAME: &'static str = "acm.RequestCertificate";
     const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
 }
 
 impl DecidedOperationError
-    for aws_sdk_acm::operation::request_certificate::RequestCertificateError
+    for carina_aws_types::sdk::acm::operation::request_certificate::RequestCertificateError
 {
-    const NAME: &'static str = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing
-    for aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder
-{
+impl TokenBearing for carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.idempotency_token(token.as_str())
     }
 }
 
-impl
-    TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
-        aws_sdk_acm::Client,
-    >
-{
-    // The permit proves the invocation token was applied before this network send.
-    // The error is the SDK's SdkError passed through unchanged.
-    #[allow(clippy::result_large_err)]
-    fn send_with_token(
-        self,
-        token: &ClientToken,
-        permit: TokenSendPermit,
-    ) -> impl Future<
-        Output = Result<
-            <Self as AwsOperation>::Output,
-            SdkError<<Self as AwsOperation>::Error, HttpResponse>,
-        >,
-    > + Send {
-        self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
-        })
-    }
-}
-
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
-    for TokenOperation<
-        aws_sdk_acm::operation::request_certificate::builders::RequestCertificateInputBuilder,
-        aws_sdk_acm::Client,
-    >
-{
-    fn send(
-        self,
-        (token, permit): (&'a ClientToken, TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send_with_token(token, permit)
-    }
-}
-
-/// UpdateCertificateOptions: replaces the requested certificate option values keyed by certificate ARN
-impl AwsOperation for aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_acm::operation::update_certificate_options::UpdateCertificateOptionsOutput;
-    type Error = aws_sdk_acm::operation::update_certificate_options::UpdateCertificateOptionsError;
-
-    const NAME: &'static str = "acm.UpdateCertificateOptions";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_acm::operation::update_certificate_options::UpdateCertificateOptionsError
-{
-    const NAME: &'static str = <aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// AssociateKmsKey: sets the KMS-key association for one log group
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyError;
-
-    const NAME: &'static str = "cloudwatchlogs.AssociateKmsKey";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// CreateLogGroup: creates a top-level resource without an idempotency token
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::create_log_group::CreateLogGroupOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::create_log_group::CreateLogGroupError;
-
-    const NAME: &'static str = "cloudwatchlogs.CreateLogGroup";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::create_log_group::CreateLogGroupError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// DeleteLogGroup: the provider does not accept an already-absent log group as success
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::delete_log_group::DeleteLogGroupOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::delete_log_group::DeleteLogGroupError;
-
-    const NAME: &'static str = "cloudwatchlogs.DeleteLogGroup";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::delete_log_group::DeleteLogGroupError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// DeleteRetentionPolicy: removes the single retention policy keyed by log group
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyError;
-
-    const NAME: &'static str = "cloudwatchlogs.DeleteRetentionPolicy";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// DescribeLogGroups: reads log-group state and has no side effects
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError;
-
-    const NAME: &'static str = "cloudwatchlogs.DescribeLogGroups";
-    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// DisassociateKmsKey: removes the KMS-key association from one log group
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyError;
-
-    const NAME: &'static str = "cloudwatchlogs.DisassociateKmsKey";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// ListTagsForResource: reads resource tags and has no side effects
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceError;
-
-    const NAME: &'static str = "cloudwatchlogs.ListTagsForResource";
-    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// ListTagsLogGroup: reads log-group tags and has no side effects
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupError;
-
-    const NAME: &'static str = "cloudwatchlogs.ListTagsLogGroup";
-    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// PutLogGroupDeletionProtection: sets one boolean on the identified log group
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError;
-
-    const NAME: &'static str = "cloudwatchlogs.PutLogGroupDeletionProtection";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError {
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// PutRetentionPolicy: replaces the single retention policy keyed by log group
-impl AwsOperation for aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyError;
-
-    const NAME: &'static str = "cloudwatchlogs.PutRetentionPolicy";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// TagLogGroup: sets tag keys on one log group; repeating the same values has no additional effect
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::tag_log_group::TagLogGroupOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::tag_log_group::TagLogGroupError;
-
-    const NAME: &'static str = "cloudwatchlogs.TagLogGroup";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::tag_log_group::TagLogGroupError {
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::tag_resource::TagResourceOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::tag_resource::TagResourceError;
-
-    const NAME: &'static str = "cloudwatchlogs.TagResource";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError for aws_sdk_cloudwatchlogs::operation::tag_resource::TagResourceError {
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// UntagLogGroup: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::untag_log_group::UntagLogGroupOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::untag_log_group::UntagLogGroupError;
-
-    const NAME: &'static str = "cloudwatchlogs.UntagLogGroup";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::untag_log_group::UntagLogGroupError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// UntagResource: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation
-    for aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_cloudwatchlogs::operation::untag_resource::UntagResourceOutput;
-    type Error = aws_sdk_cloudwatchlogs::operation::untag_resource::UntagResourceError;
-
-    const NAME: &'static str = "cloudwatchlogs.UntagResource";
-    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_cloudwatchlogs::operation::untag_resource::UntagResourceError
-{
-    const NAME: &'static str = <aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// AllocateAddress: each successful call can allocate another address and the API has no client token
-impl AwsOperation
-    for aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::allocate_address::AllocateAddressOutput;
-    type Error = aws_sdk_ec2::operation::allocate_address::AllocateAddressError;
-
-    const NAME: &'static str = "ec2.AllocateAddress";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError for aws_sdk_ec2::operation::allocate_address::AllocateAddressError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// AssociateRouteTable: creates an association without an idempotency token
-impl AwsOperation
-    for aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::associate_route_table::AssociateRouteTableOutput;
-    type Error = aws_sdk_ec2::operation::associate_route_table::AssociateRouteTableError;
-
-    const NAME: &'static str = "ec2.AssociateRouteTable";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::associate_route_table::AssociateRouteTableError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// AttachInternetGateway: attaches a resource and has no idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::attach_internet_gateway::AttachInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::attach_internet_gateway::AttachInternetGatewayError;
-
-    const NAME: &'static str = "ec2.AttachInternetGateway";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::attach_internet_gateway::AttachInternetGatewayError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// AttachVpnGateway: attaches a resource and has no idempotency token
-impl AwsOperation
-    for aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder
-{
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::attach_vpn_gateway::AttachVpnGatewayOutput;
-    type Error = aws_sdk_ec2::operation::attach_vpn_gateway::AttachVpnGatewayError;
-
-    const NAME: &'static str = "ec2.AttachVpnGateway";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError for aws_sdk_ec2::operation::attach_vpn_gateway::AttachVpnGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder
-{
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
-        self.send()
-    }
-}
-
-/// AuthorizeSecurityGroupEgress: authorizes rules without an idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressOutput;
-    type Error = aws_sdk_ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressError;
-
-    const NAME: &'static str = "ec2.AuthorizeSecurityGroupEgress";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// AuthorizeSecurityGroupIngress: authorizes rules without an idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder {
-    type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressOutput;
-    type Error = aws_sdk_ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressError;
-
-    const NAME: &'static str = "ec2.AuthorizeSecurityGroupIngress";
-    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
-}
-
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl DecidedSend<()> for aws_sdk_ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder {
-    fn send(
-        self,
-        (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
-        self.send()
-    }
-}
-
-/// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
-impl AwsOperation for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
-    type Resend = WithToken;
-    type Output = aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError;
-
-    const NAME: &'static str = "ec2.CreateEgressOnlyInternetGateway";
-    const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
-}
-
-impl DecidedOperationError for aws_sdk_ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
-}
-
-impl TokenBearing for aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
-    fn with_client_token(self, token: &ClientToken) -> Self {
-        self.client_token(token.as_str())
-    }
-}
-
-impl TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client> {
+impl TokenOperation<carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder, carina_aws_types::sdk::acm::AcmClient> {
     // The permit proves the invocation token was applied before this network send.
     // The error is the SDK's SdkError passed through unchanged.
     #[allow(clippy::result_large_err)]
@@ -2549,12 +1630,585 @@ impl TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway:
         permit: TokenSendPermit,
     ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
         self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
+            input.send_with(client.inner()).await
         })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<aws_sdk_ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, aws_sdk_ec2::Client> {
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::acm::operation::request_certificate::builders::RequestCertificateInputBuilder, carina_aws_types::sdk::acm::AcmClient> {
+    fn send(
+        self,
+        (token, permit): (&'a ClientToken, TokenSendPermit),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send_with_token(token, permit)
+    }
+}
+
+/// UpdateCertificateOptions: replaces the requested certificate option values keyed by certificate ARN
+impl AwsOperation for carina_aws_types::sdk::acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::acm::operation::update_certificate_options::UpdateCertificateOptionsOutput;
+    type Error = carina_aws_types::sdk::acm::operation::update_certificate_options::UpdateCertificateOptionsError;
+
+    const NAME: &'static str = "acm.UpdateCertificateOptions";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::acm::operation::update_certificate_options::UpdateCertificateOptionsError {
+    const NAME: &'static str = <carina_aws_types::sdk::acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::acm::operation::update_certificate_options::builders::UpdateCertificateOptionsFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AssociateKmsKey: sets the KMS-key association for one log group
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyError;
+
+    const NAME: &'static str = "cloudwatchlogs.AssociateKmsKey";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::AssociateKmsKeyError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::associate_kms_key::builders::AssociateKmsKeyFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// CreateLogGroup: creates a top-level resource without an idempotency token
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::CreateLogGroupOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::CreateLogGroupError;
+
+    const NAME: &'static str = "cloudwatchlogs.CreateLogGroup";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::CreateLogGroupError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::create_log_group::builders::CreateLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// DeleteLogGroup: the provider does not accept an already-absent log group as success
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::DeleteLogGroupOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::DeleteLogGroupError;
+
+    const NAME: &'static str = "cloudwatchlogs.DeleteLogGroup";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::DeleteLogGroupError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::delete_log_group::builders::DeleteLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// DeleteRetentionPolicy: removes the single retention policy keyed by log group
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyError;
+
+    const NAME: &'static str = "cloudwatchlogs.DeleteRetentionPolicy";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::DeleteRetentionPolicyError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::delete_retention_policy::builders::DeleteRetentionPolicyFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// DescribeLogGroups: reads log-group state and has no side effects
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError;
+
+    const NAME: &'static str = "cloudwatchlogs.DescribeLogGroups";
+    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::builders::DescribeLogGroupsFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// DisassociateKmsKey: removes the KMS-key association from one log group
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyError;
+
+    const NAME: &'static str = "cloudwatchlogs.DisassociateKmsKey";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::DisassociateKmsKeyError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::disassociate_kms_key::builders::DisassociateKmsKeyFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// ListTagsForResource: reads resource tags and has no side effects
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceError;
+
+    const NAME: &'static str = "cloudwatchlogs.ListTagsForResource";
+    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::ListTagsForResourceError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// ListTagsLogGroup: reads log-group tags and has no side effects
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupError;
+
+    const NAME: &'static str = "cloudwatchlogs.ListTagsLogGroup";
+    const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::ListTagsLogGroupError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::list_tags_log_group::builders::ListTagsLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// PutLogGroupDeletionProtection: sets one boolean on the identified log group
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError;
+
+    const NAME: &'static str = "cloudwatchlogs.PutLogGroupDeletionProtection";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::PutLogGroupDeletionProtectionError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::put_log_group_deletion_protection::builders::PutLogGroupDeletionProtectionFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// PutRetentionPolicy: replaces the single retention policy keyed by log group
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyError;
+
+    const NAME: &'static str = "cloudwatchlogs.PutRetentionPolicy";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::PutRetentionPolicyError {
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::put_retention_policy::builders::PutRetentionPolicyFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// TagLogGroup: sets tag keys on one log group; repeating the same values has no additional effect
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::TagLogGroupOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::TagLogGroupError;
+
+    const NAME: &'static str = "cloudwatchlogs.TagLogGroup";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::TagLogGroupError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::tag_log_group::builders::TagLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::TagResourceOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::TagResourceError;
+
+    const NAME: &'static str = "cloudwatchlogs.TagResource";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::TagResourceError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::tag_resource::builders::TagResourceFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// UntagLogGroup: removes named tag keys; repeating the removal leaves the same state
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::UntagLogGroupOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::UntagLogGroupError;
+
+    const NAME: &'static str = "cloudwatchlogs.UntagLogGroup";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::UntagLogGroupError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::untag_log_group::builders::UntagLogGroupFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// UntagResource: removes named tag keys; repeating the removal leaves the same state
+impl AwsOperation for carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::UntagResourceOutput;
+    type Error = carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::UntagResourceError;
+
+    const NAME: &'static str = "cloudwatchlogs.UntagResource";
+    const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::UntagResourceError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::cloudwatchlogs::operation::untag_resource::builders::UntagResourceFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AllocateAddress: each successful call can allocate another address and the API has no client token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::allocate_address::AllocateAddressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::allocate_address::AllocateAddressError;
+
+    const NAME: &'static str = "ec2.AllocateAddress";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::allocate_address::AllocateAddressError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::allocate_address::builders::AllocateAddressFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AssociateRouteTable: creates an association without an idempotency token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::associate_route_table::AssociateRouteTableOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::associate_route_table::AssociateRouteTableError;
+
+    const NAME: &'static str = "ec2.AssociateRouteTable";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::associate_route_table::AssociateRouteTableError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::associate_route_table::builders::AssociateRouteTableFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AttachInternetGateway: attaches a resource and has no idempotency token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::attach_internet_gateway::AttachInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::attach_internet_gateway::AttachInternetGatewayError;
+
+    const NAME: &'static str = "ec2.AttachInternetGateway";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::attach_internet_gateway::AttachInternetGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::attach_internet_gateway::builders::AttachInternetGatewayFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AttachVpnGateway: attaches a resource and has no idempotency token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::AttachVpnGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::AttachVpnGatewayError;
+
+    const NAME: &'static str = "ec2.AttachVpnGateway";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::AttachVpnGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::attach_vpn_gateway::builders::AttachVpnGatewayFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AuthorizeSecurityGroupEgress: authorizes rules without an idempotency token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressError;
+
+    const NAME: &'static str = "ec2.AuthorizeSecurityGroupEgress";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::AuthorizeSecurityGroupEgressError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::authorize_security_group_egress::builders::AuthorizeSecurityGroupEgressFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// AuthorizeSecurityGroupIngress: authorizes rules without an idempotency token
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder {
+    type Resend = NoToken;
+    type Output = carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressError;
+
+    const NAME: &'static str = "ec2.AuthorizeSecurityGroupIngress";
+    const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::AuthorizeSecurityGroupIngressError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::authorize_security_group_ingress::builders::AuthorizeSecurityGroupIngressFluentBuilder {
+    fn send(
+        self,
+        (): (),
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
+        self.send()
+    }
+}
+
+/// CreateEgressOnlyInternetGateway: ClientToken identifies one gateway creation request
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
+    type Resend = WithToken;
+    type Output = carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError;
+
+    const NAME: &'static str = "ec2.CreateEgressOnlyInternetGateway";
+    const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
+}
+
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::CreateEgressOnlyInternetGatewayError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
+}
+
+impl TokenBearing for carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder {
+    fn with_client_token(self, token: &ClientToken) -> Self {
+        self.client_token(token.as_str())
+    }
+}
+
+impl TokenOperation<carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
+    // The permit proves the invocation token was applied before this network send.
+    // The error is the SDK's SdkError passed through unchanged.
+    #[allow(clippy::result_large_err)]
+    fn send_with_token(
+        self,
+        token: &ClientToken,
+        permit: TokenSendPermit,
+    ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
+        self.send_with_token_using(token, permit, |input, client| async move {
+            input.send_with(client.inner()).await
+        })
+    }
+}
+
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::ec2::operation::create_egress_only_internet_gateway::builders::CreateEgressOnlyInternetGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
@@ -2564,36 +2218,29 @@ impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<aws_
 }
 
 /// CreateFlowLogs: ClientToken identifies one flow-log creation request
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder {
     type Resend = WithToken;
-    type Output = aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput;
-    type Error = aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError;
 
     const NAME: &'static str = "ec2.CreateFlowLogs";
     const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing
-    for aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder
-{
+impl TokenBearing for carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
     }
 }
 
-impl
-    TokenOperation<
-        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl TokenOperation<carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     // The permit proves the invocation token was applied before this network send.
     // The error is the SDK's SdkError passed through unchanged.
     #[allow(clippy::result_large_err)]
@@ -2601,51 +2248,40 @@ impl
         self,
         token: &ClientToken,
         permit: TokenSendPermit,
-    ) -> impl Future<
-        Output = Result<
-            <Self as AwsOperation>::Output,
-            SdkError<<Self as AwsOperation>::Error, HttpResponse>,
-        >,
-    > + Send {
+    ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
         self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
+            input.send_with(client.inner()).await
         })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
-    for TokenOperation<
-        aws_sdk_ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::ec2::operation::create_flow_logs::builders::CreateFlowLogsInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send_with_token(token, permit)
     }
 }
 
 /// CreateInternetGateway: each successful call creates a new gateway and the API has no client token
-impl AwsOperation for aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_internet_gateway::CreateInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::create_internet_gateway::CreateInternetGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_internet_gateway::CreateInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_internet_gateway::CreateInternetGatewayError;
 
     const NAME: &'static str = "ec2.CreateInternetGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::create_internet_gateway::CreateInternetGatewayError
+    for carina_aws_types::sdk::ec2::operation::create_internet_gateway::CreateInternetGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_internet_gateway::builders::CreateInternetGatewayFluentBuilder {
     fn send(
         self,
         (): (),
@@ -2655,36 +2291,29 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_internet_gateway::builde
 }
 
 /// CreateNatGateway: the model's ClientToken identifies one NAT-gateway creation request
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder {
     type Resend = WithToken;
-    type Output = aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayOutput;
-    type Error = aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_nat_gateway::CreateNatGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_nat_gateway::CreateNatGatewayError;
 
     const NAME: &'static str = "ec2.CreateNatGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_nat_gateway::CreateNatGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing
-    for aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder
-{
+impl TokenBearing for carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
     }
 }
 
-impl
-    TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl TokenOperation<carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     // The permit proves the invocation token was applied before this network send.
     // The error is the SDK's SdkError passed through unchanged.
     #[allow(clippy::result_large_err)]
@@ -2692,49 +2321,44 @@ impl
         self,
         token: &ClientToken,
         permit: TokenSendPermit,
-    ) -> impl Future<
-        Output = Result<
-            <Self as AwsOperation>::Output,
-            SdkError<<Self as AwsOperation>::Error, HttpResponse>,
-        >,
-    > + Send {
+    ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
         self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
+            input.send_with(client.inner()).await
         })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
-    for TokenOperation<
-        aws_sdk_ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::ec2::operation::create_nat_gateway::builders::CreateNatGatewayInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send_with_token(token, permit)
     }
 }
 
 /// CreateRoute: creates a route without an idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::create_route::builders::CreateRouteFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_route::CreateRouteOutput;
-    type Error = aws_sdk_ec2::operation::create_route::CreateRouteError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_route::CreateRouteOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_route::CreateRouteError;
 
     const NAME: &'static str = "ec2.CreateRoute";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_route::CreateRouteError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_route::CreateRouteError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_route::builders::CreateRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_route::builders::CreateRouteFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::create_route::builders::CreateRouteFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -2745,36 +2369,29 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_route::builders::CreateR
 }
 
 /// CreateRouteTable: the model's ClientToken identifies one route-table creation request
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder {
     type Resend = WithToken;
-    type Output = aws_sdk_ec2::operation::create_route_table::CreateRouteTableOutput;
-    type Error = aws_sdk_ec2::operation::create_route_table::CreateRouteTableError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_route_table::CreateRouteTableOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_route_table::CreateRouteTableError;
 
     const NAME: &'static str = "ec2.CreateRouteTable";
     const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_route_table::CreateRouteTableError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_route_table::CreateRouteTableError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing
-    for aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder
-{
+impl TokenBearing for carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
     }
 }
 
-impl
-    TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl TokenOperation<carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     // The permit proves the invocation token was applied before this network send.
     // The error is the SDK's SdkError passed through unchanged.
     #[allow(clippy::result_large_err)]
@@ -2782,81 +2399,69 @@ impl
         self,
         token: &ClientToken,
         permit: TokenSendPermit,
-    ) -> impl Future<
-        Output = Result<
-            <Self as AwsOperation>::Output,
-            SdkError<<Self as AwsOperation>::Error, HttpResponse>,
-        >,
-    > + Send {
+    ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
         self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
+            input.send_with(client.inner()).await
         })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
-    for TokenOperation<
-        aws_sdk_ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::ec2::operation::create_route_table::builders::CreateRouteTableInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send_with_token(token, permit)
     }
 }
 
 /// CreateSecurityGroup: creates a security group without an idempotency token
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_security_group::CreateSecurityGroupOutput;
-    type Error = aws_sdk_ec2::operation::create_security_group::CreateSecurityGroupError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_security_group::CreateSecurityGroupOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_security_group::CreateSecurityGroupError;
 
     const NAME: &'static str = "ec2.CreateSecurityGroup";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::create_security_group::CreateSecurityGroupError
+    for carina_aws_types::sdk::ec2::operation::create_security_group::CreateSecurityGroupError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_security_group::builders::CreateSecurityGroupFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CreateSubnet: each successful call can create a new subnet and the API has no client token
-impl AwsOperation for aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_subnet::CreateSubnetOutput;
-    type Error = aws_sdk_ec2::operation::create_subnet::CreateSubnetError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_subnet::CreateSubnetOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_subnet::CreateSubnetError;
 
     const NAME: &'static str = "ec2.CreateSubnet";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_subnet::CreateSubnetError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_subnet::CreateSubnetError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder
+    for carina_aws_types::sdk::ec2::operation::create_subnet::builders::CreateSubnetFluentBuilder
 {
     fn send(
         self,
@@ -2868,21 +2473,25 @@ impl DecidedSend<()>
 }
 
 /// CreateTags: sets tag keys on named resources; repeating the same values has no additional effect
-impl AwsOperation for aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::create_tags::builders::CreateTagsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_tags::CreateTagsOutput;
-    type Error = aws_sdk_ec2::operation::create_tags::CreateTagsError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_tags::CreateTagsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_tags::CreateTagsError;
 
     const NAME: &'static str = "ec2.CreateTags";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_tags::CreateTagsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::create_tags::CreateTagsError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_tags::builders::CreateTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_tags::builders::CreateTagsFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::create_tags::builders::CreateTagsFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -2893,52 +2502,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_tags::builders::CreateTa
 }
 
 /// CreateTransitGateway: each successful call creates a new transit gateway and the API has no client token
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_transit_gateway::CreateTransitGatewayOutput;
-    type Error = aws_sdk_ec2::operation::create_transit_gateway::CreateTransitGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_transit_gateway::CreateTransitGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_transit_gateway::CreateTransitGatewayError;
 
     const NAME: &'static str = "ec2.CreateTransitGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::create_transit_gateway::CreateTransitGatewayError
+    for carina_aws_types::sdk::ec2::operation::create_transit_gateway::CreateTransitGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_transit_gateway::builders::CreateTransitGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CreateTransitGatewayVpcAttachment: creates an attachment without an idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentOutput;
-    type Error = aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentError;
 
     const NAME: &'static str = "ec2.CreateTransitGatewayVpcAttachment";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::CreateTransitGatewayVpcAttachmentError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_transit_gateway_vpc_attachment::builders::CreateTransitGatewayVpcAttachmentFluentBuilder {
     fn send(
         self,
         (): (),
@@ -2948,21 +2552,25 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_transit_gateway_vpc_atta
 }
 
 /// CreateVpc: each successful call creates a new VPC and the API has no client token
-impl AwsOperation for aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::create_vpc::builders::CreateVpcFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_vpc::CreateVpcOutput;
-    type Error = aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_vpc::CreateVpcOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_vpc::CreateVpcError;
 
     const NAME: &'static str = "ec2.CreateVpc";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_vpc::CreateVpcError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::create_vpc::CreateVpcError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_vpc::builders::CreateVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_vpc::builders::CreateVpcFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::create_vpc::builders::CreateVpcFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -2973,36 +2581,29 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_vpc::builders::CreateVpc
 }
 
 /// CreateVpcEndpoint: ClientToken identifies one endpoint creation request
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder {
     type Resend = WithToken;
-    type Output = aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointOutput;
-    type Error = aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::CreateVpcEndpointOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::CreateVpcEndpointError;
 
     const NAME: &'static str = "ec2.CreateVpcEndpoint";
     const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_vpc_endpoint::CreateVpcEndpointError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::CreateVpcEndpointError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl TokenBearing
-    for aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder
-{
+impl TokenBearing for carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder {
     fn with_client_token(self, token: &ClientToken) -> Self {
         self.client_token(token.as_str())
     }
 }
 
-impl
-    TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl TokenOperation<carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     // The permit proves the invocation token was applied before this network send.
     // The error is the SDK's SdkError passed through unchanged.
     #[allow(clippy::result_large_err)]
@@ -3010,51 +2611,38 @@ impl
         self,
         token: &ClientToken,
         permit: TokenSendPermit,
-    ) -> impl Future<
-        Output = Result<
-            <Self as AwsOperation>::Output,
-            SdkError<<Self as AwsOperation>::Error, HttpResponse>,
-        >,
-    > + Send {
+    ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {
         self.send_with_token_using(token, permit, |input, client| async move {
-            input.send_with(&client).await
+            input.send_with(client.inner()).await
         })
     }
 }
 
-impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)>
-    for TokenOperation<
-        aws_sdk_ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder,
-        aws_sdk_ec2::Client,
-    >
-{
+impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<carina_aws_types::sdk::ec2::operation::create_vpc_endpoint::builders::CreateVpcEndpointInputBuilder, carina_aws_types::sdk::ec2::Ec2Client> {
     fn send(
         self,
         (token, permit): (&'a ClientToken, TokenSendPermit),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send_with_token(token, permit)
     }
 }
 
 /// CreateVpcPeeringConnection: creates a peering connection without an idempotency token
-impl AwsOperation for aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionOutput;
-    type Error = aws_sdk_ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionError;
 
     const NAME: &'static str = "ec2.CreateVpcPeeringConnection";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::CreateVpcPeeringConnectionError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_vpc_peering_connection::builders::CreateVpcPeeringConnectionFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3064,50 +2652,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::create_vpc_peering_connection::
 }
 
 /// CreateVpnGateway: each successful call creates a new gateway and the API has no client token
-impl AwsOperation
-    for aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::create_vpn_gateway::CreateVpnGatewayOutput;
-    type Error = aws_sdk_ec2::operation::create_vpn_gateway::CreateVpnGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::create_vpn_gateway::CreateVpnGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::create_vpn_gateway::CreateVpnGatewayError;
 
     const NAME: &'static str = "ec2.CreateVpnGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::create_vpn_gateway::CreateVpnGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::create_vpn_gateway::CreateVpnGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::create_vpn_gateway::builders::CreateVpnGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteEgressOnlyInternetGateway: the provider does not accept an already-absent gateway as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayError;
 
     const NAME: &'static str = "ec2.DeleteEgressOnlyInternetGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::DeleteEgressOnlyInternetGatewayError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_egress_only_internet_gateway::builders::DeleteEgressOnlyInternetGatewayFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3117,52 +2702,49 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_egress_only_internet_gat
 }
 
 /// DeleteFlowLogs: the provider reports unsuccessful already-absent items as errors
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_flow_logs::DeleteFlowLogsOutput;
-    type Error = aws_sdk_ec2::operation::delete_flow_logs::DeleteFlowLogsError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_flow_logs::DeleteFlowLogsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_flow_logs::DeleteFlowLogsError;
 
     const NAME: &'static str = "ec2.DeleteFlowLogs";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_flow_logs::DeleteFlowLogsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_flow_logs::DeleteFlowLogsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_flow_logs::builders::DeleteFlowLogsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteInternetGateway: the provider does not accept an already-absent gateway as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_internet_gateway::DeleteInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::delete_internet_gateway::DeleteInternetGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_internet_gateway::DeleteInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_internet_gateway::DeleteInternetGatewayError;
 
     const NAME: &'static str = "ec2.DeleteInternetGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::delete_internet_gateway::DeleteInternetGatewayError
+    for carina_aws_types::sdk::ec2::operation::delete_internet_gateway::DeleteInternetGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_internet_gateway::builders::DeleteInternetGatewayFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3172,50 +2754,53 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_internet_gateway::builde
 }
 
 /// DeleteNatGateway: the provider does not accept an already-absent NAT gateway as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_nat_gateway::DeleteNatGatewayOutput;
-    type Error = aws_sdk_ec2::operation::delete_nat_gateway::DeleteNatGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_nat_gateway::DeleteNatGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_nat_gateway::DeleteNatGatewayError;
 
     const NAME: &'static str = "ec2.DeleteNatGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_nat_gateway::DeleteNatGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_nat_gateway::DeleteNatGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_nat_gateway::builders::DeleteNatGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteRoute: the provider does not accept an already-absent route as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::delete_route::builders::DeleteRouteFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_route::DeleteRouteOutput;
-    type Error = aws_sdk_ec2::operation::delete_route::DeleteRouteError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_route::DeleteRouteOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_route::DeleteRouteError;
 
     const NAME: &'static str = "ec2.DeleteRoute";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_route::DeleteRouteError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_route::DeleteRouteError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_route::builders::DeleteRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_route::builders::DeleteRouteFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::delete_route::builders::DeleteRouteFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -3226,82 +2811,78 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_route::builders::DeleteR
 }
 
 /// DeleteRouteTable: the provider does not accept an already-absent route table as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_route_table::DeleteRouteTableOutput;
-    type Error = aws_sdk_ec2::operation::delete_route_table::DeleteRouteTableError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_route_table::DeleteRouteTableOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_route_table::DeleteRouteTableError;
 
     const NAME: &'static str = "ec2.DeleteRouteTable";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_route_table::DeleteRouteTableError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_route_table::DeleteRouteTableError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_route_table::builders::DeleteRouteTableFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteSecurityGroup: the provider does not accept an already-absent security group as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_security_group::DeleteSecurityGroupOutput;
-    type Error = aws_sdk_ec2::operation::delete_security_group::DeleteSecurityGroupError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_security_group::DeleteSecurityGroupOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_security_group::DeleteSecurityGroupError;
 
     const NAME: &'static str = "ec2.DeleteSecurityGroup";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::delete_security_group::DeleteSecurityGroupError
+    for carina_aws_types::sdk::ec2::operation::delete_security_group::DeleteSecurityGroupError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_security_group::builders::DeleteSecurityGroupFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteSubnet: the provider does not accept an already-absent subnet as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_subnet::DeleteSubnetOutput;
-    type Error = aws_sdk_ec2::operation::delete_subnet::DeleteSubnetError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_subnet::DeleteSubnetOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_subnet::DeleteSubnetError;
 
     const NAME: &'static str = "ec2.DeleteSubnet";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_subnet::DeleteSubnetError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_subnet::DeleteSubnetError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder
+    for carina_aws_types::sdk::ec2::operation::delete_subnet::builders::DeleteSubnetFluentBuilder
 {
     fn send(
         self,
@@ -3313,21 +2894,25 @@ impl DecidedSend<()>
 }
 
 /// DeleteTags: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation for aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_tags::DeleteTagsOutput;
-    type Error = aws_sdk_ec2::operation::delete_tags::DeleteTagsError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_tags::DeleteTagsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_tags::DeleteTagsError;
 
     const NAME: &'static str = "ec2.DeleteTags";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_tags::DeleteTagsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::delete_tags::DeleteTagsError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::delete_tags::builders::DeleteTagsFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -3338,52 +2923,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_tags::builders::DeleteTa
 }
 
 /// DeleteTransitGateway: the provider does not accept an already-deleting or absent transit gateway as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_transit_gateway::DeleteTransitGatewayOutput;
-    type Error = aws_sdk_ec2::operation::delete_transit_gateway::DeleteTransitGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_transit_gateway::DeleteTransitGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_transit_gateway::DeleteTransitGatewayError;
 
     const NAME: &'static str = "ec2.DeleteTransitGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::delete_transit_gateway::DeleteTransitGatewayError
+    for carina_aws_types::sdk::ec2::operation::delete_transit_gateway::DeleteTransitGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_transit_gateway::builders::DeleteTransitGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteTransitGatewayVpcAttachment: the provider does not accept an already-deleting or absent attachment as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentOutput;
-    type Error = aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentError;
 
     const NAME: &'static str = "ec2.DeleteTransitGatewayVpcAttachment";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::DeleteTransitGatewayVpcAttachmentError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_transit_gateway_vpc_attachment::builders::DeleteTransitGatewayVpcAttachmentFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3393,21 +2973,25 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_transit_gateway_vpc_atta
 }
 
 /// DeleteVpc: the provider does not accept an already-absent VPC as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_vpc::DeleteVpcOutput;
-    type Error = aws_sdk_ec2::operation::delete_vpc::DeleteVpcError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_vpc::DeleteVpcOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_vpc::DeleteVpcError;
 
     const NAME: &'static str = "ec2.DeleteVpc";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_vpc::DeleteVpcError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::delete_vpc::DeleteVpcError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::ec2::operation::delete_vpc::builders::DeleteVpcFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -3418,54 +3002,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_vpc::builders::DeleteVpc
 }
 
 /// DeleteVpcEndpoints: the provider reports unsuccessful already-absent items as errors
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsOutput;
-    type Error = aws_sdk_ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError;
 
     const NAME: &'static str = "ec2.DeleteVpcEndpoints";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError
+    for carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::builders::DeleteVpcEndpointsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteVpcPeeringConnection: the provider does not accept an already-absent connection as success
-impl AwsOperation for aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionOutput;
-    type Error = aws_sdk_ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionError;
 
     const NAME: &'static str = "ec2.DeleteVpcPeeringConnection";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::DeleteVpcPeeringConnectionError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_vpc_peering_connection::builders::DeleteVpcPeeringConnectionFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3475,79 +3052,73 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::delete_vpc_peering_connection::
 }
 
 /// DeleteVpnGateway: the provider does not accept an already-absent gateway as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::delete_vpn_gateway::DeleteVpnGatewayOutput;
-    type Error = aws_sdk_ec2::operation::delete_vpn_gateway::DeleteVpnGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::DeleteVpnGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::DeleteVpnGatewayError;
 
     const NAME: &'static str = "ec2.DeleteVpnGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::delete_vpn_gateway::DeleteVpnGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::DeleteVpnGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::delete_vpn_gateway::builders::DeleteVpnGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeAddresses: reads address state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_addresses::DescribeAddressesOutput;
-    type Error = aws_sdk_ec2::operation::describe_addresses::DescribeAddressesError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_addresses::DescribeAddressesOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_addresses::DescribeAddressesError;
 
     const NAME: &'static str = "ec2.DescribeAddresses";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_addresses::DescribeAddressesError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::describe_addresses::DescribeAddressesError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_addresses::builders::DescribeAddressesFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeEgressOnlyInternetGateways: reads gateway state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysOutput;
-    type Error = aws_sdk_ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysError;
 
     const NAME: &'static str = "ec2.DescribeEgressOnlyInternetGateways";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::DescribeEgressOnlyInternetGatewaysError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_egress_only_internet_gateways::builders::DescribeEgressOnlyInternetGatewaysFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3557,52 +3128,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_egress_only_internet_g
 }
 
 /// DescribeFlowLogs: reads flow-log state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_flow_logs::DescribeFlowLogsOutput;
-    type Error = aws_sdk_ec2::operation::describe_flow_logs::DescribeFlowLogsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_flow_logs::DescribeFlowLogsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_flow_logs::DescribeFlowLogsError;
 
     const NAME: &'static str = "ec2.DescribeFlowLogs";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_flow_logs::DescribeFlowLogsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::describe_flow_logs::DescribeFlowLogsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_flow_logs::builders::DescribeFlowLogsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeInternetGateways: reads gateway state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_internet_gateways::DescribeInternetGatewaysOutput;
-    type Error = aws_sdk_ec2::operation::describe_internet_gateways::DescribeInternetGatewaysError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_internet_gateways::DescribeInternetGatewaysOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_internet_gateways::DescribeInternetGatewaysError;
 
     const NAME: &'static str = "ec2.DescribeInternetGateways";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_internet_gateways::DescribeInternetGatewaysError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_internet_gateways::DescribeInternetGatewaysError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_internet_gateways::builders::DescribeInternetGatewaysFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3612,85 +3178,73 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_internet_gateways::bui
 }
 
 /// DescribeNatGateways: reads NAT-gateway state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_nat_gateways::DescribeNatGatewaysOutput;
-    type Error = aws_sdk_ec2::operation::describe_nat_gateways::DescribeNatGatewaysError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_nat_gateways::DescribeNatGatewaysOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_nat_gateways::DescribeNatGatewaysError;
 
     const NAME: &'static str = "ec2.DescribeNatGateways";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_nat_gateways::DescribeNatGatewaysError
+    for carina_aws_types::sdk::ec2::operation::describe_nat_gateways::DescribeNatGatewaysError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_nat_gateways::builders::DescribeNatGatewaysFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeRouteTables: reads route-table state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_route_tables::DescribeRouteTablesOutput;
-    type Error = aws_sdk_ec2::operation::describe_route_tables::DescribeRouteTablesError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_route_tables::DescribeRouteTablesOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_route_tables::DescribeRouteTablesError;
 
     const NAME: &'static str = "ec2.DescribeRouteTables";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_route_tables::DescribeRouteTablesError
+    for carina_aws_types::sdk::ec2::operation::describe_route_tables::DescribeRouteTablesError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_route_tables::builders::DescribeRouteTablesFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeSecurityGroupRules: reads security-group rules and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesOutput;
-    type Error = aws_sdk_ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesError;
 
     const NAME: &'static str = "ec2.DescribeSecurityGroupRules";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_security_group_rules::DescribeSecurityGroupRulesError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_security_group_rules::builders::DescribeSecurityGroupRulesFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3700,23 +3254,23 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_security_group_rules::
 }
 
 /// DescribeSecurityGroups: reads security-group state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsOutput;
-    type Error = aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_security_groups::DescribeSecurityGroupsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_security_groups::DescribeSecurityGroupsError;
 
     const NAME: &'static str = "ec2.DescribeSecurityGroups";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsError
+    for carina_aws_types::sdk::ec2::operation::describe_security_groups::DescribeSecurityGroupsError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_security_groups::builders::DescribeSecurityGroupsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3726,50 +3280,47 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_security_groups::build
 }
 
 /// DescribeSubnets: reads subnet state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_subnets::DescribeSubnetsOutput;
-    type Error = aws_sdk_ec2::operation::describe_subnets::DescribeSubnetsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_subnets::DescribeSubnetsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_subnets::DescribeSubnetsError;
 
     const NAME: &'static str = "ec2.DescribeSubnets";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_subnets::DescribeSubnetsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::describe_subnets::DescribeSubnetsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_subnets::builders::DescribeSubnetsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeTransitGatewayVpcAttachments: reads attachment state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsOutput;
-    type Error = aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsError;
 
     const NAME: &'static str = "ec2.DescribeTransitGatewayVpcAttachments";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::DescribeTransitGatewayVpcAttachmentsError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_transit_gateway_vpc_attachments::builders::DescribeTransitGatewayVpcAttachmentsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3779,23 +3330,21 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_transit_gateway_vpc_at
 }
 
 /// DescribeTransitGateways: reads transit-gateway state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_transit_gateways::DescribeTransitGatewaysOutput;
-    type Error = aws_sdk_ec2::operation::describe_transit_gateways::DescribeTransitGatewaysError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_transit_gateways::DescribeTransitGatewaysOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_transit_gateways::DescribeTransitGatewaysError;
 
     const NAME: &'static str = "ec2.DescribeTransitGateways";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_transit_gateways::DescribeTransitGatewaysError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_transit_gateways::DescribeTransitGatewaysError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_transit_gateways::builders::DescribeTransitGatewaysFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3805,85 +3354,73 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_transit_gateways::buil
 }
 
 /// DescribeVpcAttribute: reads one VPC attribute and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_vpc_attribute::DescribeVpcAttributeOutput;
-    type Error = aws_sdk_ec2::operation::describe_vpc_attribute::DescribeVpcAttributeError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::DescribeVpcAttributeOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::DescribeVpcAttributeError;
 
     const NAME: &'static str = "ec2.DescribeVpcAttribute";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_vpc_attribute::DescribeVpcAttributeError
+    for carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::DescribeVpcAttributeError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_vpc_attribute::builders::DescribeVpcAttributeFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeVpcEndpoints: reads endpoint state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsOutput;
-    type Error = aws_sdk_ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsError;
 
     const NAME: &'static str = "ec2.DescribeVpcEndpoints";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsError
+    for carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::DescribeVpcEndpointsError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_vpc_endpoints::builders::DescribeVpcEndpointsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeVpcPeeringConnections: reads peering state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsOutput;
-    type Error = aws_sdk_ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsError;
 
     const NAME: &'static str = "ec2.DescribeVpcPeeringConnections";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::DescribeVpcPeeringConnectionsError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_vpc_peering_connections::builders::DescribeVpcPeeringConnectionsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3893,22 +3430,26 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::describe_vpc_peering_connection
 }
 
 /// DescribeVpcs: reads VPC state and has no side effects
-impl AwsOperation for aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput;
-    type Error = aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_vpcs::DescribeVpcsOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_vpcs::DescribeVpcsError;
 
     const NAME: &'static str = "ec2.DescribeVpcs";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::describe_vpcs::DescribeVpcsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder
+    for carina_aws_types::sdk::ec2::operation::describe_vpcs::builders::DescribeVpcsFluentBuilder
 {
     fn send(
         self,
@@ -3920,54 +3461,49 @@ impl DecidedSend<()>
 }
 
 /// DescribeVpnGateways: reads VPN-gateway state and has no side effects
-impl AwsOperation
-    for aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysOutput;
-    type Error = aws_sdk_ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysError;
+    type Output = carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysError;
 
     const NAME: &'static str = "ec2.DescribeVpnGateways";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysError
+    for carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::DescribeVpnGatewaysError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::describe_vpn_gateways::builders::DescribeVpnGatewaysFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DetachInternetGateway: detaches a resource and the provider does not accept an already-detached result as success
-impl AwsOperation for aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::detach_internet_gateway::DetachInternetGatewayOutput;
-    type Error = aws_sdk_ec2::operation::detach_internet_gateway::DetachInternetGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::detach_internet_gateway::DetachInternetGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::detach_internet_gateway::DetachInternetGatewayError;
 
     const NAME: &'static str = "ec2.DetachInternetGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::detach_internet_gateway::DetachInternetGatewayError
+    for carina_aws_types::sdk::ec2::operation::detach_internet_gateway::DetachInternetGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::detach_internet_gateway::builders::DetachInternetGatewayFluentBuilder {
     fn send(
         self,
         (): (),
@@ -3977,52 +3513,49 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::detach_internet_gateway::builde
 }
 
 /// DetachVpnGateway: detaches a resource and the provider does not accept an already-detached result as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::detach_vpn_gateway::DetachVpnGatewayOutput;
-    type Error = aws_sdk_ec2::operation::detach_vpn_gateway::DetachVpnGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::DetachVpnGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::DetachVpnGatewayError;
 
     const NAME: &'static str = "ec2.DetachVpnGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::detach_vpn_gateway::DetachVpnGatewayError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::DetachVpnGatewayError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::detach_vpn_gateway::builders::DetachVpnGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DisassociateRouteTable: removes an association and the provider does not accept an already-removed result as success
-impl AwsOperation for aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::disassociate_route_table::DisassociateRouteTableOutput;
-    type Error = aws_sdk_ec2::operation::disassociate_route_table::DisassociateRouteTableError;
+    type Output = carina_aws_types::sdk::ec2::operation::disassociate_route_table::DisassociateRouteTableOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::disassociate_route_table::DisassociateRouteTableError;
 
     const NAME: &'static str = "ec2.DisassociateRouteTable";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::disassociate_route_table::DisassociateRouteTableError
+    for carina_aws_types::sdk::ec2::operation::disassociate_route_table::DisassociateRouteTableError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::disassociate_route_table::builders::DisassociateRouteTableFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4032,23 +3565,23 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::disassociate_route_table::build
 }
 
 /// ModifySubnetAttribute: sets one named subnet attribute to a complete value
-impl AwsOperation for aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::modify_subnet_attribute::ModifySubnetAttributeOutput;
-    type Error = aws_sdk_ec2::operation::modify_subnet_attribute::ModifySubnetAttributeError;
+    type Output = carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::ModifySubnetAttributeOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::ModifySubnetAttributeError;
 
     const NAME: &'static str = "ec2.ModifySubnetAttribute";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::modify_subnet_attribute::ModifySubnetAttributeError
+    for carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::ModifySubnetAttributeError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::modify_subnet_attribute::builders::ModifySubnetAttributeFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4058,142 +3591,130 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::modify_subnet_attribute::builde
 }
 
 /// ModifyTransitGateway: sets the complete transit-gateway description value
-impl AwsOperation
-    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayOutput;
-    type Error = aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError;
+    type Output = carina_aws_types::sdk::ec2::operation::modify_transit_gateway::ModifyTransitGatewayOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::modify_transit_gateway::ModifyTransitGatewayError;
 
     const NAME: &'static str = "ec2.ModifyTransitGateway";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::modify_transit_gateway::ModifyTransitGatewayError
+    for carina_aws_types::sdk::ec2::operation::modify_transit_gateway::ModifyTransitGatewayError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::modify_transit_gateway::builders::ModifyTransitGatewayFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ModifyVpcAttribute: sets one named VPC attribute to a complete value
-impl AwsOperation
-    for aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::modify_vpc_attribute::ModifyVpcAttributeOutput;
-    type Error = aws_sdk_ec2::operation::modify_vpc_attribute::ModifyVpcAttributeError;
+    type Output = carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::ModifyVpcAttributeOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::ModifyVpcAttributeError;
 
     const NAME: &'static str = "ec2.ModifyVpcAttribute";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_ec2::operation::modify_vpc_attribute::ModifyVpcAttributeError
+    for carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::ModifyVpcAttributeError
 {
-    const NAME: &'static str = <aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::modify_vpc_attribute::builders::ModifyVpcAttributeFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ModifyVpcEndpoint: applies incremental add/remove sets and a replay is not guaranteed to be accepted
-impl AwsOperation
-    for aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointOutput;
-    type Error = aws_sdk_ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointError;
+    type Output = carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointError;
 
     const NAME: &'static str = "ec2.ModifyVpcEndpoint";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::ModifyVpcEndpointError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::modify_vpc_endpoint::builders::ModifyVpcEndpointFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ReleaseAddress: the provider does not accept an already-released address as success
-impl AwsOperation
-    for aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::release_address::builders::ReleaseAddressFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::release_address::ReleaseAddressOutput;
-    type Error = aws_sdk_ec2::operation::release_address::ReleaseAddressError;
+    type Output = carina_aws_types::sdk::ec2::operation::release_address::ReleaseAddressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::release_address::ReleaseAddressError;
 
     const NAME: &'static str = "ec2.ReleaseAddress";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::release_address::ReleaseAddressError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::release_address::ReleaseAddressError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::release_address::builders::ReleaseAddressFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_ec2::operation::release_address::builders::ReleaseAddressFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::release_address::builders::ReleaseAddressFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ReplaceRoute: replaces the complete route target keyed by route table and destination
-impl AwsOperation for aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::replace_route::ReplaceRouteOutput;
-    type Error = aws_sdk_ec2::operation::replace_route::ReplaceRouteError;
+    type Output = carina_aws_types::sdk::ec2::operation::replace_route::ReplaceRouteOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::replace_route::ReplaceRouteError;
 
     const NAME: &'static str = "ec2.ReplaceRoute";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_ec2::operation::replace_route::ReplaceRouteError {
-    const NAME: &'static str = <aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::ec2::operation::replace_route::ReplaceRouteError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder
+    for carina_aws_types::sdk::ec2::operation::replace_route::builders::ReplaceRouteFluentBuilder
 {
     fn send(
         self,
@@ -4205,23 +3726,21 @@ impl DecidedSend<()>
 }
 
 /// ReplaceRouteTableAssociation: a successful call replaces the association identifier consumed by the request
-impl AwsOperation for aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationOutput;
-    type Error = aws_sdk_ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationError;
+    type Output = carina_aws_types::sdk::ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationError;
 
     const NAME: &'static str = "ec2.ReplaceRouteTableAssociation";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::replace_route_table_association::ReplaceRouteTableAssociationError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::replace_route_table_association::builders::ReplaceRouteTableAssociationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4231,23 +3750,21 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::replace_route_table_association
 }
 
 /// RevokeSecurityGroupEgress: revokes rules and the provider does not accept already-absent rules as success
-impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressOutput;
-    type Error = aws_sdk_ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressError;
+    type Output = carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressError;
 
     const NAME: &'static str = "ec2.RevokeSecurityGroupEgress";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::RevokeSecurityGroupEgressError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::revoke_security_group_egress::builders::RevokeSecurityGroupEgressFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4257,23 +3774,21 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::revoke_security_group_egress::b
 }
 
 /// RevokeSecurityGroupIngress: revokes rules and the provider does not accept already-absent rules as success
-impl AwsOperation for aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressOutput;
-    type Error = aws_sdk_ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressError;
+    type Output = carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressOutput;
+    type Error = carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressError;
 
     const NAME: &'static str = "ec2.RevokeSecurityGroupIngress";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressError
-{
-    const NAME: &'static str = <aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::RevokeSecurityGroupIngressError {
+    const NAME: &'static str = <carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::ec2::operation::revoke_security_group_ingress::builders::RevokeSecurityGroupIngressFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4283,21 +3798,25 @@ impl DecidedSend<()> for aws_sdk_ec2::operation::revoke_security_group_ingress::
 }
 
 /// CreateRole: creates a top-level resource without an idempotency token
-impl AwsOperation for aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::create_role::builders::CreateRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::create_role::CreateRoleOutput;
-    type Error = aws_sdk_iam::operation::create_role::CreateRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::create_role::CreateRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::create_role::CreateRoleError;
 
     const NAME: &'static str = "iam.CreateRole";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::create_role::CreateRoleError {
-    const NAME: &'static str = <aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::create_role::CreateRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::create_role::builders::CreateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::create_role::builders::CreateRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::create_role::builders::CreateRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4308,21 +3827,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::create_role::builders::CreateRo
 }
 
 /// DeleteRole: the provider does not accept an already-absent role as success
-impl AwsOperation for aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::delete_role::builders::DeleteRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::delete_role::DeleteRoleOutput;
-    type Error = aws_sdk_iam::operation::delete_role::DeleteRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::delete_role::DeleteRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::delete_role::DeleteRoleError;
 
     const NAME: &'static str = "iam.DeleteRole";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::delete_role::DeleteRoleError {
-    const NAME: &'static str = <aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::delete_role::DeleteRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::delete_role::builders::DeleteRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::delete_role::builders::DeleteRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::delete_role::builders::DeleteRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4333,22 +3856,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::delete_role::builders::DeleteRo
 }
 
 /// GetRole: reads role state and has no side effects
-impl AwsOperation for aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::get_role::builders::GetRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::get_role::GetRoleOutput;
-    type Error = aws_sdk_iam::operation::get_role::GetRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::get_role::GetRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::get_role::GetRoleError;
 
     const NAME: &'static str = "iam.GetRole";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::get_role::GetRoleError {
-    const NAME: &'static str =
-        <aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::get_role::GetRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::get_role::builders::GetRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::get_role::builders::GetRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::get_role::builders::GetRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4359,21 +3885,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::get_role::builders::GetRoleFlue
 }
 
 /// ListRoles: reads role state and has no side effects
-impl AwsOperation for aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::list_roles::builders::ListRolesFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::list_roles::ListRolesOutput;
-    type Error = aws_sdk_iam::operation::list_roles::ListRolesError;
+    type Output = carina_aws_types::sdk::iam::operation::list_roles::ListRolesOutput;
+    type Error = carina_aws_types::sdk::iam::operation::list_roles::ListRolesError;
 
     const NAME: &'static str = "iam.ListRoles";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::list_roles::ListRolesError {
-    const NAME: &'static str = <aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::list_roles::ListRolesError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::list_roles::builders::ListRolesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::list_roles::builders::ListRolesFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::list_roles::builders::ListRolesFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4384,22 +3914,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::list_roles::builders::ListRoles
 }
 
 /// TagRole: sets tag keys on one role; repeating the same values has no additional effect
-impl AwsOperation for aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::tag_role::builders::TagRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::tag_role::TagRoleOutput;
-    type Error = aws_sdk_iam::operation::tag_role::TagRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::tag_role::TagRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::tag_role::TagRoleError;
 
     const NAME: &'static str = "iam.TagRole";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::tag_role::TagRoleError {
-    const NAME: &'static str =
-        <aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::tag_role::TagRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::tag_role::builders::TagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::tag_role::builders::TagRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::tag_role::builders::TagRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4410,21 +3943,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::tag_role::builders::TagRoleFlue
 }
 
 /// UntagRole: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation for aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::untag_role::builders::UntagRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::untag_role::UntagRoleOutput;
-    type Error = aws_sdk_iam::operation::untag_role::UntagRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::untag_role::UntagRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::untag_role::UntagRoleError;
 
     const NAME: &'static str = "iam.UntagRole";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::untag_role::UntagRoleError {
-    const NAME: &'static str = <aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::untag_role::UntagRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::untag_role::builders::UntagRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::untag_role::builders::UntagRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::untag_role::builders::UntagRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4435,23 +3972,21 @@ impl DecidedSend<()> for aws_sdk_iam::operation::untag_role::builders::UntagRole
 }
 
 /// UpdateAssumeRolePolicy: replaces the whole trust policy keyed by role name
-impl AwsOperation for aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyOutput;
-    type Error = aws_sdk_iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyError;
+    type Output = carina_aws_types::sdk::iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyOutput;
+    type Error = carina_aws_types::sdk::iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyError;
 
     const NAME: &'static str = "iam.UpdateAssumeRolePolicy";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyError
-{
-    const NAME: &'static str = <aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::update_assume_role_policy::UpdateAssumeRolePolicyError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::iam::operation::update_assume_role_policy::builders::UpdateAssumeRolePolicyFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4461,21 +3996,25 @@ impl DecidedSend<()> for aws_sdk_iam::operation::update_assume_role_policy::buil
 }
 
 /// UpdateRole: sets complete mutable role attributes keyed by role name
-impl AwsOperation for aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::iam::operation::update_role::builders::UpdateRoleFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_iam::operation::update_role::UpdateRoleOutput;
-    type Error = aws_sdk_iam::operation::update_role::UpdateRoleError;
+    type Output = carina_aws_types::sdk::iam::operation::update_role::UpdateRoleOutput;
+    type Error = carina_aws_types::sdk::iam::operation::update_role::UpdateRoleError;
 
     const NAME: &'static str = "iam.UpdateRole";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_iam::operation::update_role::UpdateRoleError {
-    const NAME: &'static str = <aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::iam::operation::update_role::UpdateRoleError {
+    const NAME: &'static str = <carina_aws_types::sdk::iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::iam::operation::update_role::builders::UpdateRoleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_iam::operation::update_role::builders::UpdateRoleFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::iam::operation::update_role::builders::UpdateRoleFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4486,141 +4025,125 @@ impl DecidedSend<()> for aws_sdk_iam::operation::update_role::builders::UpdateRo
 }
 
 /// DescribeUser: the model marks this read operation @readonly
-impl AwsOperation
-    for aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::identitystore::operation::describe_user::builders::DescribeUserFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_identitystore::operation::describe_user::DescribeUserOutput;
-    type Error = aws_sdk_identitystore::operation::describe_user::DescribeUserError;
+    type Output = carina_aws_types::sdk::identitystore::operation::describe_user::DescribeUserOutput;
+    type Error = carina_aws_types::sdk::identitystore::operation::describe_user::DescribeUserError;
 
     const NAME: &'static str = "identitystore.DescribeUser";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_identitystore::operation::describe_user::DescribeUserError {
-    const NAME: &'static str = <aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::identitystore::operation::describe_user::DescribeUserError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::identitystore::operation::describe_user::builders::DescribeUserFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_identitystore::operation::describe_user::builders::DescribeUserFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::identitystore::operation::describe_user::builders::DescribeUserFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetUserId: the model marks this read operation @readonly
-impl AwsOperation
-    for aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_identitystore::operation::get_user_id::GetUserIdOutput;
-    type Error = aws_sdk_identitystore::operation::get_user_id::GetUserIdError;
+    type Output = carina_aws_types::sdk::identitystore::operation::get_user_id::GetUserIdOutput;
+    type Error = carina_aws_types::sdk::identitystore::operation::get_user_id::GetUserIdError;
 
     const NAME: &'static str = "identitystore.GetUserId";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_identitystore::operation::get_user_id::GetUserIdError {
-    const NAME: &'static str = <aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::identitystore::operation::get_user_id::GetUserIdError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::identitystore::operation::get_user_id::builders::GetUserIdFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CloseAccount: starts a top-level account transition and has no idempotency token
-impl AwsOperation
-    for aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::close_account::builders::CloseAccountFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::close_account::CloseAccountOutput;
-    type Error = aws_sdk_organizations::operation::close_account::CloseAccountError;
+    type Output = carina_aws_types::sdk::organizations::operation::close_account::CloseAccountOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::close_account::CloseAccountError;
 
     const NAME: &'static str = "organizations.CloseAccount";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_organizations::operation::close_account::CloseAccountError {
-    const NAME: &'static str = <aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::organizations::operation::close_account::CloseAccountError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::close_account::builders::CloseAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::close_account::builders::CloseAccountFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::close_account::builders::CloseAccountFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CreateAccount: starts an account creation request without an idempotency token
-impl AwsOperation
-    for aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::create_account::builders::CreateAccountFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::create_account::CreateAccountOutput;
-    type Error = aws_sdk_organizations::operation::create_account::CreateAccountError;
+    type Output = carina_aws_types::sdk::organizations::operation::create_account::CreateAccountOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::create_account::CreateAccountError;
 
     const NAME: &'static str = "organizations.CreateAccount";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_organizations::operation::create_account::CreateAccountError
+    for carina_aws_types::sdk::organizations::operation::create_account::CreateAccountError
 {
-    const NAME: &'static str = <aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::create_account::builders::CreateAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::create_account::builders::CreateAccountFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::create_account::builders::CreateAccountFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CreateOrganization: creates a top-level organization without an idempotency token
-impl AwsOperation for aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::create_organization::CreateOrganizationOutput;
-    type Error = aws_sdk_organizations::operation::create_organization::CreateOrganizationError;
+    type Output = carina_aws_types::sdk::organizations::operation::create_organization::CreateOrganizationOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::create_organization::CreateOrganizationError;
 
     const NAME: &'static str = "organizations.CreateOrganization";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_organizations::operation::create_organization::CreateOrganizationError
-{
-    const NAME: &'static str = <aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::organizations::operation::create_organization::CreateOrganizationError {
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::create_organization::builders::CreateOrganizationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4630,23 +4153,21 @@ impl DecidedSend<()> for aws_sdk_organizations::operation::create_organization::
 }
 
 /// DeleteOrganization: the provider does not accept an already-absent organization as success
-impl AwsOperation for aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::delete_organization::DeleteOrganizationOutput;
-    type Error = aws_sdk_organizations::operation::delete_organization::DeleteOrganizationError;
+    type Output = carina_aws_types::sdk::organizations::operation::delete_organization::DeleteOrganizationOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::delete_organization::DeleteOrganizationError;
 
     const NAME: &'static str = "organizations.DeleteOrganization";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_organizations::operation::delete_organization::DeleteOrganizationError
-{
-    const NAME: &'static str = <aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::organizations::operation::delete_organization::DeleteOrganizationError {
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::delete_organization::builders::DeleteOrganizationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4656,52 +4177,47 @@ impl DecidedSend<()> for aws_sdk_organizations::operation::delete_organization::
 }
 
 /// DescribeAccount: reads account state and has no side effects
-impl AwsOperation
-    for aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::describe_account::builders::DescribeAccountFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::describe_account::DescribeAccountOutput;
-    type Error = aws_sdk_organizations::operation::describe_account::DescribeAccountError;
+    type Output = carina_aws_types::sdk::organizations::operation::describe_account::DescribeAccountOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::describe_account::DescribeAccountError;
 
     const NAME: &'static str = "organizations.DescribeAccount";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_organizations::operation::describe_account::DescribeAccountError
+    for carina_aws_types::sdk::organizations::operation::describe_account::DescribeAccountError
 {
-    const NAME: &'static str = <aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::describe_account::builders::DescribeAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::describe_account::builders::DescribeAccountFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::describe_account::builders::DescribeAccountFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DescribeCreateAccountStatus: reads request state and has no side effects
-impl AwsOperation for aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::describe_create_account_status::DescribeCreateAccountStatusOutput;
-    type Error = aws_sdk_organizations::operation::describe_create_account_status::DescribeCreateAccountStatusError;
+    type Output = carina_aws_types::sdk::organizations::operation::describe_create_account_status::DescribeCreateAccountStatusOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::describe_create_account_status::DescribeCreateAccountStatusError;
 
     const NAME: &'static str = "organizations.DescribeCreateAccountStatus";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_organizations::operation::describe_create_account_status::DescribeCreateAccountStatusError {
-    const NAME: &'static str = <aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::organizations::operation::describe_create_account_status::DescribeCreateAccountStatusError {
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::describe_create_account_status::builders::DescribeCreateAccountStatusFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4711,23 +4227,21 @@ impl DecidedSend<()> for aws_sdk_organizations::operation::describe_create_accou
 }
 
 /// DescribeOrganization: reads organization state and has no side effects
-impl AwsOperation for aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::describe_organization::DescribeOrganizationOutput;
-    type Error = aws_sdk_organizations::operation::describe_organization::DescribeOrganizationError;
+    type Output = carina_aws_types::sdk::organizations::operation::describe_organization::DescribeOrganizationOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::describe_organization::DescribeOrganizationError;
 
     const NAME: &'static str = "organizations.DescribeOrganization";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_organizations::operation::describe_organization::DescribeOrganizationError
-{
-    const NAME: &'static str = <aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::organizations::operation::describe_organization::DescribeOrganizationError {
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::describe_organization::builders::DescribeOrganizationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4737,52 +4251,47 @@ impl DecidedSend<()> for aws_sdk_organizations::operation::describe_organization
 }
 
 /// ListParents: reads account parents and has no side effects
-impl AwsOperation
-    for aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::list_parents::builders::ListParentsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::list_parents::ListParentsOutput;
-    type Error = aws_sdk_organizations::operation::list_parents::ListParentsError;
+    type Output = carina_aws_types::sdk::organizations::operation::list_parents::ListParentsOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::list_parents::ListParentsError;
 
     const NAME: &'static str = "organizations.ListParents";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_organizations::operation::list_parents::ListParentsError {
-    const NAME: &'static str = <aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::organizations::operation::list_parents::ListParentsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::list_parents::builders::ListParentsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::list_parents::builders::ListParentsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::list_parents::builders::ListParentsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ListTagsForResource: reads resource tags and has no side effects
-impl AwsOperation for aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::list_tags_for_resource::ListTagsForResourceOutput;
-    type Error = aws_sdk_organizations::operation::list_tags_for_resource::ListTagsForResourceError;
+    type Output = carina_aws_types::sdk::organizations::operation::list_tags_for_resource::ListTagsForResourceOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::list_tags_for_resource::ListTagsForResourceError;
 
     const NAME: &'static str = "organizations.ListTagsForResource";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_organizations::operation::list_tags_for_resource::ListTagsForResourceError
-{
-    const NAME: &'static str = <aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::organizations::operation::list_tags_for_resource::ListTagsForResourceError {
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4792,112 +4301,99 @@ impl DecidedSend<()> for aws_sdk_organizations::operation::list_tags_for_resourc
 }
 
 /// MoveAccount: consumes the source parent relationship and a replay is not guaranteed to be accepted
-impl AwsOperation
-    for aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::move_account::builders::MoveAccountFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::move_account::MoveAccountOutput;
-    type Error = aws_sdk_organizations::operation::move_account::MoveAccountError;
+    type Output = carina_aws_types::sdk::organizations::operation::move_account::MoveAccountOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::move_account::MoveAccountError;
 
     const NAME: &'static str = "organizations.MoveAccount";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_organizations::operation::move_account::MoveAccountError {
-    const NAME: &'static str = <aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::organizations::operation::move_account::MoveAccountError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::move_account::builders::MoveAccountFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::move_account::builders::MoveAccountFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::move_account::builders::MoveAccountFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// TagResource: sets tag keys on one resource; repeating the same values has no additional effect
-impl AwsOperation
-    for aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::tag_resource::builders::TagResourceFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::tag_resource::TagResourceOutput;
-    type Error = aws_sdk_organizations::operation::tag_resource::TagResourceError;
+    type Output = carina_aws_types::sdk::organizations::operation::tag_resource::TagResourceOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::tag_resource::TagResourceError;
 
     const NAME: &'static str = "organizations.TagResource";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_organizations::operation::tag_resource::TagResourceError {
-    const NAME: &'static str = <aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::organizations::operation::tag_resource::TagResourceError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::tag_resource::builders::TagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::tag_resource::builders::TagResourceFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::tag_resource::builders::TagResourceFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// UntagResource: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation
-    for aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::organizations::operation::untag_resource::builders::UntagResourceFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_organizations::operation::untag_resource::UntagResourceOutput;
-    type Error = aws_sdk_organizations::operation::untag_resource::UntagResourceError;
+    type Output = carina_aws_types::sdk::organizations::operation::untag_resource::UntagResourceOutput;
+    type Error = carina_aws_types::sdk::organizations::operation::untag_resource::UntagResourceError;
 
     const NAME: &'static str = "organizations.UntagResource";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_organizations::operation::untag_resource::UntagResourceError
+    for carina_aws_types::sdk::organizations::operation::untag_resource::UntagResourceError
 {
-    const NAME: &'static str = <aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::organizations::operation::untag_resource::builders::UntagResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_organizations::operation::untag_resource::builders::UntagResourceFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::organizations::operation::untag_resource::builders::UntagResourceFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ChangeResourceRecordSets: applies a change batch without an idempotency token
-impl AwsOperation for aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_route53::operation::change_resource_record_sets::ChangeResourceRecordSetsOutput;
-    type Error = aws_sdk_route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError;
+    type Output = carina_aws_types::sdk::route53::operation::change_resource_record_sets::ChangeResourceRecordSetsOutput;
+    type Error = carina_aws_types::sdk::route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError;
 
     const NAME: &'static str = "route53.ChangeResourceRecordSets";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError
-{
-    const NAME: &'static str = <aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::route53::operation::change_resource_record_sets::ChangeResourceRecordSetsError {
+    const NAME: &'static str = <carina_aws_types::sdk::route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::route53::operation::change_resource_record_sets::builders::ChangeResourceRecordSetsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4907,23 +4403,21 @@ impl DecidedSend<()> for aws_sdk_route53::operation::change_resource_record_sets
 }
 
 /// ListResourceRecordSets: reads record-set state and has no side effects
-impl AwsOperation for aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_route53::operation::list_resource_record_sets::ListResourceRecordSetsOutput;
-    type Error = aws_sdk_route53::operation::list_resource_record_sets::ListResourceRecordSetsError;
+    type Output = carina_aws_types::sdk::route53::operation::list_resource_record_sets::ListResourceRecordSetsOutput;
+    type Error = carina_aws_types::sdk::route53::operation::list_resource_record_sets::ListResourceRecordSetsError;
 
     const NAME: &'static str = "route53.ListResourceRecordSets";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_route53::operation::list_resource_record_sets::ListResourceRecordSetsError
-{
-    const NAME: &'static str = <aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::route53::operation::list_resource_record_sets::ListResourceRecordSetsError {
+    const NAME: &'static str = <carina_aws_types::sdk::route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::route53::operation::list_resource_record_sets::builders::ListResourceRecordSetsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4933,23 +4427,23 @@ impl DecidedSend<()> for aws_sdk_route53::operation::list_resource_record_sets::
 }
 
 /// ListTagsForResource: reads hosted-zone tags and has no side effects
-impl AwsOperation for aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_route53::operation::list_tags_for_resource::ListTagsForResourceOutput;
-    type Error = aws_sdk_route53::operation::list_tags_for_resource::ListTagsForResourceError;
+    type Output = carina_aws_types::sdk::route53::operation::list_tags_for_resource::ListTagsForResourceOutput;
+    type Error = carina_aws_types::sdk::route53::operation::list_tags_for_resource::ListTagsForResourceError;
 
     const NAME: &'static str = "route53.ListTagsForResource";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_route53::operation::list_tags_for_resource::ListTagsForResourceError
+    for carina_aws_types::sdk::route53::operation::list_tags_for_resource::ListTagsForResourceError
 {
-    const NAME: &'static str = <aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::route53::operation::list_tags_for_resource::builders::ListTagsForResourceFluentBuilder {
     fn send(
         self,
         (): (),
@@ -4959,21 +4453,27 @@ impl DecidedSend<()> for aws_sdk_route53::operation::list_tags_for_resource::bui
 }
 
 /// CreateBucket: creates a top-level bucket without an idempotency token
-impl AwsOperation for aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::create_bucket::builders::CreateBucketFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::create_bucket::CreateBucketOutput;
-    type Error = aws_sdk_s3::operation::create_bucket::CreateBucketError;
+    type Output = carina_aws_types::sdk::s3::operation::create_bucket::CreateBucketOutput;
+    type Error = carina_aws_types::sdk::s3::operation::create_bucket::CreateBucketError;
 
     const NAME: &'static str = "s3.CreateBucket";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::create_bucket::CreateBucketError {
-    const NAME: &'static str = <aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::create_bucket::CreateBucketError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::create_bucket::builders::CreateBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::create_bucket::builders::CreateBucketFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::s3::operation::create_bucket::builders::CreateBucketFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -4984,21 +4484,27 @@ impl DecidedSend<()> for aws_sdk_s3::operation::create_bucket::builders::CreateB
 }
 
 /// DeleteBucket: the provider does not accept an already-absent bucket as success
-impl AwsOperation for aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket::DeleteBucketOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket::DeleteBucketError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket::DeleteBucketOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket::DeleteBucketError;
 
     const NAME: &'static str = "s3.DeleteBucket";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::delete_bucket::DeleteBucketError {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::delete_bucket::DeleteBucketError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::s3::operation::delete_bucket::builders::DeleteBucketFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -5009,52 +4515,49 @@ impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket::builders::DeleteB
 }
 
 /// DeleteBucketCors: removes the whole CORS sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_cors::DeleteBucketCorsOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_cors::DeleteBucketCorsError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_cors::DeleteBucketCorsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_cors::DeleteBucketCorsError;
 
     const NAME: &'static str = "s3.DeleteBucketCors";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::delete_bucket_cors::DeleteBucketCorsError {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_cors::DeleteBucketCorsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_cors::builders::DeleteBucketCorsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteBucketEncryption: removes the whole encryption sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_encryption::DeleteBucketEncryptionOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_encryption::DeleteBucketEncryptionError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_encryption::DeleteBucketEncryptionOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_encryption::DeleteBucketEncryptionError;
 
     const NAME: &'static str = "s3.DeleteBucketEncryption";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_encryption::DeleteBucketEncryptionError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_encryption::DeleteBucketEncryptionError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_encryption::builders::DeleteBucketEncryptionFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5064,54 +4567,47 @@ impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_encryption::builde
 }
 
 /// DeleteBucketLifecycle: removes the whole lifecycle sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleError;
 
     const NAME: &'static str = "s3.DeleteBucketLifecycle";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::DeleteBucketLifecycleError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_lifecycle::builders::DeleteBucketLifecycleFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteBucketOwnershipControls: removes the whole ownership-controls sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsError;
 
     const NAME: &'static str = "s3.DeleteBucketOwnershipControls";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::DeleteBucketOwnershipControlsError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_ownership_controls::builders::DeleteBucketOwnershipControlsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5121,54 +4617,47 @@ impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_ownership_controls
 }
 
 /// DeleteBucketPolicy: removes the whole policy sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_policy::DeleteBucketPolicyOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_policy::DeleteBucketPolicyError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_policy::DeleteBucketPolicyOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_policy::DeleteBucketPolicyError;
 
     const NAME: &'static str = "s3.DeleteBucketPolicy";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_policy::DeleteBucketPolicyError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_policy::DeleteBucketPolicyError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_policy::builders::DeleteBucketPolicyFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteBucketReplication: removes the whole replication sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_replication::DeleteBucketReplicationOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_replication::DeleteBucketReplicationError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_replication::DeleteBucketReplicationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_replication::DeleteBucketReplicationError;
 
     const NAME: &'static str = "s3.DeleteBucketReplication";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_replication::DeleteBucketReplicationError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::delete_bucket_replication::DeleteBucketReplicationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_replication::builders::DeleteBucketReplicationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5178,84 +4667,78 @@ impl DecidedSend<()> for aws_sdk_s3::operation::delete_bucket_replication::build
 }
 
 /// DeleteBucketTagging: removes the whole tag set keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_tagging::DeleteBucketTaggingOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_tagging::DeleteBucketTaggingError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_tagging::DeleteBucketTaggingOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_tagging::DeleteBucketTaggingError;
 
     const NAME: &'static str = "s3.DeleteBucketTagging";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_tagging::DeleteBucketTaggingError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_tagging::DeleteBucketTaggingError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_tagging::builders::DeleteBucketTaggingFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteBucketWebsite: removes the whole website sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_bucket_website::DeleteBucketWebsiteOutput;
-    type Error = aws_sdk_s3::operation::delete_bucket_website::DeleteBucketWebsiteError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_bucket_website::DeleteBucketWebsiteOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_bucket_website::DeleteBucketWebsiteError;
 
     const NAME: &'static str = "s3.DeleteBucketWebsite";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_bucket_website::DeleteBucketWebsiteError
+    for carina_aws_types::sdk::s3::operation::delete_bucket_website::DeleteBucketWebsiteError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_website::builders::DeleteBucketWebsiteFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
-impl AwsOperation for aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_objects::DeleteObjectsOutput;
-    type Error = aws_sdk_s3::operation::delete_objects::DeleteObjectsError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError;
 
     const NAME: &'static str = "s3.DeleteObjects";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::delete_objects::DeleteObjectsError {
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
+    for carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
 {
     fn send(
         self,
@@ -5267,23 +4750,21 @@ impl DecidedSend<()>
 }
 
 /// DeletePublicAccessBlock: removes the whole public-access-block sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::delete_public_access_block::DeletePublicAccessBlockOutput;
-    type Error = aws_sdk_s3::operation::delete_public_access_block::DeletePublicAccessBlockError;
+    type Output = carina_aws_types::sdk::s3::operation::delete_public_access_block::DeletePublicAccessBlockOutput;
+    type Error = carina_aws_types::sdk::s3::operation::delete_public_access_block::DeletePublicAccessBlockError;
 
     const NAME: &'static str = "s3.DeletePublicAccessBlock";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::delete_public_access_block::DeletePublicAccessBlockError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::delete_public_access_block::DeletePublicAccessBlockError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_public_access_block::builders::DeletePublicAccessBlockFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5293,22 +4774,26 @@ impl DecidedSend<()> for aws_sdk_s3::operation::delete_public_access_block::buil
 }
 
 /// GetBucketAcl: reads bucket ACL state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_acl::GetBucketAclOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_acl::GetBucketAclError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_acl::GetBucketAclOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_acl::GetBucketAclError;
 
     const NAME: &'static str = "s3.GetBucketAcl";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_acl::GetBucketAclError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_acl::GetBucketAclError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder
+    for carina_aws_types::sdk::s3::operation::get_bucket_acl::builders::GetBucketAclFluentBuilder
 {
     fn send(
         self,
@@ -5320,22 +4805,26 @@ impl DecidedSend<()>
 }
 
 /// GetBucketCors: reads bucket CORS state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_cors::GetBucketCorsOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_cors::GetBucketCorsError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_cors::GetBucketCorsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_cors::GetBucketCorsError;
 
     const NAME: &'static str = "s3.GetBucketCors";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_cors::GetBucketCorsError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_cors::GetBucketCorsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder
+    for carina_aws_types::sdk::s3::operation::get_bucket_cors::builders::GetBucketCorsFluentBuilder
 {
     fn send(
         self,
@@ -5347,52 +4836,47 @@ impl DecidedSend<()>
 }
 
 /// GetBucketEncryption: reads bucket encryption state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_encryption::GetBucketEncryptionOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_encryption::GetBucketEncryptionError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_encryption::GetBucketEncryptionOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_encryption::GetBucketEncryptionError;
 
     const NAME: &'static str = "s3.GetBucketEncryption";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::get_bucket_encryption::GetBucketEncryptionError
+    for carina_aws_types::sdk::s3::operation::get_bucket_encryption::GetBucketEncryptionError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_encryption::builders::GetBucketEncryptionFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketLifecycleConfiguration: reads bucket lifecycle state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationError;
 
     const NAME: &'static str = "s3.GetBucketLifecycleConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::GetBucketLifecycleConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_lifecycle_configuration::builders::GetBucketLifecycleConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5402,50 +4886,47 @@ impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_lifecycle_configurati
 }
 
 /// GetBucketLogging: reads bucket logging state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_logging::GetBucketLoggingOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_logging::GetBucketLoggingError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_logging::GetBucketLoggingOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_logging::GetBucketLoggingError;
 
     const NAME: &'static str = "s3.GetBucketLogging";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_logging::GetBucketLoggingError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_logging::GetBucketLoggingError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_logging::builders::GetBucketLoggingFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketNotificationConfiguration: reads bucket notification state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationError;
 
     const NAME: &'static str = "s3.GetBucketNotificationConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::GetBucketNotificationConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_notification_configuration::builders::GetBucketNotificationConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5455,23 +4936,21 @@ impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_notification_configur
 }
 
 /// GetBucketOwnershipControls: reads bucket ownership-control state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsError;
 
     const NAME: &'static str = "s3.GetBucketOwnershipControls";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::GetBucketOwnershipControlsError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_ownership_controls::builders::GetBucketOwnershipControlsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5481,172 +4960,151 @@ impl DecidedSend<()> for aws_sdk_s3::operation::get_bucket_ownership_controls::b
 }
 
 /// GetBucketPolicy: reads bucket policy state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_policy::GetBucketPolicyOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_policy::GetBucketPolicyError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_policy::GetBucketPolicyOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_policy::GetBucketPolicyError;
 
     const NAME: &'static str = "s3.GetBucketPolicy";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_policy::GetBucketPolicyError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_policy::GetBucketPolicyError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_policy::builders::GetBucketPolicyFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketReplication: reads bucket replication state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_replication::GetBucketReplicationOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_replication::GetBucketReplicationError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_replication::GetBucketReplicationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_replication::GetBucketReplicationError;
 
     const NAME: &'static str = "s3.GetBucketReplication";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::get_bucket_replication::GetBucketReplicationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_replication::GetBucketReplicationError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_replication::builders::GetBucketReplicationFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketTagging: reads bucket tags and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_tagging::GetBucketTaggingOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_tagging::GetBucketTaggingError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_tagging::GetBucketTaggingOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_tagging::GetBucketTaggingError;
 
     const NAME: &'static str = "s3.GetBucketTagging";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_tagging::GetBucketTaggingError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_tagging::GetBucketTaggingError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_tagging::builders::GetBucketTaggingFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketVersioning: reads bucket versioning state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_versioning::GetBucketVersioningOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_versioning::GetBucketVersioningError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_versioning::GetBucketVersioningOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_versioning::GetBucketVersioningError;
 
     const NAME: &'static str = "s3.GetBucketVersioning";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::get_bucket_versioning::GetBucketVersioningError
+    for carina_aws_types::sdk::s3::operation::get_bucket_versioning::GetBucketVersioningError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_versioning::builders::GetBucketVersioningFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetBucketWebsite: reads bucket website state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_bucket_website::GetBucketWebsiteOutput;
-    type Error = aws_sdk_s3::operation::get_bucket_website::GetBucketWebsiteError;
+    type Output = carina_aws_types::sdk::s3::operation::get_bucket_website::GetBucketWebsiteOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_bucket_website::GetBucketWebsiteError;
 
     const NAME: &'static str = "s3.GetBucketWebsite";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::get_bucket_website::GetBucketWebsiteError {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::get_bucket_website::GetBucketWebsiteError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_bucket_website::builders::GetBucketWebsiteFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// GetObjectLockConfiguration: reads object-lock state and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_object_lock_configuration::GetObjectLockConfigurationOutput;
-    type Error = aws_sdk_s3::operation::get_object_lock_configuration::GetObjectLockConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::get_object_lock_configuration::GetObjectLockConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_object_lock_configuration::GetObjectLockConfigurationError;
 
     const NAME: &'static str = "s3.GetObjectLockConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::get_object_lock_configuration::GetObjectLockConfigurationError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::get_object_lock_configuration::GetObjectLockConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_object_lock_configuration::builders::GetObjectLockConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5656,52 +5114,51 @@ impl DecidedSend<()> for aws_sdk_s3::operation::get_object_lock_configuration::b
 }
 
 /// GetPublicAccessBlock: reads public-access-block state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::get_public_access_block::GetPublicAccessBlockOutput;
-    type Error = aws_sdk_s3::operation::get_public_access_block::GetPublicAccessBlockError;
+    type Output = carina_aws_types::sdk::s3::operation::get_public_access_block::GetPublicAccessBlockOutput;
+    type Error = carina_aws_types::sdk::s3::operation::get_public_access_block::GetPublicAccessBlockError;
 
     const NAME: &'static str = "s3.GetPublicAccessBlock";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::get_public_access_block::GetPublicAccessBlockError
+    for carina_aws_types::sdk::s3::operation::get_public_access_block::GetPublicAccessBlockError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::get_public_access_block::builders::GetPublicAccessBlockFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// HeadBucket: reads bucket existence and region metadata and has no side effects
-impl AwsOperation for aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::head_bucket::builders::HeadBucketFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::head_bucket::HeadBucketOutput;
-    type Error = aws_sdk_s3::operation::head_bucket::HeadBucketError;
+    type Output = carina_aws_types::sdk::s3::operation::head_bucket::HeadBucketOutput;
+    type Error = carina_aws_types::sdk::s3::operation::head_bucket::HeadBucketError;
 
     const NAME: &'static str = "s3.HeadBucket";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::head_bucket::HeadBucketError {
-    const NAME: &'static str = <aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::head_bucket::HeadBucketError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::head_bucket::builders::HeadBucketFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::head_bucket::builders::HeadBucketFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::s3::operation::head_bucket::builders::HeadBucketFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -5712,53 +5169,52 @@ impl DecidedSend<()> for aws_sdk_s3::operation::head_bucket::builders::HeadBucke
 }
 
 /// ListObjectVersions: reads object-version state and has no side effects
-impl AwsOperation
-    for aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::list_object_versions::ListObjectVersionsOutput;
-    type Error = aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError;
+    type Output = carina_aws_types::sdk::s3::operation::list_object_versions::ListObjectVersionsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::list_object_versions::ListObjectVersionsError;
 
     const NAME: &'static str = "s3.ListObjectVersions";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::list_object_versions::ListObjectVersionsError
+    for carina_aws_types::sdk::s3::operation::list_object_versions::ListObjectVersionsError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::list_object_versions::builders::ListObjectVersionsFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketAcl: replaces the whole ACL keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_acl::PutBucketAclOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_acl::PutBucketAclError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_acl::PutBucketAclOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_acl::PutBucketAclError;
 
     const NAME: &'static str = "s3.PutBucketAcl";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_acl::PutBucketAclError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_acl::PutBucketAclError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder
+    for carina_aws_types::sdk::s3::operation::put_bucket_acl::builders::PutBucketAclFluentBuilder
 {
     fn send(
         self,
@@ -5770,22 +5226,26 @@ impl DecidedSend<()>
 }
 
 /// PutBucketCors: replaces the whole CORS sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_cors::PutBucketCorsOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_cors::PutBucketCorsError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_cors::PutBucketCorsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_cors::PutBucketCorsError;
 
     const NAME: &'static str = "s3.PutBucketCors";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_cors::PutBucketCorsError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_cors::PutBucketCorsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder
+    for carina_aws_types::sdk::s3::operation::put_bucket_cors::builders::PutBucketCorsFluentBuilder
 {
     fn send(
         self,
@@ -5797,52 +5257,47 @@ impl DecidedSend<()>
 }
 
 /// PutBucketEncryption: replaces the whole encryption sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_encryption::PutBucketEncryptionOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_encryption::PutBucketEncryptionError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_encryption::PutBucketEncryptionOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_encryption::PutBucketEncryptionError;
 
     const NAME: &'static str = "s3.PutBucketEncryption";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::put_bucket_encryption::PutBucketEncryptionError
+    for carina_aws_types::sdk::s3::operation::put_bucket_encryption::PutBucketEncryptionError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_encryption::builders::PutBucketEncryptionFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketLifecycleConfiguration: replaces the whole lifecycle sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationError;
 
     const NAME: &'static str = "s3.PutBucketLifecycleConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::PutBucketLifecycleConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_lifecycle_configuration::builders::PutBucketLifecycleConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5852,50 +5307,47 @@ impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_lifecycle_configurati
 }
 
 /// PutBucketLogging: replaces the whole logging sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_logging::PutBucketLoggingOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_logging::PutBucketLoggingError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_logging::PutBucketLoggingOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_logging::PutBucketLoggingError;
 
     const NAME: &'static str = "s3.PutBucketLogging";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_logging::PutBucketLoggingError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_logging::PutBucketLoggingError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_logging::builders::PutBucketLoggingFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketNotificationConfiguration: replaces the whole notification sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationError;
 
     const NAME: &'static str = "s3.PutBucketNotificationConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::PutBucketNotificationConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_notification_configuration::builders::PutBucketNotificationConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5905,23 +5357,21 @@ impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_notification_configur
 }
 
 /// PutBucketOwnershipControls: replaces the whole ownership-controls sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsError;
 
     const NAME: &'static str = "s3.PutBucketOwnershipControls";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::PutBucketOwnershipControlsError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_ownership_controls::builders::PutBucketOwnershipControlsFluentBuilder {
     fn send(
         self,
         (): (),
@@ -5931,172 +5381,151 @@ impl DecidedSend<()> for aws_sdk_s3::operation::put_bucket_ownership_controls::b
 }
 
 /// PutBucketPolicy: replaces the whole policy keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_policy::PutBucketPolicyOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_policy::PutBucketPolicyError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_policy::PutBucketPolicyOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_policy::PutBucketPolicyError;
 
     const NAME: &'static str = "s3.PutBucketPolicy";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_policy::PutBucketPolicyError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_policy::PutBucketPolicyError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_policy::builders::PutBucketPolicyFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketReplication: replaces the whole replication sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_replication::PutBucketReplicationOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_replication::PutBucketReplicationError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_replication::PutBucketReplicationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_replication::PutBucketReplicationError;
 
     const NAME: &'static str = "s3.PutBucketReplication";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::put_bucket_replication::PutBucketReplicationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_replication::PutBucketReplicationError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_replication::builders::PutBucketReplicationFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketTagging: replaces the whole tag set keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_tagging::PutBucketTaggingOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_tagging::PutBucketTaggingError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_tagging::PutBucketTaggingOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_tagging::PutBucketTaggingError;
 
     const NAME: &'static str = "s3.PutBucketTagging";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_tagging::PutBucketTaggingError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_tagging::PutBucketTaggingError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_tagging::builders::PutBucketTaggingFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketVersioning: sets the complete versioning state keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_versioning::PutBucketVersioningOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_versioning::PutBucketVersioningError;
 
     const NAME: &'static str = "s3.PutBucketVersioning";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::put_bucket_versioning::PutBucketVersioningError
+    for carina_aws_types::sdk::s3::operation::put_bucket_versioning::PutBucketVersioningError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_versioning::builders::PutBucketVersioningFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutBucketWebsite: replaces the whole website sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_bucket_website::PutBucketWebsiteOutput;
-    type Error = aws_sdk_s3::operation::put_bucket_website::PutBucketWebsiteError;
+    type Output = carina_aws_types::sdk::s3::operation::put_bucket_website::PutBucketWebsiteOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_bucket_website::PutBucketWebsiteError;
 
     const NAME: &'static str = "s3.PutBucketWebsite";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_s3::operation::put_bucket_website::PutBucketWebsiteError {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::s3::operation::put_bucket_website::PutBucketWebsiteError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_bucket_website::builders::PutBucketWebsiteFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// PutObjectLockConfiguration: replaces the whole object-lock sub-configuration keyed by bucket
-impl AwsOperation for aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder {
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_object_lock_configuration::PutObjectLockConfigurationOutput;
-    type Error = aws_sdk_s3::operation::put_object_lock_configuration::PutObjectLockConfigurationError;
+    type Output = carina_aws_types::sdk::s3::operation::put_object_lock_configuration::PutObjectLockConfigurationOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_object_lock_configuration::PutObjectLockConfigurationError;
 
     const NAME: &'static str = "s3.PutObjectLockConfiguration";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError
-    for aws_sdk_s3::operation::put_object_lock_configuration::PutObjectLockConfigurationError
-{
-    const NAME: &'static str = <aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::s3::operation::put_object_lock_configuration::PutObjectLockConfigurationError {
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder {
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_object_lock_configuration::builders::PutObjectLockConfigurationFluentBuilder {
     fn send(
         self,
         (): (),
@@ -6106,52 +5535,53 @@ impl DecidedSend<()> for aws_sdk_s3::operation::put_object_lock_configuration::b
 }
 
 /// PutPublicAccessBlock: replaces the whole public-access-block sub-configuration keyed by bucket
-impl AwsOperation
-    for aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_s3::operation::put_public_access_block::PutPublicAccessBlockOutput;
-    type Error = aws_sdk_s3::operation::put_public_access_block::PutPublicAccessBlockError;
+    type Output = carina_aws_types::sdk::s3::operation::put_public_access_block::PutPublicAccessBlockOutput;
+    type Error = carina_aws_types::sdk::s3::operation::put_public_access_block::PutPublicAccessBlockError;
 
     const NAME: &'static str = "s3.PutPublicAccessBlock";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_s3::operation::put_public_access_block::PutPublicAccessBlockError
+    for carina_aws_types::sdk::s3::operation::put_public_access_block::PutPublicAccessBlockError
 {
-    const NAME: &'static str = <aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::put_public_access_block::builders::PutPublicAccessBlockFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// CreateQueue: creates a top-level queue without an idempotency token
-impl AwsOperation for aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::sqs::operation::create_queue::builders::CreateQueueFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::create_queue::CreateQueueOutput;
-    type Error = aws_sdk_sqs::operation::create_queue::CreateQueueError;
+    type Output = carina_aws_types::sdk::sqs::operation::create_queue::CreateQueueOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::create_queue::CreateQueueError;
 
     const NAME: &'static str = "sqs.CreateQueue";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_sqs::operation::create_queue::CreateQueueError {
-    const NAME: &'static str = <aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::sqs::operation::create_queue::CreateQueueError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::create_queue::builders::CreateQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_sqs::operation::create_queue::builders::CreateQueueFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::sqs::operation::create_queue::builders::CreateQueueFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -6162,21 +5592,27 @@ impl DecidedSend<()> for aws_sdk_sqs::operation::create_queue::builders::CreateQ
 }
 
 /// DeleteQueue: the provider does not accept an already-absent queue as success
-impl AwsOperation for aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::delete_queue::DeleteQueueOutput;
-    type Error = aws_sdk_sqs::operation::delete_queue::DeleteQueueError;
+    type Output = carina_aws_types::sdk::sqs::operation::delete_queue::DeleteQueueOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::delete_queue::DeleteQueueError;
 
     const NAME: &'static str = "sqs.DeleteQueue";
     const IDEMPOTENCY: Idempotency = Idempotency::NotIdempotent;
 }
 
-impl DecidedOperationError for aws_sdk_sqs::operation::delete_queue::DeleteQueueError {
-    const NAME: &'static str = <aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::sqs::operation::delete_queue::DeleteQueueError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::sqs::operation::delete_queue::builders::DeleteQueueFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -6187,55 +5623,52 @@ impl DecidedSend<()> for aws_sdk_sqs::operation::delete_queue::builders::DeleteQ
 }
 
 /// GetQueueAttributes: reads queue state and has no side effects
-impl AwsOperation
-    for aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesOutput;
-    type Error = aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesError;
+    type Output = carina_aws_types::sdk::sqs::operation::get_queue_attributes::GetQueueAttributesOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::get_queue_attributes::GetQueueAttributesError;
 
     const NAME: &'static str = "sqs.GetQueueAttributes";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
 impl DecidedOperationError
-    for aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesError
+    for carina_aws_types::sdk::sqs::operation::get_queue_attributes::GetQueueAttributesError
 {
-    const NAME: &'static str = <aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::sqs::operation::get_queue_attributes::builders::GetQueueAttributesFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// ListQueueTags: reads queue tags and has no side effects
 impl AwsOperation
-    for aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
+    for carina_aws_types::sdk::sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
 {
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsOutput;
-    type Error = aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsError;
+    type Output = carina_aws_types::sdk::sqs::operation::list_queue_tags::ListQueueTagsOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::list_queue_tags::ListQueueTagsError;
 
     const NAME: &'static str = "sqs.ListQueueTags";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsError {
-    const NAME: &'static str = <aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::sqs::operation::list_queue_tags::ListQueueTagsError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
 impl DecidedSend<()>
-    for aws_sdk_sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
+    for carina_aws_types::sdk::sqs::operation::list_queue_tags::builders::ListQueueTagsFluentBuilder
 {
     fn send(
         self,
@@ -6247,53 +5680,51 @@ impl DecidedSend<()>
 }
 
 /// SetQueueAttributes: sets complete values for named queue attributes
-impl AwsOperation
-    for aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::set_queue_attributes::SetQueueAttributesOutput;
-    type Error = aws_sdk_sqs::operation::set_queue_attributes::SetQueueAttributesError;
+    type Output = carina_aws_types::sdk::sqs::operation::set_queue_attributes::SetQueueAttributesOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::set_queue_attributes::SetQueueAttributesError;
 
     const NAME: &'static str = "sqs.SetQueueAttributes";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
 impl DecidedOperationError
-    for aws_sdk_sqs::operation::set_queue_attributes::SetQueueAttributesError
+    for carina_aws_types::sdk::sqs::operation::set_queue_attributes::SetQueueAttributesError
 {
-    const NAME: &'static str = <aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::sqs::operation::set_queue_attributes::builders::SetQueueAttributesFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }
 
 /// TagQueue: sets tag keys on one queue; repeating the same values has no additional effect
-impl AwsOperation for aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::sqs::operation::tag_queue::builders::TagQueueFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::tag_queue::TagQueueOutput;
-    type Error = aws_sdk_sqs::operation::tag_queue::TagQueueError;
+    type Output = carina_aws_types::sdk::sqs::operation::tag_queue::TagQueueOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::tag_queue::TagQueueError;
 
     const NAME: &'static str = "sqs.TagQueue";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_sqs::operation::tag_queue::TagQueueError {
-    const NAME: &'static str =
-        <aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::sqs::operation::tag_queue::TagQueueError {
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::tag_queue::builders::TagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_sqs::operation::tag_queue::builders::TagQueueFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::sqs::operation::tag_queue::builders::TagQueueFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -6304,21 +5735,25 @@ impl DecidedSend<()> for aws_sdk_sqs::operation::tag_queue::builders::TagQueueFl
 }
 
 /// UntagQueue: removes named tag keys; repeating the removal leaves the same state
-impl AwsOperation for aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
+impl AwsOperation
+    for carina_aws_types::sdk::sqs::operation::untag_queue::builders::UntagQueueFluentBuilder
+{
     type Resend = NoToken;
-    type Output = aws_sdk_sqs::operation::untag_queue::UntagQueueOutput;
-    type Error = aws_sdk_sqs::operation::untag_queue::UntagQueueError;
+    type Output = carina_aws_types::sdk::sqs::operation::untag_queue::UntagQueueOutput;
+    type Error = carina_aws_types::sdk::sqs::operation::untag_queue::UntagQueueError;
 
     const NAME: &'static str = "sqs.UntagQueue";
     const IDEMPOTENCY: Idempotency = Idempotency::Idempotent;
 }
 
-impl DecidedOperationError for aws_sdk_sqs::operation::untag_queue::UntagQueueError {
-    const NAME: &'static str = <aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError for carina_aws_types::sdk::sqs::operation::untag_queue::UntagQueueError {
+    const NAME: &'static str = <carina_aws_types::sdk::sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sqs::operation::untag_queue::builders::UntagQueueFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()> for aws_sdk_sqs::operation::untag_queue::builders::UntagQueueFluentBuilder {
+impl DecidedSend<()>
+    for carina_aws_types::sdk::sqs::operation::untag_queue::builders::UntagQueueFluentBuilder
+{
     fn send(
         self,
         (): (),
@@ -6329,30 +5764,27 @@ impl DecidedSend<()> for aws_sdk_sqs::operation::untag_queue::builders::UntagQue
 }
 
 /// GetCallerIdentity: reads caller identity and has no side effects
-impl AwsOperation
-    for aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder
-{
+impl AwsOperation for carina_aws_types::sdk::sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder {
     type Resend = NoToken;
-    type Output = aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityOutput;
-    type Error = aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError;
+    type Output = carina_aws_types::sdk::sts::operation::get_caller_identity::GetCallerIdentityOutput;
+    type Error = carina_aws_types::sdk::sts::operation::get_caller_identity::GetCallerIdentityError;
 
     const NAME: &'static str = "sts.GetCallerIdentity";
     const IDEMPOTENCY: Idempotency = Idempotency::ReadOnly;
 }
 
-impl DecidedOperationError for aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityError {
-    const NAME: &'static str = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::NAME;
-    const IDEMPOTENCY: Idempotency = <aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::IDEMPOTENCY;
+impl DecidedOperationError
+    for carina_aws_types::sdk::sts::operation::get_caller_identity::GetCallerIdentityError
+{
+    const NAME: &'static str = <carina_aws_types::sdk::sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::NAME;
+    const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder as AwsOperation>::IDEMPOTENCY;
 }
 
-impl DecidedSend<()>
-    for aws_sdk_sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder
-{
+impl DecidedSend<()> for carina_aws_types::sdk::sts::operation::get_caller_identity::builders::GetCallerIdentityFluentBuilder {
     fn send(
         self,
         (): (),
-    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>> + Send {
         self.send()
     }
 }

@@ -6,9 +6,9 @@
 
 use std::fmt;
 
-use aws_sdk_identitystore::operation::describe_user::DescribeUserError;
-use aws_sdk_identitystore::operation::get_user_id::GetUserIdError;
-use aws_sdk_identitystore::types::{AlternateIdentifier, UniqueAttribute};
+use carina_aws_types::sdk::identitystore::operation::describe_user::DescribeUserError;
+use carina_aws_types::sdk::identitystore::operation::get_user_id::GetUserIdError;
+use carina_aws_types::sdk::identitystore::types::{AlternateIdentifier, UniqueAttribute};
 use carina_core::provider::{BoxFuture, ProviderError, ProviderResult};
 use carina_core::resource::{
     AbsoluteBindingAddress, ConcreteValue, DataSource, NoPlaceholder, State, Value,
@@ -182,7 +182,7 @@ async fn resolve_user_id(
 /// map for `identitystore.user`. Extracted from the read path so it can be
 /// unit-tested without hitting the AWS SDK.
 pub(crate) fn extract_identitystore_user(
-    resp: &aws_sdk_identitystore::operation::describe_user::DescribeUserOutput,
+    resp: &carina_aws_types::sdk::identitystore::operation::describe_user::DescribeUserOutput,
 ) -> IdentitystoreUserDataSourceReadModel {
     let string_value =
         |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
@@ -211,7 +211,7 @@ pub(crate) fn extract_identitystore_user(
     let email_values: Vec<Value> = resp
         .emails()
         .iter()
-        .filter_map(|e: &aws_sdk_identitystore::types::Email| {
+        .filter_map(|e: &carina_aws_types::sdk::identitystore::types::Email| {
             e.value()
                 .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())))
         })
@@ -231,13 +231,15 @@ pub(crate) fn extract_identitystore_user(
 mod tests {
     use super::*;
     use crate::read_model::DataSourceReadModel;
-    use aws_sdk_identitystore::error::SdkError;
-    use aws_sdk_identitystore::operation::describe_user::{DescribeUserError, DescribeUserOutput};
-    use aws_sdk_identitystore::types::error::AccessDeniedException;
-    use aws_sdk_identitystore::types::{Email, Name};
     use aws_smithy_runtime_api::http::{Response, StatusCode};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ErrorMetadata;
+    use carina_aws_types::sdk::identitystore::error::SdkError;
+    use carina_aws_types::sdk::identitystore::operation::describe_user::{
+        DescribeUserError, DescribeUserOutput,
+    };
+    use carina_aws_types::sdk::identitystore::types::error::AccessDeniedException;
+    use carina_aws_types::sdk::identitystore::types::{Email, Name};
 
     fn extract_attributes(resp: &DescribeUserOutput) -> std::collections::HashMap<String, Value> {
         extract_identitystore_user(resp)

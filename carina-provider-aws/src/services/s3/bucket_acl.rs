@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
+use carina_aws_types::sdk::s3::types::{BucketCannedAcl, Grant, Permission, Type as GranteeType};
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{
@@ -238,7 +238,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_s3::types::Grantee;
+    use carina_aws_types::sdk::s3::types::Grantee;
     use carina_core::differ::Diff;
     use carina_core::provider::RawSavedAttrs;
     use carina_core::resource::{ResolvedResource, Resource};

@@ -77,7 +77,7 @@ impl AwsProvider {
                 builder.vpc_id(&vpc_id).tag_specifications(
                     build_tag_specification_with_create_token(
                         tags.as_ref(),
-                        aws_sdk_ec2::types::ResourceType::EgressOnlyInternetGateway,
+                        carina_aws_types::sdk::ec2::types::ResourceType::EgressOnlyInternetGateway,
                         client_token,
                     ),
                 )

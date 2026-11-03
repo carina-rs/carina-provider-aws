@@ -51,7 +51,7 @@ struct FlowLogCreateRejection {
 
 impl FlowLogCreateRejection {
     fn from_output(
-        output: &aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput,
+        output: &carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsOutput,
     ) -> Option<Self> {
         if !output.flow_log_ids().is_empty() {
             return None;
@@ -71,7 +71,9 @@ impl FlowLogCreateRejection {
     }
 
     fn from_failure(
-        failure: &SendFailure<aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError>,
+        failure: &SendFailure<
+            carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError,
+        >,
     ) -> Option<Self> {
         use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 
@@ -117,7 +119,7 @@ fn build_tag_field_specifications(
     id: &ResourceId,
     value: Option<&Value>,
     schema: &CompiledResourceSchema,
-) -> ProviderResult<Option<Vec<aws_sdk_ec2::types::TagFieldSpecificationRequest>>> {
+) -> ProviderResult<Option<Vec<carina_aws_types::sdk::ec2::types::TagFieldSpecificationRequest>>> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -144,24 +146,28 @@ fn build_tag_field_specifications(
                 fields.get("resource_type"),
             )
             .map_err(|error| enum_attr_error(id, error))?
-            .map(|value| aws_sdk_ec2::types::TaggableResourceType::from(value.api_value()));
+            .map(|value| {
+                carina_aws_types::sdk::ec2::types::TaggableResourceType::from(value.api_value())
+            });
             let tag_keys = crate::send_model::optional_string_list_value(
                 id,
                 "tag_field_specifications.tag_keys",
                 fields.get("tag_keys"),
             )?;
 
-            Ok(aws_sdk_ec2::types::TagFieldSpecificationRequest::builder()
-                .set_resource_type(resource_type)
-                .set_tag_keys(tag_keys)
-                .build())
+            Ok(
+                carina_aws_types::sdk::ec2::types::TagFieldSpecificationRequest::builder()
+                    .set_resource_type(resource_type)
+                    .set_tag_keys(tag_keys)
+                    .build(),
+            )
         })
         .collect::<ProviderResult<Vec<_>>>()
         .map(Some)
 }
 
 fn tag_field_specifications_value(
-    specifications: &[aws_sdk_ec2::types::TagFieldSpecificationResponse],
+    specifications: &[carina_aws_types::sdk::ec2::types::TagFieldSpecificationResponse],
 ) -> Option<Value> {
     (!specifications.is_empty()).then(|| {
         Value::Concrete(ConcreteValue::List(
@@ -342,21 +348,23 @@ impl AwsProvider {
         let mut req = self.ec2_client.create_flow_logs().configure(|builder| {
             builder
                 .set_resource_ids(Some(resource_ids.clone()))
-                .resource_type(aws_sdk_ec2::types::FlowLogsResourceType::from(
-                    resource_type.as_str(),
-                ))
+                .resource_type(
+                    carina_aws_types::sdk::ec2::types::FlowLogsResourceType::from(
+                        resource_type.as_str(),
+                    ),
+                )
                 .set_tag_field_specifications(tag_field_specifications.clone())
         });
 
         if let Some(traffic_type) = traffic_type {
-            use aws_sdk_ec2::types::TrafficType;
+            use carina_aws_types::sdk::ec2::types::TrafficType;
             req = req.configure(|builder| {
                 builder.traffic_type(TrafficType::from(traffic_type.as_str()))
             });
         }
 
         if let Some(log_dest_type) = log_destination_type {
-            use aws_sdk_ec2::types::LogDestinationType;
+            use carina_aws_types::sdk::ec2::types::LogDestinationType;
             req = req.configure(|builder| {
                 builder.log_destination_type(LogDestinationType::from(log_dest_type.as_str()))
             });
@@ -395,7 +403,7 @@ impl AwsProvider {
             let request = req.clone().configure(|builder| {
                 builder.tag_specifications(build_tag_specification_with_create_token(
                     tags.as_ref(),
-                    aws_sdk_ec2::types::ResourceType::VpcFlowLog,
+                    carina_aws_types::sdk::ec2::types::ResourceType::VpcFlowLog,
                     request_token.as_client_token(),
                 ))
             });
@@ -578,18 +586,20 @@ impl AwsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_ec2::error::SdkError;
-    use aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsError;
-    use aws_sdk_ec2::types::{UnsuccessfulItem, UnsuccessfulItemError};
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
+    use carina_aws_types::sdk::ec2::error::SdkError;
+    use carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError;
+    use carina_aws_types::sdk::ec2::types::{UnsuccessfulItem, UnsuccessfulItemError};
 
     #[test]
     fn proven_rejection_rotates_the_flow_log_client_token() {
         let invocation_token = ClientToken::new();
         let attempt_token = FlowLogRequestToken::from_invocation(&invocation_token);
-        let output = aws_sdk_ec2::operation::create_flow_logs::CreateFlowLogsOutput::builder()
+        let output =
+            carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsOutput::builder(
+            )
             .unsuccessful(
                 UnsuccessfulItem::builder()
                     .error(

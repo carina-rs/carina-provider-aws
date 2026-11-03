@@ -213,6 +213,19 @@ use resend_safety_generated::{
 };
 
 /// AWS Provider
+///
+/// Service SDKs are available only through `carina_aws_types::sdk`.
+/// Provider code cannot use the SDK's raw client constructors:
+///
+/// ```compile_fail
+/// use aws_sdk_s3::Client;
+/// ```
+///
+/// The same import works through the guarded facade:
+///
+/// ```
+/// use carina_aws_types::sdk::s3::S3Client;
+/// ```
 pub struct AwsProvider {
     s3_client: S3Client,
     ec2_client: Ec2Client,
@@ -250,7 +263,7 @@ impl AwsProvider {
     /// [`AwsProvider::verify_account_id`] is called.
     ///
     /// `assume_role`, when present, layers an
-    /// [`aws_config::sts::AssumeRoleProvider`] over the base credentials
+    /// [`carina_aws_types::GuardedAssumeRoleProvider`] over the base credentials
     /// (host-supplied on wasm32, the default chain natively) so all SDK
     /// calls go out under the assumed-role session.
     pub async fn new_with_account_guard(

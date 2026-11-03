@@ -21,7 +21,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -90,10 +90,12 @@ impl AwsProvider {
         let mut req = self
             .ec2_client
             .create_vpn_gateway()
-            .r#type(aws_sdk_ec2::types::GatewayType::from(gateway_type.as_str()))
+            .r#type(carina_aws_types::sdk::ec2::types::GatewayType::from(
+                gateway_type.as_str(),
+            ))
             .tag_specifications(build_tag_specification_with_create_token(
                 tags.as_ref(),
-                aws_sdk_ec2::types::ResourceType::VpnGateway,
+                carina_aws_types::sdk::ec2::types::ResourceType::VpnGateway,
                 client_token,
             ));
 

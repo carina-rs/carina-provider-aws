@@ -12,10 +12,10 @@
 
 use std::collections::HashMap;
 
-use aws_sdk_acm::operation::request_certificate::{
+use carina_aws_types::sdk::acm::operation::request_certificate::{
     RequestCertificateError, RequestCertificateInput,
 };
-use aws_sdk_acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
+use carina_aws_types::sdk::acm::types::{CertificateStatus, KeyAlgorithm, ValidationMethod};
 use indexmap::IndexMap;
 
 use carina_core::provider::{AppliedIdentifier, Observation, ReadOutcome};
@@ -217,7 +217,7 @@ fn build_request_certificate_input(
     if let Some(tag_map) = tags {
         for (key, value) in tag_map {
             sdk_tags.push(
-                aws_sdk_acm::types::Tag::builder()
+                carina_aws_types::sdk::acm::types::Tag::builder()
                     .key(key)
                     .value(value)
                     .build()
@@ -250,10 +250,10 @@ fn build_create_certificate_options(
     id: &ResourceId,
     value: Option<&Value>,
     schema: &CompiledResourceSchema,
-) -> ProviderResult<Option<aws_sdk_acm::types::CertificateOptions>> {
-    use aws_sdk_acm::types::CertificateExport;
+) -> ProviderResult<Option<carina_aws_types::sdk::acm::types::CertificateOptions>> {
+    use carina_aws_types::sdk::acm::types::CertificateExport;
 
-    let mut options = aws_sdk_acm::types::CertificateOptions::builder();
+    let mut options = carina_aws_types::sdk::acm::types::CertificateOptions::builder();
     let mut has_options = false;
 
     let field = |name| {
@@ -269,7 +269,9 @@ fn build_create_certificate_options(
     if let Some(pref) = field("certificate_transparency_logging_preference")? {
         #[allow(deprecated)]
         let configured = options.certificate_transparency_logging_preference(
-            aws_sdk_acm::types::CertificateTransparencyLoggingPreference::from(pref.api_value()),
+            carina_aws_types::sdk::acm::types::CertificateTransparencyLoggingPreference::from(
+                pref.api_value(),
+            ),
         );
         options = configured;
         has_options = true;
@@ -317,7 +319,9 @@ impl CertificateDetailReadFields {
     }
 }
 
-fn domain_validations_value(validations: &[aws_sdk_acm::types::DomainValidation]) -> Value {
+fn domain_validations_value(
+    validations: &[carina_aws_types::sdk::acm::types::DomainValidation],
+) -> Value {
     let mut list = Vec::with_capacity(validations.len());
     for validation in validations {
         let mut fields = IndexMap::new();
@@ -369,7 +373,7 @@ fn domain_validations_value(validations: &[aws_sdk_acm::types::DomainValidation]
 /// Typed projection of a `DescribeCertificate` response. Tags are fetched by
 /// the caller through ACM's separate tag API.
 fn certificate_detail_read_fields(
-    cert: &aws_sdk_acm::types::CertificateDetail,
+    cert: &carina_aws_types::sdk::acm::types::CertificateDetail,
 ) -> CertificateDetailReadFields {
     let extracted = AwsProvider::extract_acm_certificate_attributes(cert);
     let string_value =
@@ -441,12 +445,16 @@ fn certificate_detail_read_fields(
     }
 }
 
-fn dvo_resource_records_populated(cert: &aws_sdk_acm::types::CertificateDetail) -> bool {
+fn dvo_resource_records_populated(
+    cert: &carina_aws_types::sdk::acm::types::CertificateDetail,
+) -> bool {
     let dvs = cert.domain_validation_options();
     !dvs.is_empty() && dvs.iter().all(|dv| dv.resource_record().is_some())
 }
 
-fn failed_certificate_reason(cert: &aws_sdk_acm::types::CertificateDetail) -> Option<String> {
+fn failed_certificate_reason(
+    cert: &carina_aws_types::sdk::acm::types::CertificateDetail,
+) -> Option<String> {
     if cert.status() != Some(&CertificateStatus::Failed) {
         return None;
     }
@@ -466,7 +474,9 @@ enum DvoReadiness {
     Failed(String),
 }
 
-fn classify_dvo(cert: Option<&aws_sdk_acm::types::CertificateDetail>) -> DvoReadiness {
+fn classify_dvo(
+    cert: Option<&carina_aws_types::sdk::acm::types::CertificateDetail>,
+) -> DvoReadiness {
     match cert {
         Some(cert) => {
             if let Some(reason) = failed_certificate_reason(cert) {
@@ -662,7 +672,7 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         identifier: &AppliedIdentifier,
-        cert: Option<&aws_sdk_acm::types::CertificateDetail>,
+        cert: Option<&carina_aws_types::sdk::acm::types::CertificateDetail>,
     ) -> ProviderResult<ReadOutcome> {
         let Some(cert) = cert else {
             return Ok(ReadOutcome::not_found(id.clone()));
@@ -745,7 +755,7 @@ impl AwsProvider {
                 .add_tags_to_certificate()
                 .certificate_arn(arn);
             for (k, v) in to_add {
-                let tag = aws_sdk_acm::types::Tag::builder()
+                let tag = carina_aws_types::sdk::acm::types::Tag::builder()
                     .key(k)
                     .value(v)
                     .build()
@@ -767,7 +777,7 @@ impl AwsProvider {
                 .certificate_arn(arn);
             for k in to_remove {
                 // RemoveTagsFromCertificate accepts a Tag with just `key`.
-                let tag = aws_sdk_acm::types::Tag::builder()
+                let tag = carina_aws_types::sdk::acm::types::Tag::builder()
                     .key(k)
                     .build()
                     .map_err(|e| {
@@ -807,15 +817,15 @@ impl AwsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_acm::error::SdkError;
     use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
+    use carina_aws_types::sdk::acm::error::SdkError;
 
     fn acm_schema() -> &'static CompiledResourceSchema {
         crate::test_resource_schema("acm.Certificate")
     }
-    use aws_sdk_acm::types::{
+    use carina_aws_types::sdk::acm::types::{
         CertificateDetail, CertificateExport, CertificateOptions, DomainValidation, RecordType,
         ResourceRecord,
     };
@@ -968,7 +978,7 @@ mod tests {
         let cert = CertificateDetail::builder()
             .domain_name("registry.example.com")
             .certificate_arn("arn:aws:acm:us-east-1:111:certificate/abc")
-            .status(aws_sdk_acm::types::CertificateStatus::Issued)
+            .status(carina_aws_types::sdk::acm::types::CertificateStatus::Issued)
             .build();
 
         let fields = certificate_detail_read_fields(&cert);
@@ -998,7 +1008,7 @@ mod tests {
         #[allow(deprecated)]
         let options = CertificateOptions::builder()
             .certificate_transparency_logging_preference(
-                aws_sdk_acm::types::CertificateTransparencyLoggingPreference::Enabled,
+                carina_aws_types::sdk::acm::types::CertificateTransparencyLoggingPreference::Enabled,
             )
             .build();
         let cert = CertificateDetail::builder()
@@ -1187,7 +1197,7 @@ mod tests {
     fn dvo_failed_is_terminal_and_keeps_failure_reason() {
         let cert = CertificateDetail::builder()
             .status(CertificateStatus::Failed)
-            .failure_reason(aws_sdk_acm::types::FailureReason::DomainNotAllowed)
+            .failure_reason(carina_aws_types::sdk::acm::types::FailureReason::DomainNotAllowed)
             .build();
         let DvoReadiness::Failed(reason) = classify_dvo(Some(&cert)) else {
             panic!("FAILED must be terminal")

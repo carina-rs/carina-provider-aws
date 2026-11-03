@@ -29,17 +29,17 @@ pub(crate) struct SecurityGroupRuleSendInput {
 
 fn build_security_group_rule_permission(
     input: &SecurityGroupRuleSendInput,
-) -> aws_sdk_ec2::types::IpPermission {
+) -> carina_aws_types::sdk::ec2::types::IpPermission {
     let from_port = input.from_port.unwrap_or_default() as i32;
     let to_port = input.to_port.unwrap_or_default() as i32;
 
-    let mut permission_builder = aws_sdk_ec2::types::IpPermission::builder()
+    let mut permission_builder = carina_aws_types::sdk::ec2::types::IpPermission::builder()
         .ip_protocol(&input.ip_protocol)
         .from_port(from_port)
         .to_port(to_port);
 
     if let Some(ref cidr) = input.cidr_ip {
-        let mut range_builder = aws_sdk_ec2::types::IpRange::builder().cidr_ip(cidr);
+        let mut range_builder = carina_aws_types::sdk::ec2::types::IpRange::builder().cidr_ip(cidr);
         if let Some(ref desc) = input.description {
             range_builder = range_builder.description(desc);
         }
@@ -47,7 +47,8 @@ fn build_security_group_rule_permission(
     }
 
     if let Some(ref cidr_v6) = input.cidr_ipv6 {
-        let mut range_builder = aws_sdk_ec2::types::Ipv6Range::builder().cidr_ipv6(cidr_v6);
+        let mut range_builder =
+            carina_aws_types::sdk::ec2::types::Ipv6Range::builder().cidr_ipv6(cidr_v6);
         if let Some(ref desc) = input.description {
             range_builder = range_builder.description(desc);
         }
@@ -55,7 +56,8 @@ fn build_security_group_rule_permission(
     }
 
     if let Some(ref pl_id) = input.prefix_list_id {
-        let mut pl_builder = aws_sdk_ec2::types::PrefixListId::builder().prefix_list_id(pl_id);
+        let mut pl_builder =
+            carina_aws_types::sdk::ec2::types::PrefixListId::builder().prefix_list_id(pl_id);
         if let Some(ref desc) = input.description {
             pl_builder = pl_builder.description(desc);
         }
@@ -63,7 +65,8 @@ fn build_security_group_rule_permission(
     }
 
     if let Some(ref ref_sg_id) = input.referenced_security_group_id {
-        let mut pair_builder = aws_sdk_ec2::types::UserIdGroupPair::builder().group_id(ref_sg_id);
+        let mut pair_builder =
+            carina_aws_types::sdk::ec2::types::UserIdGroupPair::builder().group_id(ref_sg_id);
         if let Some(owner_id) = &input.source_security_group_owner_id {
             pair_builder = pair_builder.user_id(owner_id);
         }
@@ -188,7 +191,7 @@ impl AwsProvider {
         &self,
         resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
         sg_id: String,
-        permission: aws_sdk_ec2::types::IpPermission,
+        permission: carina_aws_types::sdk::ec2::types::IpPermission,
         is_ingress: bool,
     ) -> ProviderResult<(AppliedIdentifier, ProviderResult<ReadOutcome>)> {
         let rule_ids: Vec<String> = if is_ingress {
@@ -361,10 +364,10 @@ mod tests {
 
     #[test]
     fn test_security_group_rule_referenced_group() {
-        let ref_group = aws_sdk_ec2::types::ReferencedSecurityGroup::builder()
+        let ref_group = carina_aws_types::sdk::ec2::types::ReferencedSecurityGroup::builder()
             .group_id("sg-ref-12345678")
             .build();
-        let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+        let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
             .security_group_rule_id("sgr-12345678")
             .group_id("sg-12345678")
             .ip_protocol("tcp")
@@ -389,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_security_group_rule_cidr_ipv4() {
-        let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+        let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
             .security_group_rule_id("sgr-12345678")
             .group_id("sg-12345678")
             .ip_protocol("tcp")
@@ -415,11 +418,11 @@ mod tests {
 
     #[test]
     fn test_security_group_rule_is_egress_filtering() {
-        let ingress_rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+        let ingress_rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
             .security_group_rule_id("sgr-ingress")
             .is_egress(false)
             .build();
-        let egress_rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+        let egress_rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
             .security_group_rule_id("sgr-egress")
             .is_egress(true)
             .build();

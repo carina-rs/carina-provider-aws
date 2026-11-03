@@ -47,10 +47,6 @@ struct Args {
     #[arg(long, value_enum, default_value = "rust")]
     format: OutputFormat,
 
-    /// Workspace Clippy configuration generated with provider resend safety.
-    #[arg(long)]
-    clippy_config: Option<PathBuf>,
-
     /// Directory containing generated-doc examples (`<service>_<page>/main.crn`); required for markdown.
     #[arg(long)]
     examples_dir: Option<PathBuf>,
@@ -77,7 +73,6 @@ struct ResolvedArgs {
     output_dir: PathBuf,
     resource: Option<String>,
     output_mode: OutputMode,
-    clippy_config: Option<PathBuf>,
 }
 
 impl TryFrom<Args> for ResolvedArgs {
@@ -89,7 +84,6 @@ impl TryFrom<Args> for ResolvedArgs {
             output_dir,
             resource,
             format,
-            clippy_config,
             examples_dir,
         } = args;
 
@@ -116,7 +110,6 @@ impl TryFrom<Args> for ResolvedArgs {
             output_dir,
             resource,
             output_mode,
-            clippy_config,
         })
     }
 }
@@ -853,15 +846,6 @@ fn run(args: ResolvedArgs) -> Result<()> {
             std::fs::write(&resend_safety_path, resend_safety)
                 .with_context(|| format!("Failed to write {}", resend_safety_path.display()))?;
             eprintln!("Generated: {}", resend_safety_path.display());
-
-            if let Some(clippy_config_path) = &args.clippy_config {
-                let clippy_config = carina_codegen_aws::resend_safety::generate_clippy_config(
-                    carina_codegen_aws::resend_safety::OVERRIDES,
-                );
-                std::fs::write(clippy_config_path, clippy_config)
-                    .with_context(|| format!("Failed to write {}", clippy_config_path.display()))?;
-                eprintln!("Generated: {}", clippy_config_path.display());
-            }
         }
         OutputMode::Markdown { examples_dir } => {
             run_markdown(
@@ -5323,13 +5307,13 @@ fn op_suffix(operation: &str, identifier: &str) -> String {
     without_id.to_snake_case()
 }
 
-/// Get the SDK crate name from a service namespace.
-/// e.g., "com.amazonaws.s3" -> "aws_sdk_s3"
+/// Get the SDK facade path from a service namespace.
+/// e.g., "com.amazonaws.s3" -> "carina_aws_types::sdk::s3"
 fn sdk_crate_name(service_namespace: &str) -> String {
     let service = service_namespace
         .strip_prefix("com.amazonaws.")
         .unwrap_or(service_namespace);
-    format!("aws_sdk_{}", service)
+    format!("carina_aws_types::sdk::{}", service)
 }
 
 /// Get the client field name from a service namespace.
@@ -9344,7 +9328,6 @@ mod tests {
             output_dir: PathBuf::from("output"),
             resource: None,
             format,
-            clippy_config: None,
             examples_dir,
         }
     }
@@ -9480,7 +9463,6 @@ mod tests {
             output_dir: output_dir.path().to_path_buf(),
             resource: Some("ec2.Vpc".to_string()),
             output_mode: OutputMode::Markdown { examples_dir },
-            clippy_config: None,
         })
         .expect("--resource must not make other page examples look unmatched");
 

@@ -5,7 +5,7 @@
 
 use indexmap::IndexMap;
 
-use aws_sdk_route53::types::{
+use carina_aws_types::sdk::route53::types::{
     AliasTarget, Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
 };
 

@@ -6,7 +6,7 @@ use carina_core::resource::{
 };
 use carina_core::schema::CompiledResourceSchema;
 
-use aws_sdk_ec2::types::TransitGatewayState;
+use carina_aws_types::sdk::ec2::types::TransitGatewayState;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -58,8 +58,8 @@ fn build_create_transit_gateway_options(
     id: &ResourceId,
     options_value: Option<&Value>,
     schema: &CompiledResourceSchema,
-) -> ProviderResult<Option<aws_sdk_ec2::types::TransitGatewayRequestOptions>> {
-    use aws_sdk_ec2::types::{
+) -> ProviderResult<Option<carina_aws_types::sdk::ec2::types::TransitGatewayRequestOptions>> {
+    use carina_aws_types::sdk::ec2::types::{
         AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
         DefaultRouteTablePropagationValue, DnsSupportValue, MulticastSupportValue,
         SecurityGroupReferencingSupportValue, VpnEcmpSupportValue,
@@ -73,7 +73,7 @@ fn build_create_transit_gateway_options(
         .attributes
         .insert("options".to_string(), options_value.clone());
     let resource = &projected;
-    let mut options = aws_sdk_ec2::types::TransitGatewayRequestOptions::builder();
+    let mut options = carina_aws_types::sdk::ec2::types::TransitGatewayRequestOptions::builder();
     let mut has_options = false;
 
     if let Some(asn) = optional_int_struct_field(resource, "options", "amazon_side_asn") {
@@ -227,7 +227,7 @@ impl AwsProvider {
 
         req = req.tag_specifications(build_tag_specification_with_create_token(
             tags.as_ref(),
-            aws_sdk_ec2::types::ResourceType::TransitGateway,
+            carina_aws_types::sdk::ec2::types::ResourceType::TransitGateway,
             client_token,
         ));
 
@@ -346,7 +346,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_ec2::types::{
+    use carina_aws_types::sdk::ec2::types::{
         AutoAcceptSharedAttachmentsValue, DefaultRouteTableAssociationValue,
         DefaultRouteTablePropagationValue, DnsSupportValue, MulticastSupportValue,
         SecurityGroupReferencingSupportValue, TransitGateway, TransitGatewayOptions,

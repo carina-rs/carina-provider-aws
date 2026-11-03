@@ -2914,7 +2914,9 @@ impl AwsProvider {
     }
 
     /// Extract ec2.Vpc attributes from SDK response type (generated)
-    pub(crate) fn extract_ec2_vpc_attributes(obj: &aws_sdk_ec2::types::Vpc) -> Ec2VpcReadFields {
+    pub(crate) fn extract_ec2_vpc_attributes(
+        obj: &carina_aws_types::sdk::ec2::types::Vpc,
+    ) -> Ec2VpcReadFields {
         let cidr_block = obj
             .cidr_block()
             .map(|v| Value::Concrete(ConcreteValue::String(v.to_string().into())));
@@ -2935,7 +2937,7 @@ impl AwsProvider {
 
     /// Extract ec2.Subnet attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_subnet_attributes(
-        obj: &aws_sdk_ec2::types::Subnet,
+        obj: &carina_aws_types::sdk::ec2::types::Subnet,
     ) -> Ec2SubnetReadFields {
         let assign_ipv6_address_on_creation = obj
             .assign_ipv6_address_on_creation()
@@ -3014,7 +3016,7 @@ impl AwsProvider {
 
     /// Extract ec2.InternetGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_internet_gateway_attributes(
-        obj: &aws_sdk_ec2::types::InternetGateway,
+        obj: &carina_aws_types::sdk::ec2::types::InternetGateway,
     ) -> Ec2InternetGatewayReadFields {
         let internet_gateway_id = obj
             .internet_gateway_id()
@@ -3028,7 +3030,7 @@ impl AwsProvider {
 
     /// Extract ec2.RouteTable attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_route_table_attributes(
-        obj: &aws_sdk_ec2::types::RouteTable,
+        obj: &carina_aws_types::sdk::ec2::types::RouteTable,
     ) -> Ec2RouteTableReadFields {
         let route_table_id = obj
             .route_table_id()
@@ -3046,7 +3048,7 @@ impl AwsProvider {
 
     /// Extract ec2.Route attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_route_attributes(
-        obj: &aws_sdk_ec2::types::Route,
+        obj: &carina_aws_types::sdk::ec2::types::Route,
     ) -> Ec2RouteReadFields {
         let destination_cidr_block = obj
             .destination_cidr_block()
@@ -3068,7 +3070,7 @@ impl AwsProvider {
 
     /// Extract ec2.SecurityGroup attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_attributes(
-        obj: &aws_sdk_ec2::types::SecurityGroup,
+        obj: &carina_aws_types::sdk::ec2::types::SecurityGroup,
     ) -> Ec2SecurityGroupReadFields {
         let description = obj
             .description()
@@ -3094,7 +3096,7 @@ impl AwsProvider {
 
     /// Extract ec2.SecurityGroupIngress attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_ingress_attributes(
-        obj: &aws_sdk_ec2::types::SecurityGroupRule,
+        obj: &carina_aws_types::sdk::ec2::types::SecurityGroupRule,
     ) -> Ec2SecurityGroupIngressReadFields {
         let cidr_ipv6 = obj
             .cidr_ipv6()
@@ -3136,7 +3138,7 @@ impl AwsProvider {
 
     /// Extract ec2.SecurityGroupEgress attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_security_group_egress_attributes(
-        obj: &aws_sdk_ec2::types::SecurityGroupRule,
+        obj: &carina_aws_types::sdk::ec2::types::SecurityGroupRule,
     ) -> Ec2SecurityGroupEgressReadFields {
         let cidr_ipv6 = obj
             .cidr_ipv6()
@@ -3178,7 +3180,7 @@ impl AwsProvider {
 
     /// Extract ec2.EgressOnlyInternetGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_egress_only_internet_gateway_attributes(
-        obj: &aws_sdk_ec2::types::EgressOnlyInternetGateway,
+        obj: &carina_aws_types::sdk::ec2::types::EgressOnlyInternetGateway,
     ) -> Ec2EgressOnlyInternetGatewayReadFields {
         let egress_only_internet_gateway_id = obj
             .egress_only_internet_gateway_id()
@@ -3198,7 +3200,7 @@ impl AwsProvider {
 
     /// Extract ec2.Eip attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_eip_attributes(
-        obj: &aws_sdk_ec2::types::Address,
+        obj: &carina_aws_types::sdk::ec2::types::Address,
     ) -> Ec2EipReadFields {
         let allocation_id = obj
             .allocation_id()
@@ -3224,7 +3226,7 @@ impl AwsProvider {
 
     /// Extract ec2.FlowLog attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_flow_log_attributes(
-        obj: &aws_sdk_ec2::types::FlowLog,
+        obj: &carina_aws_types::sdk::ec2::types::FlowLog,
     ) -> Ec2FlowLogReadFields {
         let deliver_logs_permission_arn = obj
             .deliver_logs_permission_arn()
@@ -3266,7 +3268,7 @@ impl AwsProvider {
 
     /// Extract ec2.NatGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_nat_gateway_attributes(
-        obj: &aws_sdk_ec2::types::NatGateway,
+        obj: &carina_aws_types::sdk::ec2::types::NatGateway,
     ) -> Ec2NatGatewayReadFields {
         let availability_mode = obj
             .availability_mode()
@@ -3302,7 +3304,7 @@ impl AwsProvider {
 
     /// Extract ec2.SubnetRouteTableAssociation attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_subnet_route_table_association_attributes(
-        obj: &aws_sdk_ec2::types::RouteTableAssociation,
+        obj: &carina_aws_types::sdk::ec2::types::RouteTableAssociation,
     ) -> Ec2SubnetRouteTableAssociationReadFields {
         let route_table_id = obj
             .route_table_id()
@@ -3320,7 +3322,7 @@ impl AwsProvider {
 
     /// Extract ec2.TransitGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_transit_gateway_attributes(
-        obj: &aws_sdk_ec2::types::TransitGateway,
+        obj: &carina_aws_types::sdk::ec2::types::TransitGateway,
     ) -> Ec2TransitGatewayReadFields {
         let description = obj
             .description()
@@ -3406,7 +3408,7 @@ impl AwsProvider {
 
     /// Extract ec2.TransitGatewayAttachment attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_transit_gateway_attachment_attributes(
-        obj: &aws_sdk_ec2::types::TransitGatewayVpcAttachment,
+        obj: &carina_aws_types::sdk::ec2::types::TransitGatewayVpcAttachment,
     ) -> Ec2TransitGatewayAttachmentReadFields {
         let ids = obj.subnet_ids();
         let subnet_ids = (!ids.is_empty()).then(|| {
@@ -3466,7 +3468,7 @@ impl AwsProvider {
 
     /// Extract ec2.VpcEndpoint attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_vpc_endpoint_attributes(
-        obj: &aws_sdk_ec2::types::VpcEndpoint,
+        obj: &carina_aws_types::sdk::ec2::types::VpcEndpoint,
     ) -> Ec2VpcEndpointReadFields {
         let policy_document = obj
             .policy_document()
@@ -3541,7 +3543,7 @@ impl AwsProvider {
 
     /// Extract ec2.VpcPeeringConnection attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_vpc_peering_connection_attributes(
-        obj: &aws_sdk_ec2::types::VpcPeeringConnection,
+        obj: &carina_aws_types::sdk::ec2::types::VpcPeeringConnection,
     ) -> Ec2VpcPeeringConnectionReadFields {
         let vpc_peering_connection_id = obj
             .vpc_peering_connection_id()
@@ -3570,7 +3572,7 @@ impl AwsProvider {
 
     /// Extract ec2.VpnGateway attributes from SDK response type (generated)
     pub(crate) fn extract_ec2_vpn_gateway_attributes(
-        obj: &aws_sdk_ec2::types::VpnGateway,
+        obj: &carina_aws_types::sdk::ec2::types::VpnGateway,
     ) -> Ec2VpnGatewayReadFields {
         let amazon_side_asn = obj
             .amazon_side_asn()
@@ -3596,7 +3598,7 @@ impl AwsProvider {
 
     /// Extract organizations.Organization attributes from SDK response type (generated)
     pub(crate) fn extract_organizations_organization_attributes(
-        obj: &aws_sdk_organizations::types::Organization,
+        obj: &carina_aws_types::sdk::organizations::types::Organization,
     ) -> OrganizationsOrganizationReadFields {
         let arn = obj
             .arn()
@@ -3630,7 +3632,7 @@ impl AwsProvider {
 
     /// Extract organizations.Account attributes from SDK response type (generated)
     pub(crate) fn extract_organizations_account_attributes(
-        obj: &aws_sdk_organizations::types::Account,
+        obj: &carina_aws_types::sdk::organizations::types::Account,
     ) -> OrganizationsAccountReadFields {
         let arn = obj
             .arn()
@@ -3664,7 +3666,7 @@ impl AwsProvider {
 
     /// Extract route53.RecordSet attributes from SDK response type (generated)
     pub(crate) fn extract_route53_record_set_attributes(
-        obj: &aws_sdk_route53::types::ResourceRecordSet,
+        obj: &carina_aws_types::sdk::route53::types::ResourceRecordSet,
     ) -> Route53RecordSetReadFields {
         let v = obj.name();
         let name =
@@ -3683,7 +3685,9 @@ impl AwsProvider {
     }
 
     /// Extract iam.Role attributes from SDK response type (generated)
-    pub(crate) fn extract_iam_role_attributes(obj: &aws_sdk_iam::types::Role) -> IamRoleReadFields {
+    pub(crate) fn extract_iam_role_attributes(
+        obj: &carina_aws_types::sdk::iam::types::Role,
+    ) -> IamRoleReadFields {
         let v = obj.arn();
         let arn =
             (!v.is_empty()).then(|| Value::Concrete(ConcreteValue::String(v.to_string().into())));
@@ -3720,7 +3724,7 @@ impl AwsProvider {
 
     /// Extract logs.LogGroup attributes from SDK response type (generated)
     pub(crate) fn extract_logs_log_group_attributes(
-        obj: &aws_sdk_cloudwatchlogs::types::LogGroup,
+        obj: &carina_aws_types::sdk::cloudwatchlogs::types::LogGroup,
     ) -> LogsLogGroupReadFields {
         let deletion_protection_enabled = obj
             .deletion_protection_enabled()
@@ -3750,7 +3754,7 @@ impl AwsProvider {
 
     /// Extract acm.Certificate attributes from SDK response type (generated)
     pub(crate) fn extract_acm_certificate_attributes(
-        obj: &aws_sdk_acm::types::CertificateDetail,
+        obj: &carina_aws_types::sdk::acm::types::CertificateDetail,
     ) -> AcmCertificateReadFields {
         let certificate_arn = obj
             .certificate_arn()

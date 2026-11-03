@@ -617,7 +617,7 @@ impl Ec2TaggedResourceKind {
         self,
         provider: &AwsProvider,
         id: &ResourceId,
-        filter: aws_sdk_ec2::types::Filter,
+        filter: carina_aws_types::sdk::ec2::types::Filter,
     ) -> ProviderResult<Vec<String>> {
         macro_rules! describe_ids {
             ($request:expr, $items:ident, $identifier:ident, paginated) => {{
@@ -1395,7 +1395,7 @@ impl AwsProvider {
                         let classification = error.classification().with_prior_maybe_sent();
                         let retryable = provider_retry_allowed(
                             classification,
-                            aws_sdk_acm::operation::request_certificate::RequestCertificateError::IDEMPOTENCY,
+                            carina_aws_types::sdk::acm::operation::request_certificate::RequestCertificateError::IDEMPOTENCY,
                             &error,
                         );
                         if retryable && attempts_remaining > 1 {
@@ -1743,7 +1743,7 @@ impl AwsProvider {
         create_token: &ClientToken,
     ) -> ProviderResult<Vec<AppliedIdentifier>> {
         let id = &resource.id;
-        let filter = aws_sdk_ec2::types::Filter::builder()
+        let filter = carina_aws_types::sdk::ec2::types::Filter::builder()
             .name(format!("tag:{EC2_CREATE_TOKEN_TAG}"))
             .values(create_token.as_str())
             .build();
@@ -4373,13 +4373,13 @@ mod pending_operation_tests {
         let selected = connector.clone();
         let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
         let bounded = crate::BoundedSdkConfig::for_test(
-            aws_config::SdkConfig::builder()
-                .region(aws_config::Region::new("us-east-1"))
+            aws_types::SdkConfig::builder()
+                .region(aws_types::region::Region::new("us-east-1"))
                 .endpoint_url("https://acm.example.test")
                 .credentials_provider(credentials_provider)
                 .http_client(http_client)
                 .sleep_impl(aws_smithy_async::rt::sleep::TokioSleep::new())
-                .identity_cache(aws_config::identity::IdentityCache::no_cache())
+                .identity_cache(aws_smithy_runtime::client::identity::IdentityCache::no_cache())
                 .build(),
         );
         AwsProvider::from_sdk_config("us-east-1".to_string(), Vec::new(), Vec::new(), &bounded)
@@ -4538,11 +4538,11 @@ mod pending_operation_tests {
 
     #[test]
     fn sticky_maybe_sent_failure_keeps_tagged_create_pending() {
-        use aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
         use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
         use aws_smithy_runtime_api::client::result::SdkError;
         use aws_smithy_types::body::SdkBody;
         use aws_smithy_types::error::ErrorMetadata;
+        use carina_aws_types::sdk::ec2::operation::create_nat_gateway::CreateNatGatewayError;
 
         let error = CreateNatGatewayError::generic(
             ErrorMetadata::builder()
@@ -5063,11 +5063,17 @@ mod pending_operation_tests {
         assert_eq!(connector.calls(), 3);
     }
 
-    fn vpc_page(ids: &[&str]) -> aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput {
-        aws_sdk_ec2::operation::describe_vpcs::DescribeVpcsOutput::builder()
+    fn vpc_page(
+        ids: &[&str],
+    ) -> carina_aws_types::sdk::ec2::operation::describe_vpcs::DescribeVpcsOutput {
+        carina_aws_types::sdk::ec2::operation::describe_vpcs::DescribeVpcsOutput::builder()
             .set_vpcs(Some(
                 ids.iter()
-                    .map(|id| aws_sdk_ec2::types::Vpc::builder().vpc_id(*id).build())
+                    .map(|id| {
+                        carina_aws_types::sdk::ec2::types::Vpc::builder()
+                            .vpc_id(*id)
+                            .build()
+                    })
                     .collect(),
             ))
             .build()

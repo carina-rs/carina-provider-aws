@@ -7,7 +7,7 @@ use carina_core::resource::{
 use carina_core::schema::CompiledResourceSchema;
 use carina_plugin_sdk::{DesiredInputs, DesiredValue};
 
-use aws_sdk_ec2::types::{AvailabilityZoneAddress, NatGatewayState};
+use carina_aws_types::sdk::ec2::types::{AvailabilityZoneAddress, NatGatewayState};
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -120,7 +120,7 @@ fn build_availability_zone_addresses(
 }
 
 fn availability_zone_addresses_to_value(
-    addresses: &[aws_sdk_ec2::types::NatGatewayAddress],
+    addresses: &[carina_aws_types::sdk::ec2::types::NatGatewayAddress],
 ) -> Value {
     let mut grouped: indexmap::IndexMap<Option<String>, Vec<String>> = indexmap::IndexMap::new();
     for address in addresses {
@@ -210,7 +210,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -303,7 +303,7 @@ impl AwsProvider {
         let mut req = self.ec2_client.create_nat_gateway().configure(|builder| {
             builder.tag_specifications(build_tag_specification_with_create_token(
                 tags.as_ref(),
-                aws_sdk_ec2::types::ResourceType::Natgateway,
+                carina_aws_types::sdk::ec2::types::ResourceType::Natgateway,
                 client_token,
             ))
         });
@@ -316,7 +316,7 @@ impl AwsProvider {
         }
 
         if let Some(conn_type) = connectivity_type {
-            use aws_sdk_ec2::types::ConnectivityType;
+            use carina_aws_types::sdk::ec2::types::ConnectivityType;
             req = req.configure(|builder| {
                 builder.connectivity_type(ConnectivityType::from(conn_type.as_str()))
             });
@@ -324,9 +324,11 @@ impl AwsProvider {
 
         if let Some(availability_mode) = availability_mode {
             req = req.configure(|builder| {
-                builder.availability_mode(aws_sdk_ec2::types::AvailabilityMode::from(
-                    availability_mode.as_str(),
-                ))
+                builder.availability_mode(
+                    carina_aws_types::sdk::ec2::types::AvailabilityMode::from(
+                        availability_mode.as_str(),
+                    ),
+                )
             });
         }
         if let Some(vpc_id) = vpc_id {
@@ -515,7 +517,7 @@ mod pending_tests {
 
     #[test]
     fn regional_addresses_read_one_canonical_zone_selector_without_diff() {
-        let address = aws_sdk_ec2::types::NatGatewayAddress::builder()
+        let address = carina_aws_types::sdk::ec2::types::NatGatewayAddress::builder()
             .allocation_id("eipalloc-12345678")
             .availability_zone("ap-northeast-1a")
             .availability_zone_id("apne1-az4")

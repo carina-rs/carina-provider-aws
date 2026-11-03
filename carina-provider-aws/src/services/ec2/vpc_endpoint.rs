@@ -135,13 +135,13 @@ impl AwsProvider {
                 .service_name(&service_name)
                 .tag_specifications(build_tag_specification_with_create_token(
                     tags.as_ref(),
-                    aws_sdk_ec2::types::ResourceType::VpcEndpoint,
+                    carina_aws_types::sdk::ec2::types::ResourceType::VpcEndpoint,
                     client_token,
                 ))
         });
 
         if let Some(ep_type) = vpc_endpoint_type {
-            use aws_sdk_ec2::types::VpcEndpointType;
+            use carina_aws_types::sdk::ec2::types::VpcEndpointType;
             req = req.configure(|builder| {
                 builder.vpc_endpoint_type(VpcEndpointType::from(ep_type.as_str()))
             });

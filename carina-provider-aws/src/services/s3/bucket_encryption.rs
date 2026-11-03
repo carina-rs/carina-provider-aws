@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::{
+use carina_aws_types::sdk::s3::types::{
     ServerSideEncryption, ServerSideEncryptionByDefault, ServerSideEncryptionConfiguration,
     ServerSideEncryptionRule,
 };

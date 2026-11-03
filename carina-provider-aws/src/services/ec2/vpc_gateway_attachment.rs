@@ -50,7 +50,7 @@ impl AwsProvider {
         igw_id: &str,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let filter = Filter::builder()
             .name("internet-gateway-id")
@@ -94,7 +94,7 @@ impl AwsProvider {
         vgw_id: &str,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let filter = Filter::builder()
             .name("vpn-gateway-id")

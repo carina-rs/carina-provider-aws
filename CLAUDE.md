@@ -18,8 +18,8 @@ cargo test
 # Build WASM target
 cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 
-# Run clippy (same command as CI; --all-targets covers tests, and the
-# generated clippy.toml forbids building raw SDK clients outside the wrappers)
+# Run clippy (same command as CI; --all-targets covers tests, and
+# clippy.toml enforces read-state construction)
 cargo clippy --workspace --all-targets -- -D warnings
 
 # Format check
@@ -50,7 +50,7 @@ aws-vault exec <profile> -- cargo test
 - **carina-provider-aws**: The AWS provider implementation. Builds as both a native binary and a WASM component.
 - **carina-codegen-aws**: Code generator that produces resource definitions from AWS Smithy models.
 - **carina-smithy**: Smithy 2.0 JSON AST parser used by the code generator.
-- **carina-aws-types**: Shared AWS-specific types and `HostCredentialsProvider`. This crate lives in this repo; `carina-provider-awscc` consumes it by pinning this repository.
+- **carina-aws-types**: Shared AWS-specific types, guarded SDK handles, `HostCredentialsProvider`, and `GuardedAssumeRoleProvider`. This crate lives in this repo; `carina-provider-awscc` consumes it by pinning this repository.
 
 ## Dependencies on carina (main repo)
 
@@ -71,6 +71,37 @@ carina-provider-protocol = { path = "../carina/carina-provider-protocol" }
 `carina-aws-types` is **not** a main-repo dependency — it is a local crate in
 this repository (`carina-provider-aws/Cargo.toml` references it as
 `{ path = "../carina-aws-types" }`), so it needs no patch entry.
+
+## AWS SDK Access
+
+`carina-aws-types` owns all direct `aws-sdk-*` and `aws-config` dependencies.
+Provider crates must not add either dependency, including in dev or target
+sections. Use `carina_aws_types::sdk::<service>` for SDK types, operations, errors, and
+primitives. The facade never re-exports raw `Client`, `Config`, or `config`;
+compile-fail doctests enforce that boundary. Its service handles are constructed
+only with a permanent `ResendGuard` and the service's idempotency lookup.
+S3 Express session authentication is disabled. A rejecting Express credentials
+provider also prevents an unguarded internal CreateSession client when an
+operation overrides that flag.
+
+Generated provider wrappers keep the closed operation API and stable token
+handling. Add operation decisions to `carina-codegen-aws/src/resend_safety.rs`
+and regenerate with `./scripts/generate-provider.sh`. KMS reference routing uses
+the same facade factories. Provider-level AssumeRole uses
+`carina_aws_types::GuardedAssumeRoleProvider`, whose STS requests are guarded as
+non-idempotent and retain the base credentials and expiration-based refresh path.
+Concurrent loads share one pending AssumeRole request, including after a caller
+is cancelled; completed results are left to the consuming SDK identity cache.
+Shared configuration loading uses `carina_aws_types::load_sdk_config`; its API
+defaults to `HostCredentialsProvider` on WASM when no override is supplied,
+returns only `aws_types::SdkConfig`, and never exposes aws-config's loaders or
+credential-provider builders. Use `aws-types` for `SdkConfig` and `Region`,
+`aws-smithy-runtime-api` for `BehaviorVersion`, and `aws-smithy-runtime` for
+`IdentityCache`.
+
+Client safety comes from dependency visibility and permanent interceptors.
+The hand-maintained `clippy.toml` governs read-state construction and is not a
+codegen output.
 
 ## Code Generation
 

@@ -181,8 +181,8 @@ mod tests {
         let selected = connector.clone();
         let http_client = http_client_fn(move |_, _| SharedHttpConnector::new(selected.clone()));
         let bounded = BoundedSdkConfig::for_test(
-            aws_config::SdkConfig::builder()
-                .region(aws_config::Region::new("us-east-1"))
+            aws_types::SdkConfig::builder()
+                .region(aws_types::region::Region::new("us-east-1"))
                 .endpoint_url("https://example.test")
                 .credentials_provider(credentials_provider)
                 .http_client(http_client)

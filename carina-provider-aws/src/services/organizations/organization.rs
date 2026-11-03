@@ -62,8 +62,9 @@ impl AwsProvider {
         let mut req = self.organizations_client.create_organization();
 
         if let Some(feature_set) = feature_set {
-            let fs =
-                aws_sdk_organizations::types::OrganizationFeatureSet::from(feature_set.as_str());
+            let fs = carina_aws_types::sdk::organizations::types::OrganizationFeatureSet::from(
+                feature_set.as_str(),
+            );
             req = req.feature_set(fs);
         }
 

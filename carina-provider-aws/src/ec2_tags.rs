@@ -15,7 +15,7 @@ use crate::error_helpers::api_error_with_meta;
 /// Provider entry points reject the provider-owned discovery key. This final
 /// filter prevents an internal caller from ever overwriting it even after a
 /// validation bug; callers that need a `TagSpecification` build from here.
-pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<aws_sdk_ec2::types::Tag> {
+pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<carina_aws_types::sdk::ec2::types::Tag> {
     let mut tags = Vec::new();
     if let Value::Concrete(ConcreteValue::Map(map)) = value {
         for (key, val) in map {
@@ -23,7 +23,7 @@ pub(crate) fn value_to_ec2_tags(value: &Value) -> Vec<aws_sdk_ec2::types::Tag> {
                 && let Value::Concrete(ConcreteValue::String(v)) = val
             {
                 tags.push(
-                    aws_sdk_ec2::types::Tag::builder()
+                    carina_aws_types::sdk::ec2::types::Tag::builder()
                         .key(key)
                         .value(v.expose_plaintext())
                         .build(),
@@ -61,7 +61,9 @@ impl AwsProvider {
     ///
     /// `carina:create-token` is provider-owned discovery metadata. It is
     /// intentionally absent from state, so it cannot create drift.
-    pub(crate) fn ec2_tags_to_value(tags: &[aws_sdk_ec2::types::Tag]) -> Option<Value> {
+    pub(crate) fn ec2_tags_to_value(
+        tags: &[carina_aws_types::sdk::ec2::types::Tag],
+    ) -> Option<Value> {
         let mut tag_map: IndexMap<String, Value> = IndexMap::new();
         for tag in tags {
             if let (Some(key), Some(value)) = (tag.key(), tag.value()) {
@@ -127,7 +129,11 @@ impl AwsProvider {
             if !removed_keys.is_empty() {
                 let mut req = self.ec2_client.delete_tags().resources(ec2_resource_id);
                 for key in removed_keys {
-                    req = req.tags(aws_sdk_ec2::types::Tag::builder().key(key.as_str()).build());
+                    req = req.tags(
+                        carina_aws_types::sdk::ec2::types::Tag::builder()
+                            .key(key.as_str())
+                            .build(),
+                    );
                 }
                 req.send().await.map_err(|e| {
                     api_error_with_meta("Failed to delete tags", e)
@@ -214,14 +220,14 @@ mod tests {
 
     #[test]
     fn test_ec2_tags_to_value_empty() {
-        let tags: Vec<aws_sdk_ec2::types::Tag> = vec![];
+        let tags: Vec<carina_aws_types::sdk::ec2::types::Tag> = vec![];
         assert_eq!(AwsProvider::ec2_tags_to_value(&tags), None);
     }
 
     #[test]
     fn test_ec2_tags_to_value_single_tag() {
         let tags = vec![
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("Name")
                 .value("my-resource")
                 .build(),
@@ -243,11 +249,11 @@ mod tests {
     #[test]
     fn test_ec2_tags_to_value_multiple_tags() {
         let tags = vec![
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("Name")
                 .value("test")
                 .build(),
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("Environment")
                 .value("production")
                 .build(),
@@ -275,11 +281,11 @@ mod tests {
     #[test]
     fn create_token_tag_is_hidden_from_read_state() {
         let tags = vec![
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("carina:create-token")
                 .value("discovery-token")
                 .build(),
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("Name")
                 .value("visible")
                 .build(),
@@ -297,7 +303,7 @@ mod tests {
     #[test]
     fn test_ec2_tags_to_value_missing_key_or_value() {
         // Tag with no key set
-        let tags = vec![aws_sdk_ec2::types::Tag::builder().build()];
+        let tags = vec![carina_aws_types::sdk::ec2::types::Tag::builder().build()];
         assert_eq!(AwsProvider::ec2_tags_to_value(&tags), None);
     }
 
@@ -444,11 +450,11 @@ mod tests {
         let desired = Resource::with_provider("aws", "ec2.Vpc", "example", None)
             .with_attribute("tags", desired_tags);
         let aws_tags = vec![
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key(EC2_CREATE_TOKEN_TAG)
                 .value("discovery-token")
                 .build(),
-            aws_sdk_ec2::types::Tag::builder()
+            carina_aws_types::sdk::ec2::types::Tag::builder()
                 .key("Name")
                 .value("visible")
                 .build(),
