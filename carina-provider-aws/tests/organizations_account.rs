@@ -253,7 +253,9 @@ fn organizations_account_email_reference_types_require_annotation_or_matching_ou
             &bindings,
         );
         if let Some(expected) = expected_error {
-            let error = result.expect_err("plain String must not satisfy Organizations Email");
+            let error = result
+                .expect_err("plain String must not satisfy Organizations Email")
+                .to_string();
             assert!(error.contains(expected), "{error}");
         } else {
             assert!(result.is_ok(), "{declarations}: {result:?}");
@@ -329,7 +331,9 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             &bindings,
         );
         if let Some(expected_error) = expected_error {
-            let error = result.expect_err("plain String must not satisfy Role.Name");
+            let error = result
+                .expect_err("plain String must not satisfy Role.Name")
+                .to_string();
             assert!(error.contains(expected_error), "{error}");
         } else {
             assert!(result.is_ok(), "{field} = {expression}: {result:?}");

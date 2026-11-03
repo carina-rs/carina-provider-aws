@@ -173,7 +173,9 @@ fn organizations_organization_output_reference_types_distinguish_accounts_from_o
             &bindings,
         );
         if let Some(expected) = expected_error {
-            let error = result.expect_err("Organization ARN cannot satisfy Account ARN");
+            let error = result
+                .expect_err("Organization ARN cannot satisfy Account ARN")
+                .to_string();
             assert!(error.contains(expected), "{error}");
         } else {
             assert!(result.is_ok(), "{expression}: {result:?}");
