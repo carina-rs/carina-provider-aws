@@ -660,6 +660,24 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: dns_record_type_type,
     },
+    /// ELBv2 HTTP matcher codes, independent of load-balancer protocol constraints.
+    /// https://docs.aws.amazon.com/elasticloadbalancing/latest/APIReference/API_Matcher.html
+    Elbv2TargetGroupHttpCode => elbv2_target_group_http_code {
+        segments: ["elasticloadbalancingv2", "TargetGroup"],
+        kind: "HttpCode",
+        valid_sample: "200",
+        has_validator: true,
+        constructor: |identity| crate::elbv2_matcher_codes(identity, 200, 599),
+    },
+    /// ELBv2 gRPC matcher codes.
+    /// https://docs.aws.amazon.com/elasticloadbalancing/latest/APIReference/API_Matcher.html
+    Elbv2TargetGroupGrpcCode => elbv2_target_group_grpc_code {
+        segments: ["elasticloadbalancingv2", "TargetGroup"],
+        kind: "GrpcCode",
+        valid_sample: "12",
+        has_validator: true,
+        constructor: |identity| crate::elbv2_matcher_codes(identity, 0, 99),
+    },
     /// CloudWatch Logs retention days, sharing AWSCC's established identity.
     /// Source: PutRetentionPolicyRequest$retentionInDays -> Days.
     /// https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html
@@ -1154,6 +1172,27 @@ mod tests {
     }
 
     #[test]
+    fn elbv2_matcher_catalog_rows_report_errors_and_reject_wrong_types() {
+        for (row, range) in [
+            (AwsType::Elbv2TargetGroupHttpCode, "200..=599"),
+            (AwsType::Elbv2TargetGroupGrpcCode, "0..=99"),
+        ] {
+            let attr = row.attribute_type();
+            let validate = attribute_type_validator(&attr).expect("matcher validator");
+            let error = validate(&Value::Concrete(ConcreteValue::String("".into())))
+                .expect_err("empty matcher codes must fail")
+                .to_string();
+            assert_eq!(
+                error,
+                format!(
+                    "Validation failed: ELBv2 matcher codes must be comma-separated items N or N-N (canonical decimal digits only, no leading zeros), with every N in {range} and range start <= end; no spaces or empty items"
+                )
+            );
+            assert!(validate(&Value::Concrete(ConcreteValue::Int(200))).is_err());
+        }
+    }
+
+    #[test]
     fn logs_log_group_retention_integer_enum_matches_awscc() {
         let row = AwsType::ALL
             .iter()
@@ -1218,6 +1257,8 @@ mod tests {
             AwsType::AvailabilityZone,
             AwsType::AvailabilityZoneId,
             AwsType::S3LifecycleDate,
+            AwsType::Elbv2TargetGroupHttpCode,
+            AwsType::Elbv2TargetGroupGrpcCode,
             AwsType::LogsLogGroupRetentionInDays,
             AwsType::IamRoleName,
             AwsType::IamPolicyName,
@@ -1255,7 +1296,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            41,
+            43,
             "the shared catalog validator contract changed"
         );
 
@@ -1373,6 +1414,8 @@ KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
+Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|true
+Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true
 LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true
 IdentityStoreId|aws|identitystore/Store|Id|d-1234567890|false
 SsoPrincipalId|aws|sso/Principal|Id|12345678-1234-1234-1234-123456789abc|false

@@ -1,4 +1,5 @@
 mod ec2;
+mod elbv2;
 mod iam;
 mod identity_store;
 mod ipam;
@@ -8,6 +9,7 @@ mod sqs;
 mod sso;
 
 pub use ec2::*;
+pub use elbv2::*;
 pub use iam::*;
 pub use identity_store::*;
 pub use ipam::*;
