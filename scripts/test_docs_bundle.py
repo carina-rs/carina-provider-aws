@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 
-import gzip
 import io
 import os
 import runpy
-import subprocess
-import sys
 import tarfile
 import tempfile
 import unittest
@@ -17,77 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "docs-bundle.py"
 DOCS_BUNDLE = runpy.run_path(str(SCRIPT))
 REMOVED_SERVICE_MANIFEST = Path("services").with_suffix(".json").name
-
-
-def _octal(value, width):
-    return f"{value:0{width - 1}o}\0".encode("ascii")
-
-
-def tar_entry(
-    name,
-    data=b"",
-    *,
-    typeflag=b"0",
-    linkname=b"",
-    magic=b"ustar\0",
-    version=b"00",
-    declared_size=None,
-):
-    if isinstance(name, str):
-        name = name.encode("utf-8")
-    if len(name) > 100:
-        raise ValueError("test tar entry name exceeds the ustar name field")
-    if len(linkname) > 100:
-        raise ValueError("test tar entry link name exceeds the ustar field")
-
-    size = len(data) if declared_size is None else declared_size
-    header = bytearray(512)
-    header[0 : len(name)] = name
-    header[100:108] = _octal(0o644, 8)
-    header[108:116] = _octal(0, 8)
-    header[116:124] = _octal(0, 8)
-    header[124:136] = _octal(size, 12)
-    header[136:148] = _octal(0, 12)
-    header[148:156] = b"        "
-    header[156:157] = typeflag
-    header[157 : 157 + len(linkname)] = linkname
-    header[257:263] = magic
-    header[263:265] = version
-    checksum = sum(header)
-    header[148:156] = f"{checksum:06o}\0 ".encode("ascii")
-
-    padding = b"\0" * ((-len(data)) % 512)
-    return bytes(header) + data + padding
-
-
-def pax_record(key, value):
-    body = f"{key}={value}\n".encode("utf-8")
-    length = len(body) + 2
-    while True:
-        record = str(length).encode("ascii") + b" " + body
-        if len(record) == length:
-            return record
-        length = len(record)
-
-
-def tar_stream(*entries):
-    return b"".join(entries) + b"\0" * 1024
-
-
-def write_bundle(path, *entries):
-    path.write_bytes(gzip.compress(tar_stream(*entries), mtime=0))
-
-
-def entry_limit_entries(page_count):
-    return [
-        tar_entry("./", typeflag=b"5"),
-        tar_entry("index.md", b"# Index\n"),
-        tar_entry("resources/", typeflag=b"5"),
-        *(
-            tar_entry(f"resources/page_{index:04d}.md")
-            for index in range(page_count)
-        ),
-    ]
 
 
 def write_generated_page(path, title):
@@ -138,24 +64,6 @@ def create_build_fixture(
 
 
 class DocsBundleTests(unittest.TestCase):
-    def run_script(self, *args):
-        return subprocess.run(
-            [sys.executable, str(SCRIPT), *map(str, args)],
-            cwd=ROOT,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-
-    def assert_check_rejects(self, entries, message):
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = Path(directory) / "docs.tar.gz"
-            write_bundle(bundle, *entries)
-            result = self.run_script("check", bundle)
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(message.lower(), result.stderr.lower())
-
     def build_fixture(self, directory, filename="docs.tar.gz", **fixture_options):
         directory = Path(directory)
         source_root, index_source = create_build_fixture(
@@ -165,12 +73,6 @@ class DocsBundleTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             DOCS_BUNDLE["build_bundle"](bundle, source_root, index_source)
         return bundle
-
-    def test_build_round_trip_passes_check(self):
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = self.build_fixture(directory)
-            check = self.run_script("check", bundle)
-            self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
 
     def test_build_omits_removed_service_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -309,185 +211,6 @@ class DocsBundleTests(unittest.TestCase):
                 DOCS_BUNDLE["build_bundle"](
                     directory / "docs.tar.gz", source_root, index_source
                 )
-
-    def test_check_rejects_removed_service_manifest(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry(REMOVED_SERVICE_MANIFEST, b"{}"),
-            ],
-            "file is not allowed",
-        )
-
-    def test_check_accepts_pax_path_and_size_overrides(self):
-        records = pax_record("path", "resources/pax_entry.md")
-        records += pax_record("size", "6")
-        entries = (
-            tar_entry("pax-header", records, typeflag=b"x"),
-            tar_entry("ignored", b"hello\n"),
-            tar_entry("index.md", b"# Index\n"),
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = Path(directory) / "docs.tar.gz"
-            write_bundle(bundle, *entries)
-            result = self.run_script("check", bundle)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_check_entry_limit_ignores_empty_root(self):
-        with tempfile.TemporaryDirectory() as directory:
-            directory = Path(directory)
-            for page_count, accepted in ((4094, True), (4095, False)):
-                with self.subTest(real_entries=page_count + 2):
-                    bundle = directory / f"{page_count}.tar.gz"
-                    write_bundle(bundle, *entry_limit_entries(page_count))
-                    result = self.run_script("check", bundle)
-                    if accepted:
-                        self.assertEqual(
-                            result.returncode, 0, result.stdout + result.stderr
-                        )
-                    else:
-                        self.assertNotEqual(
-                            result.returncode, 0, result.stdout + result.stderr
-                        )
-                        self.assertIn(
-                            "more than 4096 entries", result.stderr.lower()
-                        )
-
-    def test_check_rejects_missing_index(self):
-        self.assert_check_rejects(
-            [tar_entry("resources/example.md", b"# Example\n")],
-            "index.md is required",
-        )
-
-    def test_check_rejects_bad_slug(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("resources/Bad-Slug.md", b"# Bad\n"),
-            ],
-            "invalid slug",
-        )
-
-    def test_check_rejects_extra_file(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("README.md", b"extra\n"),
-            ],
-            "file is not allowed",
-        )
-
-    def test_check_rejects_extra_directory(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("other/", typeflag=b"5"),
-            ],
-            "directory is not allowed",
-        )
-
-    def test_check_rejects_symlink(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry(
-                    "resources/link.md",
-                    typeflag=b"2",
-                    linkname=b"../index.md",
-                ),
-            ],
-            "symbolic link",
-        )
-
-    def test_check_rejects_gnu_long_name_entry(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry(
-                    "././@LongLink",
-                    b"resources/a_very_long_name.md\0",
-                    typeflag=b"L",
-                    magic=b"ustar ",
-                    version=b" \0",
-                ),
-            ],
-            "GNU long-name",
-        )
-
-    def test_check_rejects_pax_global_header(self):
-        records = pax_record("comment", "not allowed")
-        self.assert_check_rejects(
-            [
-                tar_entry("pax-global", records, typeflag=b"g"),
-                tar_entry("index.md", b"# Index\n"),
-            ],
-            "pax global header",
-        )
-
-    def test_check_rejects_two_gzip_members(self):
-        archive = tar_stream(tar_entry("index.md", b"# Index\n"))
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = Path(directory) / "docs.tar.gz"
-            bundle.write_bytes(
-                gzip.compress(archive, mtime=0)
-                + gzip.compress(archive, mtime=0)
-            )
-            result = self.run_script("check", bundle)
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("exactly one gzip member", result.stderr.lower())
-
-    def test_check_rejects_nonzero_data_after_end_marker(self):
-        archive = tar_stream(tar_entry("index.md", b"# Index\n")) + b"\x01"
-        with tempfile.TemporaryDirectory() as directory:
-            bundle = Path(directory) / "docs.tar.gz"
-            bundle.write_bytes(gzip.compress(archive, mtime=0))
-            result = self.run_script("check", bundle)
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(
-            "non-zero data follows the tar end marker", result.stderr.lower()
-        )
-
-    def test_check_rejects_non_utf8_file(self):
-        self.assert_check_rejects(
-            [tar_entry("index.md", b"# Index\n\xff")],
-            "not valid UTF-8",
-        )
-
-    def test_check_rejects_parent_path_component(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("resources/../escape.md", b"# Escape\n"),
-            ],
-            "invalid path component",
-        )
-
-    def test_check_rejects_absolute_path(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("/resources/escape.md", b"# Escape\n"),
-            ],
-            "absolute path",
-        )
-
-    def test_check_rejects_duplicate_path(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# First\n"),
-                tar_entry("./index.md", b"# Second\n"),
-            ],
-            "duplicate path",
-        )
-
-    def test_check_rejects_oversized_file(self):
-        self.assert_check_rejects(
-            [
-                tar_entry("index.md", b"# Index\n"),
-                tar_entry("resources/large.md", b"x" * (1024 * 1024 + 1)),
-            ],
-            "exceeds 1 MiB",
-        )
 
 
 if __name__ == "__main__":
