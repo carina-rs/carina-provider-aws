@@ -48,7 +48,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("log_group_name", AttributeType::string())
+            AttributeSchema::required("log_group_name", AttributeType::refined_string(None, Some("^[.\\-_/#A-Za-z0-9]{1,512}\\z".to_string()), Some((Some(1), Some(512))), None))
                 .create_only()
                 .identity()
                 .with_description("A name for the log group.")
@@ -56,7 +56,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("retention_in_days", AttributeType::int())
+            AttributeSchema::optional("retention_in_days", carina_aws_types::logs_log_group_retention_in_days())
                 .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
                 .with_provider_name("retentionInDays")
                 .build(),
