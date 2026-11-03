@@ -152,7 +152,7 @@ fn find_source<'a, T: std::error::Error + 'static>(
     None
 }
 
-// Admit complete ASCII fields before they can enter retry output. Rejected
+// Admit complete ASCII codes before they can enter retry output. Rejected
 // values are omitted, rather than shortened or passed through redaction.
 struct RetryErrorCode<'a>(&'a str);
 
@@ -166,18 +166,6 @@ impl<'a> RetryErrorCode<'a> {
     }
 }
 
-struct RetryRequestId<'a>(&'a str);
-
-impl<'a> RetryRequestId<'a> {
-    fn parse(value: &'a str) -> Option<Self> {
-        ((1..=128).contains(&value.len())
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"+/=_-".contains(&byte)))
-        .then_some(Self(value))
-    }
-}
-
 /// Retry diagnostics use only typed fields, never error Display/Debug text.
 fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
     if (error.is_response_error() || error.is_operation_error())
@@ -186,7 +174,7 @@ fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpRespons
         let mut summary = format!("HTTP {}", response.status().as_u16());
         // Type erasure doesn't retain ProvideErrorMetadata. Use metadata
         // only when it is directly available or exposed as a typed cause;
-        // modeled errors that hide it get status and request ID only.
+        // modeled errors that hide it get status only.
         let metadata = error
             .as_operation_error()
             .and_then(|error| error.downcast_ref::<ErrorMetadata>())
@@ -197,17 +185,6 @@ fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpRespons
         {
             summary.push(' ');
             summary.push_str(code.0);
-        }
-        if let Some(request_id) = request_id(response)
-            .and_then(RetryRequestId::parse)
-            .or_else(|| {
-                metadata
-                    .and_then(|metadata| metadata.extra("aws_request_id"))
-                    .and_then(RetryRequestId::parse)
-            })
-        {
-            summary.push_str("; request_id: ");
-            summary.push_str(request_id.0);
         }
         return summary;
     }

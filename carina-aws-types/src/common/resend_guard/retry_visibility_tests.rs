@@ -476,8 +476,8 @@ async fn successful_retry_prints_only_retry_lines() {
 }
 
 #[tokio::test]
-async fn service_failures_keep_their_type_and_print_status_and_request_id_only() {
-    let (operation, output, _) = operation(
+async fn service_failures_keep_their_type_and_print_status_only() {
+    let (operation, output, script) = operation(
         [Reply::Status(503), Reply::Status(503), Reply::Status(503)],
         3,
         RequestSecret::None,
@@ -490,16 +490,25 @@ async fn service_failures_keep_their_type_and_print_status_and_request_id_only()
     assert_lines(
         &output.lines(),
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503; request_id: test-request-id",
-            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): HTTP 503; request_id: test-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503",
+            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): HTTP 503",
             "  Gave up test.DescribeThing after 3 SDK attempts",
         ],
         0.05..=2.0,
     );
+    assert!(
+        script
+            .lock()
+            .expect("script lock")
+            .final_failure
+            .as_ref()
+            .expect("final rendered failure")
+            .ends_with("; status: 503; request_id: test-request-id")
+    );
 }
 
 #[tokio::test]
-async fn service_failures_report_typed_code_and_request_id_without_message() {
+async fn service_failures_report_typed_code_without_request_id_or_message() {
     let (operation, output, _) = operation(
         [Reply::CodedStatus(503, "SlowDown"), Reply::Status(200)],
         3,
@@ -508,9 +517,7 @@ async fn service_failures_report_typed_code_and_request_id_without_message() {
     operation.invoke(()).await.expect("retry succeeds");
     assert_lines(
         &output.lines(),
-        &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503 SlowDown; request_id: test-request-id",
-        ],
+        &["  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): HTTP 503 SlowDown"],
         0.05..=2.0,
     );
 }
@@ -581,20 +588,11 @@ fn http_summaries_only_use_typed_metadata_and_response_fields() {
     let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
     assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
     let response = http_response(503);
-    assert_eq!(
-        retry_summary(&error, Some(&response)),
-        "HTTP 503 SlowDown; request_id: test-request-id"
-    );
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
     let error = OrchestratorError::response(Box::new(metadata));
-    assert_eq!(
-        retry_summary(&error, Some(&response)),
-        "HTTP 503 SlowDown; request_id: test-request-id"
-    );
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
     let error = OrchestratorError::response(Box::new(Unprintable));
-    assert_eq!(
-        retry_summary(&error, Some(&response)),
-        "HTTP 503; request_id: test-request-id"
-    );
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503");
     let error = OrchestratorError::timeout(Box::new(Unprintable));
     assert_eq!(retry_summary(&error, Some(&response)), "Timeout");
     let error = OrchestratorError::other(Unprintable);
@@ -605,10 +603,7 @@ fn http_summaries_only_use_typed_metadata_and_response_fields() {
         .build();
     let error = OrchestratorError::operation(Error::erase(metadata));
     let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-    assert_eq!(
-        retry_summary(&error, Some(&response)),
-        "HTTP 503 SlowDown; request_id: metadata-request-id"
-    );
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
 }
 
 #[tokio::test]
@@ -626,7 +621,7 @@ async fn each_retry_reports_the_previous_failure_and_early_final_failure_is_coun
         &output.lines(),
         &[
             "  Retrying test.DescribeThing (SDK attempt 2/5 after {secs}s): connector io error (ConnectionReset)",
-            "  Retrying test.DescribeThing (SDK attempt 3/5 after {secs}s): HTTP 503; request_id: test-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 3/5 after {secs}s): HTTP 503",
             "  Gave up test.DescribeThing after 3 SDK attempts",
         ],
         0.05..=2.0,
@@ -673,26 +668,11 @@ fn retry_error_codes_require_the_complete_bounded_ascii_shape() {
 }
 
 #[test]
-fn retry_request_ids_require_the_complete_bounded_ascii_shape() {
+fn retry_summaries_omit_request_ids_from_headers_and_metadata() {
     for request_id in [
-        "A".to_owned(),
-        "=".to_owned(),
+        "valid-request-id".to_owned(),
         "Az09+/=_-".to_owned(),
         "A".repeat(128),
-    ] {
-        let error = OrchestratorError::operation(Error::erase(
-            ErrorMetadata::builder()
-                .code("SlowDown")
-                .custom("aws_request_id", &request_id)
-                .build(),
-        ));
-        let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-        assert_eq!(
-            retry_summary(&error, Some(&response)),
-            format!("HTTP 503 SlowDown; request_id: {request_id}")
-        );
-    }
-    for request_id in [
         "".to_owned(),
         "A".repeat(129),
         "an id".to_owned(),
@@ -710,27 +690,27 @@ fn retry_request_ids_require_the_complete_bounded_ascii_shape() {
                 .build(),
         ));
         let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-        assert_eq!(
-            retry_summary(&error, Some(&response)),
-            "HTTP 503 SlowDown",
-            "invalid metadata ID must be omitted in full"
-        );
+        assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
     }
     let error = OrchestratorError::operation(Error::erase(
         ErrorMetadata::builder().code("SlowDown").build(),
     ));
-    let mut response = http_response(503);
-    response
-        .headers_mut()
-        .insert("x-amzn-requestid", "A".repeat(128));
-    assert_eq!(
-        retry_summary(&error, Some(&response)),
-        format!("HTTP 503 SlowDown; request_id: {}", "A".repeat(128))
-    );
-    response
-        .headers_mut()
-        .insert("x-amzn-requestid", "A".repeat(129));
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    for request_id in [
+        "valid-request-id".to_owned(),
+        "A".repeat(128),
+        "A".repeat(129),
+    ] {
+        let mut response = http_response(503);
+        response
+            .headers_mut()
+            .insert("x-amzn-requestid", request_id.clone());
+        assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+        assert!(
+            rendered_failure(&error, Some(&response))
+                .ends_with(&format!("; status: 503; request_id: {request_id}")),
+            "final rendered failures must retain the response request ID"
+        );
+    }
 }
 
 async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_value: &str) {
@@ -863,13 +843,21 @@ async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_va
             !line.contains(expected_request_value),
             "response metadata leaked a secret"
         );
+        assert!(
+            !line.contains("valid-request-id"),
+            "valid request IDs must also be absent"
+        );
+        assert!(
+            !line.contains("request_id:"),
+            "retry output must not include a request ID field"
+        );
     }
     assert_lines(
         &lines,
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/4 after {secs}s): HTTP 503; request_id: valid-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 2/4 after {secs}s): HTTP 503",
             "  Retrying test.DescribeThing (SDK attempt 3/4 after {secs}s): HTTP 503 SlowDown",
-            "  Retrying test.DescribeThing (SDK attempt 4/4 after {secs}s): HTTP 503 SlowDown; request_id: valid-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 4/4 after {secs}s): HTTP 503 SlowDown",
             "  Gave up test.DescribeThing after 4 SDK attempts",
         ],
         0.05..=2.0,
