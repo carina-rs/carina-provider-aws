@@ -234,6 +234,9 @@ mod guest {
         fn reference_forms(&self) -> ReferenceForms {
             self.inner.reference_forms()
         }
+        fn assignability_edges(&self) -> Vec<AssignabilityEdge> {
+            self.inner.assignability_edges()
+        }
         fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
             self.inner.provider_config_attribute_types()
         }

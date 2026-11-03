@@ -681,46 +681,24 @@ async fn native_resume_read_back_uses_schema_budget_without_replaying_create() {
 
 #[test]
 fn deferred_dvo_references_warn_for_email_and_budget_limited_dns() {
-    use carina_core::parser::ParsedFile;
-    use carina_core::resource::{
-        AccessPath, AuthoredResource, DeferredValue, PathSegment, Subscript,
-    };
+    use carina_core::parser::{AnalysisTree, ProviderContext, parse_file};
     use carina_core::validation::deferred_populate::validate_deferred_populate_refs;
     for method in ["EMAIL", "DNS"] {
-        let mut cert: AuthoredResource =
-            Resource::with_provider("aws", "acm.Certificate", "cert", None);
-        cert.binding = Some("cert".into());
-        cert.set_attr(
-            "validation_method",
-            Value::Concrete(ConcreteValue::String(method.into())),
+        let source = format!(
+            "let cert = aws.acm.Certificate {{ validation_method = '{method}' }}\n\
+             let record = aws.route53.RecordSet {{\n\
+               name = cert.domain_validation_options[0].resource_record.name\n\
+             }}"
         );
-        let mut record: AuthoredResource =
-            Resource::with_provider("aws", "route53.RecordSet", "record", None);
-        record.binding = Some("record".into());
-        record.set_attr(
-            "name",
-            Value::Deferred(DeferredValue::ResourceRef {
-                path: AccessPath::with_segments(
-                    "cert",
-                    "domain_validation_options",
-                    vec![
-                        PathSegment::Subscript {
-                            index: Subscript::Int { index: 0 },
-                        },
-                        PathSegment::Field {
-                            name: "resource_record".into(),
-                        },
-                        PathSegment::Field {
-                            name: "name".into(),
-                        },
-                    ],
-                ),
-            }),
-        );
-        let mut parsed = ParsedFile::default();
-        parsed.resources = vec![cert, record];
+        let parsed = parse_file(
+            &source,
+            std::path::Path::new("deferred-dvo-reference.crn"),
+            &ProviderContext::new(carina_core::EnvironmentSnapshot::empty()),
+        )
+        .expect("deferred DVO fixture parses");
+        let tree = AnalysisTree::try_from_file(&parsed).expect("fixture has parser provenance");
         let diagnostics = validate_deferred_populate_refs(
-            &parsed,
+            &tree,
             &carina_provider_aws::schemas::schema_registry(),
         );
         assert_eq!(diagnostics.len(), 1, "{method}: {diagnostics:?}");

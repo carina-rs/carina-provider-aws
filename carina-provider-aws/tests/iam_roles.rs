@@ -128,7 +128,9 @@ fn iam_roles_path_prefix_accepts_infra_prefixes_without_requiring_a_trailing_sla
     }
 }
 
-fn validate_iam_roles_name_reference(reference: &str) -> Result<(), String> {
+fn validate_iam_roles_name_reference(
+    reference: &str,
+) -> Result<(), carina_core::validation::ResourceRefTypeValidationError> {
     let source = format!(
         r#"
         let roles = read aws.iam.Roles {{
@@ -187,6 +189,12 @@ fn iam_roles_names_reference_flows_into_role_name() {
 fn iam_roles_names_list_reference_is_rejected_for_role_name() {
     let error = validate_iam_roles_name_reference("roles.names")
         .expect_err("the reference type checker must reject List -> String");
+    let error = match error {
+        carina_core::validation::ResourceRefTypeValidationError::Validation(message) => message,
+        carina_core::validation::ResourceRefTypeValidationError::AnalysisInvariant(error) => {
+            panic!("reference fixture must retain parser provenance: {error}")
+        }
+    };
     assert!(error.contains("role_name"), "{error}");
     assert!(
         error.contains("List<aws.iam.Role.Name>") && error.contains("expected aws.iam.Role.Name"),
