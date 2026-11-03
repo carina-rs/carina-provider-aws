@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use carina_aws_types::{AwsType, elbv2_target_group_grpc_code, elbv2_target_group_http_code};
 use carina_core::schema::{
-    AttributeSchema, ReferenceForms, ResourceSchema, ValidatedConfigSchema, ValidatedResourceSchema,
+    AssignabilityEdge, AttributeSchema, ReferenceForms, ResourceSchema, ValidatedConfigSchema,
+    ValidatedResourceSchema,
 };
 use carina_plugin_sdk::types::{
     AppliedIdentifier, CreateRequest, DeleteRequest, ProviderError, ProviderInfo, ReadOutcome,
@@ -48,6 +49,10 @@ impl CarinaProvider for MatcherProvider {
 
     fn reference_forms(&self) -> ReferenceForms {
         ReferenceForms::new()
+    }
+
+    fn assignability_edges(&self) -> Vec<AssignabilityEdge> {
+        Vec::new()
     }
 
     fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {

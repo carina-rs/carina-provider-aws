@@ -94,14 +94,30 @@ fn reference_leaf_is_offline_and_accepts_all_key_identifier_forms() {
 
 #[test]
 fn key_arn_outputs_are_assignable_to_reference_inputs() {
-    use carina_core::schema::TypeInSchema;
-    let source = carina_aws_types::kms_key_arn();
-    for sink in [
-        carina_aws_types::kms_key_reference(),
-        carina_aws_types::kms_key_arn_reference(),
+    use carina_core::schema::{SchemaKind, SchemaRegistry, TypeInSchema, ValidatedConfigSchema};
+    let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
+        std::sync::Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
+        SchemaRegistry::new(),
+        carina_core::EnvironmentSnapshot::empty(),
+    );
+    let registry = snapshot.schema_registry();
+    let source_schema = ValidatedConfigSchema::validate(std::collections::BTreeMap::from([(
+        "arn".into(),
+        carina_aws_types::kms_key_arn(),
+    )]))
+    .expect("KMS ARN source type admission");
+    let source = &source_schema.parts()["arn"];
+    for (resource, attribute) in [
+        ("sqs.Queue", "kms_master_key_id"),
+        ("logs.LogGroup", "kms_key_id"),
     ] {
+        let schema = registry.get("aws", resource, SchemaKind::Resource).unwrap();
+        let sink = schema.as_schema().attributes()[attribute].attr_type();
         assert!(
-            TypeInSchema::schemaless(&source).is_assignable_to(TypeInSchema::schemaless(&sink))
+            TypeInSchema::schemaless(source).is_assignable_to(
+                schema.assignment_sink(sink, &snapshot.provider_context().custom_types)
+            ),
+            "aws.kms.Key.Arn must be assignable to {resource}.{attribute}"
         );
     }
 }

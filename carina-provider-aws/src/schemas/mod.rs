@@ -5,7 +5,7 @@ pub mod generated;
 
 use carina_core::provider::ProviderFactory;
 use carina_core::schema::{
-    SchemaRegistry, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
+    AssignabilityEdge, SchemaRegistry, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
 };
 
 /// Returns all AWS schemas
@@ -21,6 +21,12 @@ pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
         .collect()
 }
 
+/// Return the provider-wide identity edges shared by native and WASM schemas.
+/// AWS declares no cross-identity assignments yet.
+pub fn assignability_edges() -> Vec<AssignabilityEdge> {
+    Vec::new()
+}
+
 /// Return the provider's one aggregate schema witness. Reference forms are
 /// intentionally empty until AWS name-or-ARN forms are designed separately.
 pub fn provider_schema_witness() -> ValidatedProviderSchemaWitness {
@@ -28,6 +34,7 @@ pub fn provider_schema_witness() -> ValidatedProviderSchemaWitness {
         all_schemas(),
         crate::AwsProviderFactory.provider_config_attribute_types(),
         Default::default(),
+        assignability_edges(),
     )
     .expect("AWS provider schemas must form one valid aggregate witness")
 }
@@ -53,12 +60,56 @@ mod tests {
     use carina_core::provider::normalize_provider_states;
     use carina_core::resource::{ConcreteValue, Current, ResolvedResource, Resource, Value};
     use carina_core::schema::{
-        AttributeType, IdentityMode, RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape,
-        ShapeWalkBudget, TypeInSchema, UniqueNameSpec,
+        AttributeType, IdentityMode, PatternAttributeType, PatternForm, PatternResourceSchema,
+        RawShape, ResourceSchema, SchemaKind, SchemaRegistry, Shape, ShapeWalkBudget, TypeInSchema,
+        UniqueNameSpec, ValidatedConfigSchema,
     };
     use indexmap::IndexMap;
 
     use crate::AwsNormalizer;
+
+    fn loaded_aws() -> carina_core::provider::LoadedProviderSnapshot {
+        carina_core::provider::loaded_provider_snapshot_from_factories(
+            std::sync::Arc::new(vec![Box::new(crate::AwsProviderFactory)]),
+            SchemaRegistry::new(),
+            carina_core::EnvironmentSnapshot::empty(),
+        )
+    }
+
+    #[test]
+    fn assignability_edges_loaded_catalog_rejects_unrelated_named_identities() {
+        use carina_core::schema::TypeAssignability;
+
+        let snapshot = loaded_aws();
+        let context = snapshot.provider_context();
+        assert!(context.custom_types.is_loaded());
+        let registry = snapshot.schema_registry();
+        let role = registry
+            .get("aws", "iam.Role", SchemaKind::Resource)
+            .unwrap();
+        let subnet = registry
+            .get("aws", "ec2.Subnet", SchemaKind::Resource)
+            .unwrap();
+        let source = role.as_schema().attributes()["role_name"].attr_type();
+        let sink = subnet.as_schema().attributes()["vpc_id"].attr_type();
+        for identity in ["aws.iam.Role.Name", "aws.ec2.Vpc.Id"] {
+            assert!(
+                context
+                    .custom_types
+                    .known()
+                    .iter()
+                    .any(|owned| owned.identity().to_string() == identity),
+                "{identity} must be declared in the loaded catalog"
+            );
+        }
+        assert_eq!(
+            role.as_schema()
+                .type_in_schema(source)
+                .assignment_to(subnet.assignment_sink(sink, &context.custom_types)),
+            TypeAssignability::Mismatch,
+            "an empty edge declaration must prove a mismatch, not defer it as Unchecked"
+        );
+    }
 
     fn validate_lifecycle_filter(filter: &str) -> Result<(), String> {
         let source = format!(
@@ -467,7 +518,10 @@ mod tests {
         }
     }
 
-    fn attr_type<'a>(schema: &'a ResourceSchema, name: &str) -> &'a AttributeType {
+    fn attr_type<'a, R: PatternForm>(
+        schema: &'a PatternResourceSchema<R>,
+        name: &str,
+    ) -> &'a PatternAttributeType<R> {
         schema
             .attributes()
             .get(name)
@@ -534,11 +588,11 @@ mod tests {
         }
     }
 
-    fn struct_field_type<'a>(
-        schema: &'a ResourceSchema,
+    fn struct_field_type<'a, R: PatternForm>(
+        schema: &'a PatternResourceSchema<R>,
         attr_name: &str,
         field_name: &str,
-    ) -> &'a AttributeType {
+    ) -> &'a PatternAttributeType<R> {
         let mut budget = ShapeWalkBudget::new(8);
         schema
             .struct_fields_with_budget(attr_type(schema, attr_name), &mut budget)
@@ -572,8 +626,8 @@ mod tests {
         super::schema_registry()
     }
 
-    fn assert_refined_string(
-        attr: &AttributeType,
+    fn assert_refined_string<R: PatternForm>(
+        attr: &PatternAttributeType<R>,
         expected_identity: &str,
         expected_pattern: Option<&str>,
     ) {
@@ -668,7 +722,9 @@ mod tests {
         );
     }
 
-    fn list_element_type(attr: &AttributeType) -> &AttributeType {
+    fn list_element_type<R: PatternForm>(
+        attr: &PatternAttributeType<R>,
+    ) -> &PatternAttributeType<R> {
         let Shape::List { element_type, .. } =
             attr.shape_ref_free().expect("generated schema is Ref-free")
         else {
@@ -677,10 +733,10 @@ mod tests {
         element_type
     }
 
-    fn nested_struct_field_type<'a>(
-        attr: &'a AttributeType,
+    fn nested_struct_field_type<'a, R: PatternForm>(
+        attr: &'a PatternAttributeType<R>,
         field_name: &str,
-    ) -> &'a AttributeType {
+    ) -> &'a PatternAttributeType<R> {
         let mut budget = ShapeWalkBudget::new(16);
         attr.struct_fields_ref_free_with_budget(&mut budget)
             .expect("generated schema is Ref-free")
@@ -704,14 +760,20 @@ mod tests {
 
     #[test]
     fn acm_resource_record_type_is_assignable_to_route53_record_set_type() {
-        let acm = super::generated::acm::certificate::acm_certificate_config();
-        let route53 = super::generated::route53::record_set::route53_record_set_config();
+        let snapshot = loaded_aws();
+        let registry = snapshot.schema_registry();
+        let acm = registry
+            .get("aws", "acm.Certificate", SchemaKind::Resource)
+            .unwrap();
+        let route53 = registry
+            .get("aws", "route53.RecordSet", SchemaKind::Resource)
+            .unwrap();
 
         let domain_validation =
-            list_element_type(attr_type(&acm.schema, "domain_validation_options"));
+            list_element_type(attr_type(acm.as_schema(), "domain_validation_options"));
         let resource_record = nested_struct_field_type(domain_validation, "resource_record");
         let acm_record_type = nested_struct_field_type(resource_record, "type");
-        let route53_record_type = attr_type(&route53.schema, "type");
+        let route53_record_type = attr_type(route53.as_schema(), "type");
 
         let Shape::Enum {
             identity: acm_identity,
@@ -734,9 +796,12 @@ mod tests {
 
         assert_eq!(acm_identity, route53_identity);
         assert!(
-            acm.schema
+            acm.as_schema()
                 .type_in_schema(acm_record_type)
-                .is_assignable_to(route53.schema.type_in_schema(route53_record_type)),
+                .is_assignable_to(route53.assignment_sink(
+                    route53_record_type,
+                    &snapshot.provider_context().custom_types,
+                )),
             "ACM's computed ResourceRecord.Type must feed Route 53 RecordSet.Type"
         );
     }
@@ -937,35 +1002,52 @@ mod tests {
 
     #[test]
     fn route53_alias_target_hosted_zone_id_enforces_assignable_source_identities() {
-        let record_set = super::generated::route53::record_set::route53_record_set_config();
-        let sink = struct_field_type(&record_set.schema, "alias_target", "hosted_zone_id");
-        assert!(matches!(record_set.schema.shape_of(sink), Shape::Union));
+        let snapshot = loaded_aws();
+        let record_set = snapshot
+            .schema_registry()
+            .get("aws", "route53.RecordSet", SchemaKind::Resource)
+            .unwrap();
+        let sink = struct_field_type(record_set.as_schema(), "alias_target", "hosted_zone_id");
+        assert!(matches!(
+            record_set.as_schema().shape_of(sink),
+            Shape::Union
+        ));
+        let sink = record_set.assignment_sink(sink, &snapshot.provider_context().custom_types);
+        let sources = ValidatedConfigSchema::validate(std::collections::BTreeMap::from([
+            (
+                "route53_id".into(),
+                carina_aws_types::route53_hosted_zone_id(),
+            ),
+            (
+                "cloudfront_id".into(),
+                carina_aws_types::cloudfront_hosted_zone_id(),
+            ),
+            ("plain_string".into(), AttributeType::string()),
+            ("unrelated_id".into(), carina_aws_types::iam_role_arn()),
+        ]))
+        .expect("assignment source types must pass admission");
 
-        let route53_id = carina_aws_types::route53_hosted_zone_id();
+        let route53_id = &sources.parts()["route53_id"];
         assert!(
-            TypeInSchema::schemaless(&route53_id)
-                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            TypeInSchema::schemaless(route53_id).is_assignable_to(sink),
             "Route 53 hosted-zone IDs must be assignable to alias_target.hosted_zone_id"
         );
 
-        let cloudfront_id = carina_aws_types::cloudfront_hosted_zone_id();
+        let cloudfront_id = &sources.parts()["cloudfront_id"];
         assert!(
-            TypeInSchema::schemaless(&cloudfront_id)
-                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            TypeInSchema::schemaless(cloudfront_id).is_assignable_to(sink),
             "the CloudFront global hosted-zone enum must remain assignable"
         );
 
-        let plain_string = AttributeType::string();
+        let plain_string = &sources.parts()["plain_string"];
         assert!(
-            !TypeInSchema::schemaless(&plain_string)
-                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            !TypeInSchema::schemaless(plain_string).is_assignable_to(sink),
             "an unrefined String source must not satisfy an identified sink"
         );
 
-        let unrelated_id = carina_aws_types::iam_role_arn();
+        let unrelated_id = &sources.parts()["unrelated_id"];
         assert!(
-            !TypeInSchema::schemaless(&unrelated_id)
-                .is_assignable_to(record_set.schema.type_in_schema(sink)),
+            !TypeInSchema::schemaless(unrelated_id).is_assignable_to(sink),
             "an unrelated identified String must not satisfy the hosted-zone sink"
         );
     }
@@ -1173,22 +1255,25 @@ mod tests {
 
     #[test]
     fn s3_bucket_hosted_zone_id_outputs_are_assignable_to_route53_alias_target() {
-        let record_set = super::generated::route53::record_set::route53_record_set_config();
-        let sink = struct_field_type(&record_set.schema, "alias_target", "hosted_zone_id");
-        let bucket = super::generated::s3::bucket::s3_bucket_config();
-        let bucket_data_source =
-            super::generated::s3::bucket_data_source::s3_bucket_data_source_config();
+        let snapshot = loaded_aws();
+        let registry = snapshot.schema_registry();
+        let record_set = registry
+            .get("aws", "route53.RecordSet", SchemaKind::Resource)
+            .unwrap();
+        let sink = struct_field_type(record_set.as_schema(), "alias_target", "hosted_zone_id");
 
-        for (label, source_schema) in [
-            ("s3.Bucket resource", &bucket.schema),
-            ("s3.Bucket data source", &bucket_data_source.schema),
+        for (label, kind) in [
+            ("s3.Bucket resource", SchemaKind::Resource),
+            ("s3.Bucket data source", SchemaKind::DataSource),
         ] {
+            let bucket = registry.get("aws", "s3.Bucket", kind).unwrap();
+            let source_schema = bucket.as_schema();
             let source = attr_type(source_schema, "hosted_zone_id");
             assert_refined_string(source, "aws.route53.HostedZone.Id", Some("^Z[A-Z0-9]+$"));
             assert!(
-                source_schema
-                    .type_in_schema(source)
-                    .is_assignable_to(record_set.schema.type_in_schema(sink)),
+                source_schema.type_in_schema(source).is_assignable_to(
+                    record_set.assignment_sink(sink, &snapshot.provider_context().custom_types,)
+                ),
                 "{label} hosted_zone_id must be assignable to the Route 53 alias target"
             );
         }
