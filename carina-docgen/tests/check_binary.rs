@@ -11,6 +11,7 @@ const VALID_PAGE: &str = concat!(
     "# aws.fixture.Widget\n\n",
     "## Argument Reference\n\n",
     "### `name`\n\n",
+    "- **Type:** String(pattern: `^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\\z`)\n\n",
     "See [details](#details).\n\n",
     "## Details\n",
 );
@@ -60,7 +61,6 @@ fn checker_reads_markdown_recursively_from_a_directory() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("1 Markdown page"), "{stdout}");
     assert!(stdout.contains("0 unresolved fragments"), "{stdout}");
-    assert!(stdout.contains("0 links inside code spans"), "{stdout}");
     assert!(stdout.contains("0 duplicated section headings"), "{stdout}");
     assert!(stdout.contains("0 table column mismatches"), "{stdout}");
 }

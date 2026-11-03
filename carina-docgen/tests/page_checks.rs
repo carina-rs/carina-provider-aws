@@ -1,6 +1,9 @@
 use carina_docgen::{
-    DocgenError, Heading, PageBuilder, PageViolationKind, TableCell, check_page, heading_ids,
+    DocgenError, Heading, PageBuilder, PageViolationKind, TableCell, TypeDisplay, check_page,
+    heading_ids,
 };
+use comrak::nodes::{AstNode, NodeValue};
+use comrak::{Arena, Options, parse_document};
 
 const IPV6_DESCRIPTION: &str =
     "Indicates whether to enable Ipv6 Support for Vpc Attachment. Valid Values: enable | disable";
@@ -21,6 +24,200 @@ fn violation_kinds(markdown: &str) -> Vec<PageViolationKind> {
 }
 
 fn assert_std_error<T, E: std::error::Error>(_: &Result<T, E>) {}
+
+fn render_like_registry(markdown: &str, check: impl for<'a> FnOnce(&'a AstNode<'a>, &str, &str)) {
+    // carina-docs-bundle c6bfdcec781abf0ddb61268e5e7d114717353e4f::render_markdown.
+    let mut options = Options::default();
+    options.extension.table = true;
+    options.extension.strikethrough = true;
+    options.extension.autolink = true;
+    options.render.r#unsafe = false;
+    let arena = Arena::new();
+    let root = parse_document(&arena, markdown, &options);
+    let mut html = String::new();
+    comrak::format_html(root, &options, &mut html).unwrap();
+    // Inline characters printed by the HTML renderer, without block separators.
+    let visible: String = root
+        .descendants()
+        .filter_map(|node| match &node.data.borrow().value {
+            NodeValue::Text(text) => Some(text.to_string()),
+            NodeValue::Code(code) => Some(code.literal.clone()),
+            _ => None,
+        })
+        .collect();
+    check(root, &html, &visible);
+}
+
+#[test]
+fn type_display_link_labels_are_literal() {
+    let display = TypeDisplay::sequence([
+        TypeDisplay::link(Target::Options, "A`"),
+        TypeDisplay::link(Target::Options, "B"),
+        TypeDisplay::code("c"),
+    ]);
+    let mut page = PageBuilder::new();
+    display.write_to(&mut page);
+    page.push_str("\n\n");
+    page.target_heading(Target::Options, Heading::plain(2, "X"))
+        .unwrap();
+    let markdown = page.finish().expect("valid linked type display");
+    render_like_registry(&markdown, |_, html, visible| {
+        assert_eq!(visible, "A`BcX", "{html}");
+        assert_eq!(html.matches("<a ").count(), 2, "{html}");
+        assert_eq!(html.matches("<code>").count(), 1, "{html}");
+        assert!(
+            html.contains("<a href=\"#x\">A`</a><a href=\"#x\">B</a><code>c</code>"),
+            "{html}"
+        );
+        assert!(!html.contains("<del>"), "{html}");
+    });
+}
+
+#[test]
+fn type_display_text_preserves_literals_with_registry_extensions() {
+    for literal in [
+        "~~String~~",
+        "~String~",
+        "[^footnote]",
+        "[x] task",
+        "[ ] task",
+        "- [x] task",
+        "+ [ ] task",
+        "1. task",
+        "1) task",
+        "---",
+        "*String* _String_ `String` [String](#missing) <String> &amp;",
+    ] {
+        assert_literal_display(literal);
+    }
+}
+
+#[test]
+fn type_display_text_disables_registry_autolinks() {
+    for literal in [
+        "https://example.com",
+        "http://example.com",
+        "ftp://example.com",
+        "www.example.com",
+        "person@example.com",
+        "mailto:person@example.com",
+        "xmpp:person@example.com",
+        "<https://example.com>",
+        "www.example.com/path?a=b&c=d",
+    ] {
+        assert_literal_display(literal);
+    }
+}
+
+#[test]
+fn type_display_link_labels_escape_registry_syntax() {
+    for label in [
+        "A`",
+        "[Options]",
+        "~~String~~",
+        "*String* _String_",
+        "https://example.com",
+        "www.example.com",
+        "person@example.com",
+        r"\|",
+        "<Options> &amp;",
+        "[^footnote]",
+        "[x] task",
+    ] {
+        for in_table in [false, true] {
+            let display = TypeDisplay::link(Target::Options, label);
+            let mut page = PageBuilder::new();
+            if in_table {
+                page.table(["Label"], [[display.table_cell()]]).unwrap();
+            } else {
+                display.write_to(&mut page);
+            }
+            page.push_str("\n\n");
+            page.target_heading(Target::Options, Heading::plain(2, "X"))
+                .unwrap();
+            let markdown = page.finish().expect("literal link label");
+            render_like_registry(&markdown, |_, html, visible| {
+                let mut escaped = String::new();
+                comrak::html::escape(&mut escaped, label).unwrap();
+                assert!(
+                    html.contains(&format!("<a href=\"#x\">{escaped}</a>")),
+                    "{html}"
+                );
+                assert_eq!(html.matches("<a ").count(), 1, "{html}");
+                assert!(!html.contains("<code>"), "{html}");
+                assert!(!html.contains("<del>"), "{html}");
+                let expected = if in_table {
+                    format!("Label{label}X")
+                } else {
+                    format!("{label}X")
+                };
+                assert_eq!(visible, expected, "{html}");
+            });
+        }
+    }
+}
+
+#[test]
+fn type_display_split_literals_cannot_form_autolinks() {
+    for parts in [
+        ["https:", "//example.com"],
+        ["ww", "w.example.com"],
+        ["person", "@example.com"],
+    ] {
+        let literal = parts.concat();
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        for part in parts {
+            TypeDisplay::text(part).write_to(&mut page);
+        }
+        let markdown = page.finish().expect("literal sequence");
+        render_like_registry(&markdown, |_, html, visible| {
+            assert_eq!(visible, literal);
+            assert!(!html.contains("<a "), "{html}");
+            assert!(!html.contains("<del>"), "{html}");
+            assert!(!html.contains("<code>"), "{html}");
+        });
+    }
+}
+
+fn assert_literal_display(literal: &str) {
+    for in_table in [false, true] {
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        let display = TypeDisplay::text(literal);
+        if in_table {
+            page.table(["Literal"], [[display.table_cell()]]).unwrap();
+        } else {
+            display.write_to(&mut page);
+        }
+        let markdown = page.finish().expect("literal text introduces no links");
+        render_like_registry(&markdown, |_, html, visible| {
+            let expected = if in_table {
+                format!("Literal{literal}")
+            } else {
+                literal.to_string()
+            };
+            assert_eq!(visible, expected, "{html}");
+            assert!(
+                !html.contains("<a "),
+                "literal was autolinked: {literal:?}: {html}"
+            );
+            assert!(
+                !html.contains("<del>"),
+                "literal became strikethrough: {literal:?}: {html}"
+            );
+            assert!(
+                !html.contains("<code>"),
+                "literal became code: {literal:?}: {html}"
+            );
+            let mut escaped = String::new();
+            comrak::html::escape(&mut escaped, literal).unwrap();
+            if in_table {
+                assert!(html.contains(&format!("<td>{escaped}</td>")), "{html}");
+            } else {
+                assert_eq!(html, format!("<p>{escaped}</p>\n"));
+            }
+        });
+    }
+}
 
 #[test]
 fn attribute_reference_entry_writes_description_and_resolves_type_links() {
@@ -81,11 +278,236 @@ fn check_page_rejects_unresolved_fragment_only_links() {
 }
 
 #[test]
-fn check_page_rejects_markdown_links_inside_code_spans() {
-    assert_eq!(
-        violation_kinds("# Page\n\n`List<[Struct(X)](#x)>`\n\n## X\n"),
-        [PageViolationKind::LinkInsideCodeSpan]
-    );
+fn check_page_accepts_literal_link_syntax_inside_code_spans() {
+    check_page("# Page\n\n`List<[Struct(X)](#not-a-heading)>`\n")
+        .expect("code spans contain literal text, including link syntax");
+}
+
+#[test]
+fn type_display_pattern_is_literal_code() {
+    let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
+    let display = TypeDisplay::sequence([
+        TypeDisplay::text("String(pattern: "),
+        TypeDisplay::code(pattern),
+        TypeDisplay::text(")"),
+    ]);
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.attribute_reference_entry("name", display.table_cell(), None)
+        .expect("valid type display");
+    page.table(["Type"], [[display.table_cell()]])
+        .expect("valid table");
+
+    let markdown = page
+        .finish()
+        .expect("regex is literal, not a Markdown link");
+    assert!(markdown.contains(&format!("String(pattern: `{pattern}`)")));
+    check_page(&markdown).expect("the rendered pattern passes page validation");
+}
+
+#[test]
+fn type_display_keeps_nested_collection_links_outside_code_spans() {
+    let link = || TypeDisplay::link(Target::Options, "Struct(X)");
+    let displays = [
+        TypeDisplay::list(link()),
+        TypeDisplay::map(link()),
+        TypeDisplay::list(TypeDisplay::map(TypeDisplay::union([
+            TypeDisplay::text("String"),
+            link(),
+        ]))),
+        TypeDisplay::union([TypeDisplay::list(link()), TypeDisplay::text("Bool")]),
+    ];
+    let mut page = PageBuilder::new();
+    for display in &displays {
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+    }
+    page.table(
+        ["Type"],
+        displays.iter().map(|display| [display.table_cell()]),
+    )
+    .unwrap();
+    page.push_str("\n");
+    page.target_heading(Target::Options, Heading::plain(2, "X"))
+        .unwrap();
+
+    let markdown = page.finish().expect("all collection links resolve");
+    assert!(markdown.contains(r"List\<[Struct(X)](#x)\>"));
+    render_like_registry(&markdown, |root, _, _| {
+        assert_eq!(
+            root.descendants()
+                .filter(|node| matches!(node.data.borrow().value, NodeValue::Link(_)))
+                .count(),
+            displays.len() * 2,
+            "each type link must render as a clickable link: {markdown}"
+        );
+        assert!(
+            root.descendants()
+                .all(|node| !matches!(node.data.borrow().value, NodeValue::Code(_)))
+        );
+    });
+}
+
+#[test]
+fn type_display_adjacent_code_parts_preserve_links() {
+    let parts = || {
+        [
+            TypeDisplay::code("a"),
+            TypeDisplay::code("`"),
+            TypeDisplay::link(Target::Options, "X"),
+            TypeDisplay::code("`"),
+        ]
+    };
+    let displays = [
+        vec![TypeDisplay::sequence(parts())],
+        vec![TypeDisplay::sequence([
+            TypeDisplay::sequence([TypeDisplay::code("a"), TypeDisplay::code("")]),
+            TypeDisplay::text(""),
+            TypeDisplay::sequence([
+                TypeDisplay::code("`"),
+                TypeDisplay::link(Target::Options, "X"),
+                TypeDisplay::code("`"),
+            ]),
+        ])],
+        Vec::from(parts()),
+    ];
+    for parts in displays {
+        for in_table in [false, true] {
+            let mut page = PageBuilder::new();
+            if in_table {
+                page.table(
+                    ["Type"],
+                    [[TypeDisplay::sequence(parts.clone()).table_cell()]],
+                )
+                .unwrap();
+            } else {
+                for part in &parts {
+                    part.write_to(&mut page);
+                }
+            }
+            page.push_str("\n\n");
+            page.target_heading(Target::Options, Heading::plain(2, "X"))
+                .unwrap();
+
+            let markdown = page.finish().expect("the page checker accepts the display");
+            check_page(&markdown).expect("the finished page remains valid");
+            render_like_registry(&markdown, |root, _, _| {
+                let links: Vec<String> = root
+                    .descendants()
+                    .filter_map(|node| match &node.data.borrow().value {
+                        NodeValue::Link(link) => Some(link.url.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(links, ["#x"], "the link must remain clickable: {markdown}");
+                let code: Vec<String> = root
+                    .descendants()
+                    .filter_map(|node| match &node.data.borrow().value {
+                        NodeValue::Code(code) => Some(code.literal.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    code,
+                    ["a`", "`"],
+                    "adjacent code literals coalesce: {markdown}"
+                );
+                assert!(markdown.contains("`` a` ``[X](#x)`` ` ``"), "{markdown}");
+            });
+        }
+    }
+}
+
+#[test]
+fn type_display_table_code_preserves_backslashes_before_pipes() {
+    let literals = [r"\|", "|", r"\\|", r"\\\|", r"\|\|", r"`\|`"];
+    let split_literal = TypeDisplay::sequence([TypeDisplay::code("\\"), TypeDisplay::code("|")]);
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.table(
+        ["Pattern"],
+        literals
+            .map(|literal| [TypeDisplay::code(literal).table_cell()])
+            .into_iter()
+            .chain([[split_literal.table_cell()]]),
+    )
+    .unwrap();
+    let markdown = page.finish().expect("escaped pipes stay in their cells");
+    render_like_registry(&markdown, |root, html, _| {
+        let code: Vec<String> = root
+            .descendants()
+            .filter(|node| matches!(node.data.borrow().value, NodeValue::TableRow(false)))
+            .flat_map(|row| row.children())
+            .map(|cell| {
+                cell.descendants()
+                    .filter_map(|node| match &node.data.borrow().value {
+                        NodeValue::Code(code) => Some(code.literal.clone()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(
+            code,
+            literals.into_iter().chain([r"\|"]).collect::<Vec<_>>(),
+            "GFM must preserve literal code text: {markdown}"
+        );
+        assert!(
+            html.contains("<td><code>\\</code><!-- raw HTML omitted --><code>|</code></td>"),
+            "{html}"
+        );
+        assert!(html.contains("<code>|</code>"), "{html}");
+    });
+}
+
+#[test]
+fn type_display_code_preserves_backticks_spaces_and_pipes() {
+    let literals = ["`[x](#literal)``", "a|b", " value ", "  "];
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    for literal in literals {
+        TypeDisplay::code(literal).write_to(&mut page);
+        page.push_str("\n\n");
+    }
+    page.table(
+        ["Type"],
+        literals.map(|literal| [TypeDisplay::code(literal).table_cell()]),
+    )
+    .unwrap();
+
+    let markdown = page.finish().expect("literal code passes validation");
+    render_like_registry(&markdown, |root, _, _| {
+        let actual: Vec<String> = root
+            .descendants()
+            .filter_map(|node| match &node.data.borrow().value {
+                NodeValue::Code(code) => Some(code.literal.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(actual, literals.repeat(2), "{markdown}");
+    });
+}
+
+#[test]
+fn type_display_text_cannot_introduce_links_or_code() {
+    let display = TypeDisplay::text("[Struct(X)](#absent) and `literal`");
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    display.write_to(&mut page);
+    page.push_str("\n\n");
+    TypeDisplay::list(display).write_to(&mut page);
+
+    let markdown = page.finish().expect("text never introduces a link");
+    render_like_registry(&markdown, |root, _, _| {
+        assert!(
+            root.descendants()
+                .all(|node| !matches!(node.data.borrow().value, NodeValue::Link(_)))
+        );
+        let code: Vec<String> = root
+            .descendants()
+            .filter_map(|node| match &node.data.borrow().value {
+                NodeValue::Code(code) => Some(code.literal.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(code, ["List<[Struct(X)](#absent) and `literal`>"]);
+    });
 }
 
 #[test]
