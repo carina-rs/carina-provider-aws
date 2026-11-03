@@ -48,14 +48,14 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("path", AttributeType::refined_string(None, Some("^(?:/|/[\\x21-\\x7E]+/)\\z".to_string()), Some((Some(1), Some(512))), None))
+            AttributeSchema::optional("path", carina_aws_types::iam_path())
                 .create_only()
                 .with_description("The path to the role. For more information about paths, see IAM Identifiers in the IAM User Guide. This parameter is optional. If it is not included, ...")
                 .with_provider_name("Path")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("role_name", AttributeType::refined_string(None, Some("^[A-Za-z0-9_+=,.@-]+\\z".to_string()), Some((Some(1), Some(64))), None))
+            AttributeSchema::required("role_name", carina_aws_types::iam_role_name())
                 .create_only()
                 .identity()
                 .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")

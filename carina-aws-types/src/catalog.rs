@@ -12,9 +12,13 @@ use carina_core::schema::{AttributeType, DslTransform, TypeIdentity, legacy_vali
 use crate::{
     validate_arn, validate_availability_zone, validate_availability_zone_id,
     validate_aws_account_id, validate_aws_region, validate_aws_resource_id, validate_iam_arn,
-    validate_iam_role_id, validate_ipam_pool_id, validate_kms_key_arn, validate_kms_key_id,
-    validate_prefixed_resource_id,
+    validate_iam_policy_name, validate_iam_role_id, validate_iam_role_name, validate_ipam_pool_id,
+    validate_kms_key_arn, validate_kms_key_id, validate_prefixed_resource_id,
 };
+
+// IAM roleNameType and policyNameType use ^[\w+=,.@-]+$.
+// Spell out ASCII \w and require the match to consume the entire input.
+const IAM_NAME_PATTERN: &str = r"^[A-Za-z0-9_+=,.@-]+\z";
 
 fn validated_string(
     identity: TypeIdentity,
@@ -507,6 +511,31 @@ define_aws_type_catalog! {
         valid_sample: "2026-01-01T00:00:00Z",
         has_validator: true,
         constructor: s3_lifecycle_date_type,
+    },
+    /// IAM role name. Smithy com.amazonaws.iam#roleNameType in
+    /// carina-provider-aws/tests/fixtures/smithy/iam.json: length 1..64.
+    /// All 22 RoleName operation input members use this shape (2026-11-03 audit).
+    IamRoleName => iam_role_name {
+        segments: ["iam", "Role"],
+        kind: "Name",
+        valid_sample: "example-role",
+        has_validator: true,
+        constructor: |identity| validated_string(
+            identity, IAM_NAME_PATTERN, Some((Some(1), Some(64))), validate_iam_role_name,
+        ),
+    },
+    /// IAM policy name, including inline policies. Smithy policyNameType in
+    /// carina-provider-aws/tests/fixtures/smithy/iam.json: length 1..128.
+    /// All 11 PolicyName input members use this shape, including nested inputs
+    /// (2026-11-03 audit). Shared with AWSCC's RolePolicy and Role.Policies.
+    IamPolicyName => iam_policy_name {
+        segments: ["iam", "Policy"],
+        kind: "Name",
+        valid_sample: "example-policy",
+        has_validator: true,
+        constructor: |identity| validated_string(
+            identity, IAM_NAME_PATTERN, Some((Some(1), Some(128))), validate_iam_policy_name,
+        ),
     },
     /// IAM role ID.
     IamRoleId => iam_role_id {
@@ -1062,6 +1091,69 @@ mod tests {
     }
 
     #[test]
+    fn iam_name_catalog_rows_match_smithy_constraints_and_callbacks() {
+        for (resource, maximum, constructor, sample) in [
+            (
+                "Role",
+                64,
+                "iam_role_name",
+                "AWSReservedSSO_AdministratorAccess_0123456789abcdef",
+            ),
+            ("Policy", 128, "iam_policy_name", "carina-example-policy"),
+        ] {
+            let expected = format!("aws.iam.{resource}.Name");
+            let row = AwsType::ALL
+                .iter()
+                .copied()
+                .find(|row| row.identity().to_string() == expected)
+                .unwrap_or_else(|| panic!("missing shared catalog row {expected}"));
+            let identity = row.identity();
+            assert_eq!(identity.provider.as_deref(), Some("aws"));
+            assert_eq!(identity.segments, ["iam", resource]);
+            assert_eq!(identity.kind, "Name");
+            assert_eq!(
+                row.constructor_path(),
+                format!("carina_aws_types::{constructor}()")
+            );
+            assert!(row.has_validator());
+            let attr = row.attribute_type();
+            let RawShape::String {
+                identity: Some(actual),
+                pattern,
+                length,
+                validate: Some(validate),
+                ..
+            } = attr.raw_shape()
+            else {
+                panic!("{expected} must be a validated, identity-bearing String");
+            };
+            assert_eq!(actual, &identity);
+            assert_eq!(pattern, Some(r"^[A-Za-z0-9_+=,.@-]+\z"));
+            assert_eq!(length, Some((Some(1), Some(maximum))));
+            for valid in [
+                sample.to_string(),
+                "AZaz09_+=,.@-".to_string(),
+                "a".repeat(maximum as usize),
+            ] {
+                let value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
+                assert!(validate(&value).is_ok(), "{expected}: {valid:?}");
+            }
+            for invalid in [
+                "".to_string(),
+                "bad name".to_string(),
+                "a".repeat(maximum as usize + 1),
+                "valid\n".to_string(),
+                "rôle".to_string(),
+                "invalid/".to_string(),
+            ] {
+                let value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
+                assert!(validate(&value).is_err(), "{expected}: {invalid:?}");
+            }
+            assert!(validate(&Value::Concrete(ConcreteValue::Int(1))).is_err());
+        }
+    }
+
+    #[test]
     fn logs_log_group_retention_integer_enum_matches_awscc() {
         let row = AwsType::ALL
             .iter()
@@ -1127,6 +1219,8 @@ mod tests {
             AwsType::AvailabilityZoneId,
             AwsType::S3LifecycleDate,
             AwsType::LogsLogGroupRetentionInDays,
+            AwsType::IamRoleName,
+            AwsType::IamPolicyName,
             AwsType::IamRoleId,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
@@ -1161,7 +1255,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            39,
+            41,
             "the shared catalog validator contract changed"
         );
 
@@ -1267,6 +1361,8 @@ Region|aws||Region|ap-northeast-1|true
 AvailabilityZone|aws|AvailabilityZone|ZoneName|ap-northeast-1a|true
 AvailabilityZoneId|aws|AvailabilityZone|ZoneId|use1-az1|true
 S3LifecycleDate|aws|s3/BucketLifecycleConfiguration|LifecycleDate|2026-01-01T00:00:00Z|true
+IamRoleName|aws|iam/Role|Name|example-role|true
+IamPolicyName|aws|iam/Policy|Name|example-policy|true
 IamRoleId|aws|iam/Role|Id|AROA1234567890EXAMPLE|true
 IamRoleArn|aws|iam/Role|Arn|arn:aws:iam::123456789012:role/example-role|true
 IamPolicyArn|aws|iam/Policy|Arn|arn:aws:iam::123456789012:policy/example-policy|true

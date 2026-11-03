@@ -35,18 +35,6 @@ fn iam_roles_names_element_refinement_is_byte_identical_to_role_name() {
             panic!("names must remain a List");
         };
         assert!(!ordered, "names remain unordered");
-        let RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
-        } = element_type.raw_shape()
-        else {
-            panic!("names[] must remain a String");
-        };
-        assert!(identity.is_none(), "name identities belong to #504");
-        assert_eq!(pattern, Some(r"^[A-Za-z0-9_+=,.@-]+\z"));
-        assert_eq!(length, Some((Some(1), Some(64))));
         let actual = attribute_type_to_protocol(element_type).unwrap();
         assert_eq!(
             serde_json::to_value(&actual).unwrap(),
@@ -57,31 +45,31 @@ fn iam_roles_names_element_refinement_is_byte_identical_to_role_name() {
 
 #[test]
 fn iam_roles_names_validate_aws_reads_and_reject_aws_probe_invalid_names() {
-    for schema in iam_roles_schemas() {
-        let names = schema.effective_attribute("names").unwrap();
-        for (name, expected) in [
-            ("carina-588-probe".to_string(), true),
-            (
-                "AWSReservedSSO_AdministratorAccess_0123456789abcdef".to_string(),
-                true,
-            ),
-            ("AZaz09_+=,.@-".to_string(), true),
-            ("a".repeat(64), true),
-            ("".to_string(), false),
-            ("bad name".to_string(), false),
-            ("a".repeat(65), false),
-            ("valid\n".to_string(), false),
-            ("rôle".to_string(), false),
-        ] {
-            let value: Value = Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
-                ConcreteValue::String(name.clone().into()),
-            )]));
-            assert_eq!(
-                names.validate(&value).is_ok(),
-                expected,
-                "names[] = {name:?}"
-            );
-        }
+    // Protocol callbacks are covered by the SDK bridge test in src/main.rs.
+    let schema = iam_roles_config().schema.validate().expect("Roles schema");
+    let names = schema.effective_attribute("names").unwrap();
+    for (name, expected) in [
+        ("carina-588-probe".to_string(), true),
+        (
+            "AWSReservedSSO_AdministratorAccess_0123456789abcdef".to_string(),
+            true,
+        ),
+        ("AZaz09_+=,.@-".to_string(), true),
+        ("a".repeat(64), true),
+        ("".to_string(), false),
+        ("bad name".to_string(), false),
+        ("a".repeat(65), false),
+        ("valid\n".to_string(), false),
+        ("rôle".to_string(), false),
+    ] {
+        let value: Value = Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+            ConcreteValue::String(name.clone().into()),
+        )]));
+        assert_eq!(
+            names.validate(&value).is_ok(),
+            expected,
+            "names[] = {name:?}"
+        );
     }
 }
 
@@ -201,7 +189,7 @@ fn iam_roles_names_list_reference_is_rejected_for_role_name() {
         .expect_err("the reference type checker must reject List -> String");
     assert!(error.contains("role_name"), "{error}");
     assert!(
-        error.contains("List") && error.contains("String"),
+        error.contains("List<aws.iam.Role.Name>") && error.contains("expected aws.iam.Role.Name"),
         "{error}"
     );
 }

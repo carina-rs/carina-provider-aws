@@ -1394,6 +1394,55 @@ mod tests {
     }
 
     #[test]
+    fn iam_role_name_witness_dispatches_through_the_sdk_bridge() {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS schemas must build a dispatch table");
+        let row = carina_aws_types::AwsType::IamRoleName;
+        let expected = row.identity();
+        let role = cache
+            .schemas()
+            .iter()
+            .find(|schema| schema.parts().resource_type == "iam.Role")
+            .expect("generated Role schema");
+        let RawShape::String {
+            identity: Some(identity),
+            pattern,
+            length,
+            validate: Some(_),
+            ..
+        } = role.parts().attributes["role_name"].attr_type().raw_shape()
+        else {
+            panic!("role_name must be the shared validated String");
+        };
+        assert_eq!(identity, &expected);
+        assert_eq!(pattern, Some(r"^[A-Za-z0-9_+=,.@-]+\z"));
+        assert_eq!(length, Some((Some(1), Some(64))));
+        let identity = wire_identity(&expected);
+        for valid in [
+            row.valid_sample().to_string(),
+            "AWSReservedSSO_AdministratorAccess_0123456789abcdef".to_string(),
+            "AZaz09_+=,.@-".to_string(),
+            "a".repeat(64),
+        ] {
+            dispatch_custom_type_validation(&cache, &identity, &valid)
+                .unwrap_or_else(|error| panic!("valid role name {valid:?}: {error}"));
+        }
+        for invalid in [
+            "".to_string(),
+            "bad name".to_string(),
+            "a".repeat(65),
+            "valid\n".to_string(),
+            "rôle".to_string(),
+        ] {
+            assert!(
+                dispatch_custom_type_validation(&cache, &identity, &invalid).is_err(),
+                "invalid role name {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
     fn logs_log_group_retention_witness_dispatches_through_the_sdk_bridge() {
         let provider = AwsProcessProvider::new();
         let cache = ProviderSchemaCache::from_provider(&provider)

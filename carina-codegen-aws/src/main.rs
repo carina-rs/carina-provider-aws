@@ -123,6 +123,8 @@ enum TypeOverride {
         min_length: u64,
         max_length: u64,
     },
+    /// Share an anonymous String constructor and derive documentation from it.
+    AnonymousStringConstructor(&'static str),
     /// Use the identity, validation, and allowed-value metadata of a shared row.
     SharedType(AwsType),
     /// Override only the enum identity, retaining Smithy values and DSL aliases.
@@ -148,7 +150,26 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             ),
             format!("String(length: {min_length}..={max_length}, pattern: `{pattern}`)"),
         ),
+        TypeOverride::AnonymousStringConstructor(constructor) => {
+            let attr = attribute_type_from_code(constructor)
+                .expect("anonymous String constructor must resolve");
+            let RawShape::String {
+                identity: None,
+                pattern: Some(pattern),
+                length: Some((Some(minimum), Some(maximum))),
+                validate: None,
+                ..
+            } = attr.raw_shape()
+            else {
+                panic!("anonymous String constructor must expose its pattern and bounds");
+            };
+            (
+                constructor.to_string(),
+                format!("String(length: {minimum}..={maximum}, pattern: `{pattern}`)"),
+            )
+        }
         TypeOverride::SharedType(row) => {
+            let attr = row.attribute_type();
             let display = if let Some(values) = row.allowed_int_values() {
                 let values = values
                     .iter()
@@ -156,6 +177,16 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{} (Int; allowed: {values})", row.identity().kind)
+            } else if let RawShape::String {
+                pattern: Some(pattern),
+                length: Some((Some(minimum), Some(maximum))),
+                ..
+            } = attr.raw_shape()
+            {
+                format!(
+                    "{} (String; length: {minimum}..={maximum}, pattern: `{pattern}`)",
+                    type_code_to_display(row.constructor_path())
+                )
             } else {
                 type_code_to_display(row.constructor_path())
             };
@@ -534,6 +565,18 @@ fn emit_replacement_builder(
     match replacement {
         ReplacementClass::UniqueName(provider_name) => {
             let provider_name_snake = provider_name.to_snake_case();
+            let string_override = match resource_type_overrides()
+                .get(&(resource_type_name, provider_name_snake.as_str()))
+            {
+                Some(
+                    TypeOverride::RefinedString { .. }
+                    | TypeOverride::AnonymousStringConstructor(_),
+                ) => true,
+                Some(TypeOverride::SharedType(row)) => {
+                    matches!(row.attribute_type().raw_shape(), RawShape::String { .. })
+                }
+                _ => false,
+            };
             let attr = attrs
                 .iter()
                 .find(|attr| attr.provider_name.to_snake_case() == provider_name_snake);
@@ -547,12 +590,7 @@ fn emit_replacement_builder(
                     Some(attr) if attr.is_read_only => Err("read-only"),
                     Some(attr)
                         if !attr.is_plain_string
-                            || (attr.type_code != PLAIN_STRING_TYPE_CODE
-                                && !matches!(
-                                    resource_type_overrides()
-                                        .get(&(resource_type_name, provider_name_snake.as_str())),
-                                    Some(TypeOverride::RefinedString { .. })
-                                )) =>
+                            || (attr.type_code != PLAIN_STRING_TYPE_CODE && !string_override) =>
                     {
                         Err("not a plain string")
                     }
@@ -2621,6 +2659,8 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         };
     }
     let constructors = constructors![
+        iam_path,
+        iam_path_prefix,
         iam_policy_document,
         sqs_redrive_policy,
         sqs_redrive_allow_policy,
@@ -6462,7 +6502,12 @@ fn generate_data_source(
     }
 
     // Determine needed imports based on actual type strings used.
-    let needs_types = ds_attrs.iter().any(|a| a.type_str.contains("types::"));
+    // Match managed schemas: fully qualified shared helpers need no `types` import.
+    let needs_types = ds_attrs.iter().any(|a| {
+        a.type_str
+            .replace("carina_aws_types::", "")
+            .contains("types::")
+    });
     let needs_attribute_type = ds_attrs
         .iter()
         .any(|a| a.type_str.contains("AttributeType::"));
@@ -7308,23 +7353,16 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
-            // carina-provider-aws/tests/fixtures/smithy/iam.json:
-            // com.amazonaws.iam#roleNameType has length 1..64 and
-            // ^[\w+=,.@-]+$. Spell out ASCII \w and anchor the entire value.
-            // One anonymous refinement keeps Roles.names[] byte-identical to
-            // Role.role_name; new shared name identities belong to #504.
-            let iam_role_name = TypeOverride::RefinedString {
-                pattern: r"^[A-Za-z0-9_+=,.@-]+\z",
-                min_length: 1,
-                max_length: 64,
-            };
             HashMap::from([
                 (
                     ("iam.Role", "role_name"),
-                    // Smithy CreateRoleRequest$RoleName -> roleNameType.
+                    // carina-provider-aws/tests/fixtures/smithy/iam.json:
+                    // CreateRoleRequest$RoleName -> roleNameType, length 1..64,
+                    // ^[\w+=,.@-]+$. All role-name input operations use this shape.
+                    // Share the named type with Roles.names[] and AWSCC.
                     // carina-test-004, 2026-11-03 (IAM): CreateRole/GetRole/
                     // ListRoles preserve RoleName; "bad name" and 65 chars fail.
-                    iam_role_name.clone(),
+                    TypeOverride::SharedType(AwsType::IamRoleName),
                 ),
                 (
                     ("iam.Role", "path"),
@@ -7335,11 +7373,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // carina-test-004, 2026-11-03 (IAM): CreateRole/GetRole/
                     // ListRoles preserve /carina-588/probe/; /no-trailing fails.
                     // '-' succeeds: use the model range, not the error prose.
-                    TypeOverride::RefinedString {
-                        pattern: r"^(?:/|/[\x21-\x7E]+/)\z",
-                        min_length: 1,
-                        max_length: 512,
-                    },
+                    TypeOverride::AnonymousStringConstructor("carina_aws_types::iam_path()"),
                 ),
                 (
                     ("iam.Roles", "path_prefix"),
@@ -7350,17 +7384,13 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // require a trailing slash. Preserve the exact model range.
                     // carina-test-004, 2026-11-03 (IAM): ListRoles rejects
                     // "carina" because the leading slash is missing.
-                    TypeOverride::RefinedString {
-                        pattern: r"^/[\x21-\x7F]*\z",
-                        min_length: 1,
-                        max_length: 512,
-                    },
+                    TypeOverride::AnonymousStringConstructor("carina_aws_types::iam_path_prefix()"),
                 ),
                 (
                     ("iam.Roles", "names[]"),
                     // Smithy ListRolesResponse$Roles -> roleListType ->
                     // Role$RoleName -> roleNameType, in the same iam.json.
-                    iam_role_name,
+                    TypeOverride::SharedType(AwsType::IamRoleName),
                 ),
                 (
                     ("logs.LogGroup", "log_group_name"),
@@ -7911,14 +7941,12 @@ mod tests {
         let attrs = collect_resource_attributes(&resource, &model)
             .unwrap()
             .attrs;
-        for field in ["role_name", "path"] {
+        for (field, constructor) in [
+            ("role_name", "carina_aws_types::iam_role_name()"),
+            ("path", "carina_aws_types::iam_path()"),
+        ] {
             let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
-            assert!(
-                attr.type_code
-                    .starts_with("AttributeType::refined_string(None, "),
-                "{}",
-                attr.type_code
-            );
+            assert_eq!(attr.type_code, constructor);
             assert_eq!(attr.send_type, SendFieldType::String);
         }
         let generated = generate_resource(&resource, &model).unwrap();
@@ -7927,11 +7955,13 @@ mod tests {
             "{generated}"
         );
         assert!(
-            generated.contains(r#"Some("^[A-Za-z0-9_+=,.@-]+\\z".to_string())"#),
+            generated.contains(
+                "AttributeSchema::required(\"role_name\", carina_aws_types::iam_role_name())"
+            ),
             "{generated}"
         );
         assert!(
-            generated.contains(r#"Some("^(?:/|/[\\x21-\\x7E]+/)\\z".to_string())"#),
+            generated.contains("AttributeSchema::optional(\"path\", carina_aws_types::iam_path())"),
             "{generated}"
         );
         assert!(
@@ -7970,7 +8000,9 @@ mod tests {
         )
         .unwrap();
         assert!(
-            markdown.contains(r"String(length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)"),
+            markdown.contains(
+                r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)"
+            ),
             "{markdown}"
         );
         assert!(
@@ -10293,6 +10325,10 @@ mod tests {
             generated.contains(".as_data_source()"),
             "must mark as data source: {generated}"
         );
+        assert!(
+            !generated.contains(", types}"),
+            "shared constructors must not add an unused builtin types import: {generated}"
+        );
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
@@ -10300,30 +10336,19 @@ mod tests {
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
-        // names is an unordered list of anonymous, refined Strings.
+        // names is an unordered list of the shared, named role-name type.
         assert!(
             generated.contains(
-                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(AttributeType::refined_string(None, "
+                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(carina_aws_types::iam_role_name()))"
             ),
             "names must be List(refined String): {generated}"
-        );
-        assert!(
-            generated.contains(
-                r#"Some("^[A-Za-z0-9_+=,.@-]+\\z".to_string()), Some((Some(1), Some(64)))"#
-            ),
-            "names element pattern and bounds: {generated}"
         );
         // Inputs are both optional strings.
         assert!(
             generated.contains(
-                r#"AttributeSchema::optional("path_prefix", AttributeType::refined_string(None, "#
+                r#"AttributeSchema::optional("path_prefix", carina_aws_types::iam_path_prefix())"#
             ),
             "path_prefix input: {generated}"
-        );
-        assert!(
-            generated
-                .contains(r#"Some("^/[\\x21-\\x7F]*\\z".to_string()), Some((Some(1), Some(512)))"#),
-            "path_prefix pattern and bounds: {generated}"
         );
         assert!(
             generated
@@ -10350,7 +10375,8 @@ mod tests {
         let generated =
             generate_data_source(&unrelated, &model, false).expect("unrelated data source");
         assert!(
-            !generated.contains("AttributeType::refined_string("),
+            !generated.contains("carina_aws_types::iam_role_name()")
+                && !generated.contains("carina_aws_types::iam_path_prefix()"),
             "{generated}"
         );
     }
@@ -10378,7 +10404,7 @@ mod tests {
         );
         assert!(
             md.contains(
-                r"- **Type:** List\<String(length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)\>"
+                r"- **Type:** List\<IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)\>"
             ),
             "names element constraint: {md}"
         );

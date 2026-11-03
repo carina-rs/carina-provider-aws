@@ -18,11 +18,16 @@ fn iam_role_schemas() -> [ValidatedResourceSchema; 2] {
 }
 
 #[test]
-fn iam_role_refinements_are_anonymous_and_model_bounded() {
+fn iam_role_refinements_use_named_name_and_anonymous_path() {
     for schema in iam_role_schemas() {
-        for (field, expected_pattern, maximum) in [
-            ("role_name", r"^[A-Za-z0-9_+=,.@-]+\z", 64),
-            ("path", r"^(?:/|/[\x21-\x7E]+/)\z", 512),
+        for (field, expected_identity, expected_pattern, maximum) in [
+            (
+                "role_name",
+                Some("aws.iam.Role.Name"),
+                r"^[A-Za-z0-9_+=,.@-]+\z",
+                64,
+            ),
+            ("path", None, r"^(?:/|/[\x21-\x7E]+/)\z", 512),
         ] {
             let RawShape::String {
                 identity,
@@ -33,7 +38,11 @@ fn iam_role_refinements_are_anonymous_and_model_bounded() {
             else {
                 panic!("{field} must remain a String");
             };
-            assert!(identity.is_none(), "name identities belong to #504");
+            assert_eq!(
+                identity.map(ToString::to_string).as_deref(),
+                expected_identity,
+                "{field}"
+            );
             assert_eq!(pattern, Some(expected_pattern), "{field}");
             assert_eq!(length, Some((Some(1), Some(maximum))), "{field}");
         }
@@ -42,34 +51,34 @@ fn iam_role_refinements_are_anonymous_and_model_bounded() {
 
 #[test]
 fn iam_role_name_accepts_aws_reads_and_rejects_aws_probe_invalid_names() {
+    // Protocol callbacks are covered by the SDK bridge test in src/main.rs.
     // carina-test-004, 2026-11-03: CreateRole/GetRole/ListRoles preserve RoleName;
     // "bad name" and a 65-character name are rejected by AWS.
-    for schema in iam_role_schemas() {
-        let name = schema.effective_attribute("role_name").unwrap();
-        for valid in [
-            "a".to_string(),
-            "AZaz09_+=,.@-".to_string(),
-            "carina-588-probe".to_string(),
-            "AWSReservedSSO_AdministratorAccess_0123456789abcdef".to_string(),
-            "a".repeat(64),
-        ] {
-            let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
-            assert!(name.validate(&value).is_ok(), "valid name: {valid:?}");
-        }
-        for invalid in [
-            "".to_string(),
-            "a".repeat(65),
-            "bad name".to_string(),
-            "!valid".to_string(),
-            "valid!".to_string(),
-            "valid\n".to_string(),
-            "/role".to_string(),
-            "rôle".to_string(),
-            "日本語".to_string(),
-        ] {
-            let value: Value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
-            assert!(name.validate(&value).is_err(), "invalid name: {invalid:?}");
-        }
+    let schema = iam_role_config().schema.validate().expect("Role schema");
+    let name = schema.effective_attribute("role_name").unwrap();
+    for valid in [
+        "a".to_string(),
+        "AZaz09_+=,.@-".to_string(),
+        "carina-588-probe".to_string(),
+        "AWSReservedSSO_AdministratorAccess_0123456789abcdef".to_string(),
+        "a".repeat(64),
+    ] {
+        let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
+        assert!(name.validate(&value).is_ok(), "valid name: {valid:?}");
+    }
+    for invalid in [
+        "".to_string(),
+        "a".repeat(65),
+        "bad name".to_string(),
+        "!valid".to_string(),
+        "valid!".to_string(),
+        "valid\n".to_string(),
+        "/role".to_string(),
+        "rôle".to_string(),
+        "日本語".to_string(),
+    ] {
+        let value: Value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
+        assert!(name.validate(&value).is_err(), "invalid name: {invalid:?}");
     }
 }
 
@@ -113,27 +122,39 @@ fn iam_role_path_validates_smithy_whole_string_alternation_and_bounds() {
 }
 
 #[test]
-fn iam_role_plain_and_typed_string_references_flow_into_name_and_path() {
-    // carina#4230 permits identified String outputs in anonymous refined sinks.
-    // Concrete values are checked when they become known.
+fn iam_role_name_is_nominal_and_path_accepts_string_references() {
+    // carina#3798 / aws#504: named sinks accept literals and matching named
+    // references, but reject plain String references. Paths remain anonymous (#4230).
     let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
         Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
         SchemaRegistry::new(),
         carina_core::EnvironmentSnapshot::empty(),
     );
     let context = snapshot.provider_context();
-    for (field, plain_value) in [
-        ("role_name", "carina-588-source"),
-        ("path", "/carina-588/probe/"),
+    for (field, expression, plain_value, expected_error) in [
+        (
+            "role_name",
+            "'carina-588-literal'",
+            "carina-588-source",
+            None,
+        ),
+        ("role_name", "source.role_name", "carina-588-source", None),
+        (
+            "role_name",
+            "source.description",
+            "carina-588-source",
+            Some("expected aws.iam.Role.Name, got String"),
+        ),
+        ("path", "source.description", "/carina-588/probe/", None),
+        ("path", "source.role_id", "/carina-588/probe/", None),
     ] {
-        for reference in ["source.description", "source.role_id"] {
-            let sink_fields = if field == "role_name" {
-                format!("role_name = {reference}")
-            } else {
-                format!("role_name = 'carina-588-sink'\npath = {reference}")
-            };
-            let source = format!(
-                r#"
+        let sink_fields = if field == "role_name" {
+            format!("role_name = {expression}")
+        } else {
+            format!("role_name = 'carina-588-sink'\npath = {expression}")
+        };
+        let source = format!(
+            r#"
                 let source = aws.iam.Role {{
                     role_name = 'carina-588-source'
                     description = '{plain_value}'
@@ -150,33 +171,34 @@ fn iam_role_plain_and_typed_string_references_flow_into_name_and_path() {
                     assume_role_policy_document = source.assume_role_policy_document
                 }}
                 "#
-            );
-            let parsed = carina_core::parser::parse_file(
-                &source,
-                Path::new("iam-role-reference.crn"),
-                context,
-            )
-            .expect("parse IAM reference fixture");
-            let result = carina_core::validation::validate_resources(
-                &parsed,
-                snapshot.schema_registry(),
-                &HashSet::from(["aws".to_string()]),
-                context,
-            );
-            assert!(result.is_ok(), "{field} = {reference}: {result:?}");
-            // Value validation skips deferred references; check their declared types too.
-            let bindings = carina_core::binding_index::BindingIndex::from_parsed(
-                &parsed,
-                snapshot.schema_registry(),
-                context,
-            );
-            let result = carina_core::validation::validate_resource_ref_types(
-                &parsed,
-                snapshot.schema_registry(),
-                &HashSet::new(),
-                &bindings,
-            );
-            assert!(result.is_ok(), "{field} = {reference}: {result:?}");
+        );
+        let parsed =
+            carina_core::parser::parse_file(&source, Path::new("iam-role-reference.crn"), context)
+                .expect("parse IAM reference fixture");
+        let result = carina_core::validation::validate_resources(
+            &parsed,
+            snapshot.schema_registry(),
+            &HashSet::from(["aws".to_string()]),
+            context,
+        );
+        assert!(result.is_ok(), "{field} = {expression}: {result:?}");
+        // Value validation skips deferred references; check their declared types too.
+        let bindings = carina_core::binding_index::BindingIndex::from_parsed(
+            &parsed,
+            snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            &parsed,
+            snapshot.schema_registry(),
+            &HashSet::new(),
+            &bindings,
+        );
+        if let Some(expected_error) = expected_error {
+            let error = result.expect_err("plain String references must not satisfy Role.Name");
+            assert!(error.contains(expected_error), "{error}");
+        } else {
+            assert!(result.is_ok(), "{field} = {expression}: {result:?}");
         }
     }
 }
