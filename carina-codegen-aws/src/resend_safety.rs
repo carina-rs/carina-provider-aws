@@ -772,7 +772,7 @@ pub const OVERRIDES: &[Override] = &[
         "s3",
         "DeleteObjects",
         Decision::Idempotent,
-        "DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent",
+        "DeleteObjects: every identifier carries a version ID; deleting an explicitly named object version again leaves it absent",
     ),
     decision(
         "s3",
@@ -1216,6 +1216,33 @@ pub fn generate_provider_module(
              \x20   }}\n\n"
         ));
         for entry in &operations {
+            // This decision depends on the input shape. Send internally so callers
+            // cannot replace the versioned payload through an SDK fluent builder.
+            if entry.service == "s3" && entry.operation == "DeleteObjects" {
+                code.push_str(&format!(
+                    r#"    /// {justification}
+    pub(crate) async fn delete_objects(
+        &self,
+        bucket: &str,
+        objects: Vec<crate::s3_delete::VersionedObjectId>,
+    ) -> Result<
+        carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsOutput,
+        SdkError<carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError, HttpResponse>,
+    > {{
+        let delete = crate::s3_delete::versioned_delete(objects)
+            .map_err(SdkError::construction_failure)?;
+        self.inner.inner().delete_objects()
+            .bucket(bucket)
+            .delete(delete)
+            .send()
+            .await
+    }}
+
+"#,
+                    justification = entry.justification,
+                ));
+                continue;
+            }
             let operation_method = entry.operation.to_snake_case();
             let fluent_builder = format!(
                 "carina_aws_types::sdk::{service_name}::operation::{operation_method}::builders::{}FluentBuilder",

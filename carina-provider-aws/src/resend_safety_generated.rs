@@ -1092,12 +1092,27 @@ impl S3Client {
         self.inner.inner().delete_bucket_website()
     }
 
-    /// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
-    pub(crate) fn delete_objects(
+    /// DeleteObjects: every identifier carries a version ID; deleting an explicitly named object version again leaves it absent
+    pub(crate) async fn delete_objects(
         &self,
-    ) -> carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
-    {
-        self.inner.inner().delete_objects()
+        bucket: &str,
+        objects: Vec<crate::s3_delete::VersionedObjectId>,
+    ) -> Result<
+        carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsOutput,
+        SdkError<
+            carina_aws_types::sdk::s3::operation::delete_objects::DeleteObjectsError,
+            HttpResponse,
+        >,
+    > {
+        let delete =
+            crate::s3_delete::versioned_delete(objects).map_err(SdkError::construction_failure)?;
+        self.inner
+            .inner()
+            .delete_objects()
+            .bucket(bucket)
+            .delete(delete)
+            .send()
+            .await
     }
 
     /// DeletePublicAccessBlock: removes the whole public-access-block sub-configuration keyed by bucket
@@ -4718,7 +4733,7 @@ impl DecidedSend<()> for carina_aws_types::sdk::s3::operation::delete_bucket_web
     }
 }
 
-/// DeleteObjects: deletes the explicitly named object versions; deleting an absent key leaves it absent
+/// DeleteObjects: every identifier carries a version ID; deleting an explicitly named object version again leaves it absent
 impl AwsOperation
     for carina_aws_types::sdk::s3::operation::delete_objects::builders::DeleteObjectsFluentBuilder
 {

@@ -19,7 +19,30 @@ use crate::provider::AwsCreateAttempt;
 use crate::read_model::found_data_source_read;
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::{S3BucketDataSourceReadModel, S3BucketReadModel};
+use crate::s3_delete::VersionedObjectId;
 use crate::send_models_generated::{S3BucketCreateInput, S3BucketUpdateInput};
+
+/// Both listed versions and delete markers must name a version before deletion.
+fn s3_cleanup_identifier(
+    id: &ResourceId,
+    key: Option<&str>,
+    version_id: Option<&str>,
+) -> ProviderResult<VersionedObjectId> {
+    let version_id = version_id.ok_or_else(|| {
+        ProviderError::api_error(format!(
+            "Cannot empty S3 bucket: ListObjectVersions entry for '{}' is missing a version ID",
+            key.unwrap_or("<unknown key>")
+        ))
+        .for_resource(id.clone())
+    })?;
+    let key = key.ok_or_else(|| {
+        ProviderError::api_error(
+            "Cannot empty S3 bucket: ListObjectVersions entry is missing a key",
+        )
+        .for_resource(id.clone())
+    })?;
+    Ok(VersionedObjectId::new(key, version_id))
+}
 
 /// The complete read-only projection shared by managed and data-source
 /// reads of an S3 bucket.
@@ -362,59 +385,26 @@ impl AwsProvider {
 
             // Collect versions
             for version in response.versions() {
-                if let Some(key) = version.key() {
-                    let mut oid =
-                        carina_aws_types::sdk::s3::types::ObjectIdentifier::builder().key(key);
-                    if let Some(vid) = version.version_id() {
-                        oid = oid.version_id(vid);
-                    }
-                    objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build ObjectIdentifier",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
-                    })?);
-                }
+                objects_to_delete.push(s3_cleanup_identifier(
+                    id,
+                    version.key(),
+                    version.version_id(),
+                )?);
             }
 
             // Collect delete markers
             for marker in response.delete_markers() {
-                if let Some(key) = marker.key() {
-                    let mut oid =
-                        carina_aws_types::sdk::s3::types::ObjectIdentifier::builder().key(key);
-                    if let Some(vid) = marker.version_id() {
-                        oid = oid.version_id(vid);
-                    }
-                    objects_to_delete.push(oid.build().map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build ObjectIdentifier",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
-                    })?);
-                }
+                objects_to_delete.push(s3_cleanup_identifier(
+                    id,
+                    marker.key(),
+                    marker.version_id(),
+                )?);
             }
 
             // Batch delete (max 1000 per request)
             if !objects_to_delete.is_empty() {
-                let delete = carina_aws_types::sdk::s3::types::Delete::builder()
-                    .set_objects(Some(objects_to_delete))
-                    .quiet(true)
-                    .build()
-                    .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build Delete request",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
-                    })?;
-
                 self.s3_client
-                    .delete_objects()
-                    .bucket(bucket_name)
-                    .delete(delete)
-                    .send()
+                    .delete_objects(bucket_name, objects_to_delete)
                     .await
                     .map_err(|e| {
                         api_error_with_meta("Failed to delete objects", e).for_resource(id.clone())
@@ -705,6 +695,180 @@ pub(crate) fn is_s3_not_configured_error<
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod cleanup {
+        use super::*;
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        use aws_smithy_runtime_api::client::http::{
+            HttpConnector, HttpConnectorFuture, SharedHttpConnector, http_client_fn,
+        };
+        use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+        use aws_smithy_types::body::SdkBody;
+
+        #[derive(Clone, Debug)]
+        struct CleanupConnector {
+            listings: Arc<Mutex<VecDeque<String>>>,
+            requests: Arc<Mutex<Vec<(String, String)>>>,
+        }
+
+        impl CleanupConnector {
+            fn new(listings: impl IntoIterator<Item = String>) -> Self {
+                Self {
+                    listings: Arc::new(Mutex::new(listings.into_iter().collect())),
+                    requests: Arc::default(),
+                }
+            }
+
+            fn provider(&self) -> AwsProvider {
+                let connector = self.clone();
+                let http_client =
+                    http_client_fn(move |_, _| SharedHttpConnector::new(connector.clone()));
+                let bounded = crate::BoundedSdkConfig::for_test_http_client(
+                    http_client,
+                    "https://example.test",
+                );
+                AwsProvider::from_sdk_config(
+                    "us-east-1".to_string(),
+                    Vec::new(),
+                    Vec::new(),
+                    &bounded,
+                )
+            }
+
+            fn requests(&self) -> Vec<(String, String)> {
+                self.requests.lock().expect("requests lock").clone()
+            }
+        }
+
+        impl HttpConnector for CleanupConnector {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let uri = request.uri().to_string();
+                let body = String::from_utf8_lossy(request.body().bytes().unwrap_or_default())
+                    .into_owned();
+                self.requests
+                    .lock()
+                    .expect("requests lock")
+                    .push((uri.clone(), body));
+                let body = if uri.contains("versions") {
+                    self.listings
+                        .lock()
+                        .expect("listings lock")
+                        .pop_front()
+                        .expect("unexpected ListObjectVersions request")
+                } else {
+                    assert!(uri.contains("delete"), "unexpected request: {uri}");
+                    r#"<DeleteResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>"#.to_string()
+                };
+                HttpConnectorFuture::new(async move {
+                    let mut response = HttpResponse::new(
+                        200.try_into().expect("valid status"),
+                        SdkBody::from(body),
+                    );
+                    response
+                        .headers_mut()
+                        .insert("content-type", "application/xml");
+                    Ok(response)
+                })
+            }
+        }
+
+        fn listing(entries: &str, pagination: &str) -> String {
+            format!(
+                r#"<ListVersionsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">{entries}{pagination}</ListVersionsResult>"#
+            )
+        }
+
+        #[tokio::test]
+        async fn s3_cleanup_rejects_entries_without_version_id_before_deleting() {
+            for entry in ["Version", "DeleteMarker"] {
+                let connector = CleanupConnector::new([listing(
+                    &format!(
+                        "<Version><Key>valid</Key><VersionId>v1</VersionId></Version>\
+                         <{entry}><Key>missing-version</Key></{entry}>"
+                    ),
+                    "<IsTruncated>false</IsTruncated>",
+                )]);
+                let id = ResourceId::pending_with_provider("aws", "s3.Bucket", None);
+                let result = connector.provider().empty_s3_bucket(&id, "cleanup").await;
+
+                let requests = connector.requests();
+                assert_eq!(
+                    requests.len(),
+                    1,
+                    "{entry}: only listing may reach the connector"
+                );
+                assert!(requests[0].0.contains("versions"));
+                let error = result.expect_err("missing version ID must fail cleanup");
+                let message = error.to_string();
+                assert!(message.contains("version ID"), "{message}");
+                assert!(message.contains("missing-version"), "{message}");
+            }
+        }
+
+        #[tokio::test]
+        async fn s3_cleanup_deletes_versions_and_markers_including_null_across_pages() {
+            let connector = CleanupConnector::new([
+                listing(
+                    "<Version><Key>object</Key><VersionId>v1</VersionId></Version>\
+                     <DeleteMarker><Key>deleted</Key><VersionId>m1</VersionId></DeleteMarker>",
+                    "<IsTruncated>true</IsTruncated><NextKeyMarker>next</NextKeyMarker>\
+                     <NextVersionIdMarker>v2</NextVersionIdMarker>",
+                ),
+                listing(
+                    "<Version><Key>unversioned</Key><VersionId>null</VersionId></Version>",
+                    "<IsTruncated>false</IsTruncated>",
+                ),
+            ]);
+            let id = ResourceId::pending_with_provider("aws", "s3.Bucket", None);
+            connector
+                .provider()
+                .empty_s3_bucket(&id, "cleanup")
+                .await
+                .expect("versioned cleanup succeeds");
+
+            let requests = connector.requests();
+            assert_eq!(requests.len(), 4);
+            assert!(requests[0].0.contains("versions"));
+            assert!(requests[1].0.contains("delete"));
+            assert!(
+                requests[1]
+                    .1
+                    .contains("<Key>object</Key><VersionId>v1</VersionId>")
+            );
+            assert!(
+                requests[1]
+                    .1
+                    .contains("<Key>deleted</Key><VersionId>m1</VersionId>")
+            );
+            assert!(requests[2].0.contains("key-marker=next"));
+            assert!(requests[2].0.contains("version-id-marker=v2"));
+            assert!(requests[3].0.contains("delete"));
+            assert!(
+                requests[3]
+                    .1
+                    .contains("<Key>unversioned</Key><VersionId>null</VersionId>")
+            );
+        }
+
+        #[tokio::test]
+        async fn s3_cleanup_empty_bucket_only_lists() {
+            let connector =
+                CleanupConnector::new([listing("", "<IsTruncated>false</IsTruncated>")]);
+            let id = ResourceId::pending_with_provider("aws", "s3.Bucket", None);
+            connector
+                .provider()
+                .empty_s3_bucket(&id, "cleanup")
+                .await
+                .expect("empty bucket cleanup succeeds");
+
+            let requests = connector.requests();
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].0.contains("versions"));
+        }
+    }
 
     fn concrete_string<'a>(attributes: &'a HashMap<String, Value>, name: &str) -> &'a str {
         match attributes.get(name) {

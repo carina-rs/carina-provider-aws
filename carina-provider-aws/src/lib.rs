@@ -20,6 +20,7 @@ mod references;
 #[cfg(test)]
 mod resend_guard;
 mod resend_safety_generated;
+mod s3_delete;
 pub mod schemas;
 mod sdk_config;
 #[cfg(all(test, not(target_arch = "wasm32")))]
