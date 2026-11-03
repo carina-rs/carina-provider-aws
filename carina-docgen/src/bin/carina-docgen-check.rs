@@ -13,7 +13,6 @@ use tar::Archive;
 struct CheckSummary {
     pages: usize,
     unresolved_fragments: usize,
-    links_inside_code_spans: usize,
     duplicated_section_headings: usize,
     table_column_mismatches: usize,
     reports: Vec<String>,
@@ -26,7 +25,6 @@ impl CheckSummary {
             for violation in error.violations() {
                 match violation.kind {
                     PageViolationKind::UnresolvedFragment => self.unresolved_fragments += 1,
-                    PageViolationKind::LinkInsideCodeSpan => self.links_inside_code_spans += 1,
                     PageViolationKind::DuplicateSectionHeading => {
                         self.duplicated_section_headings += 1;
                     }
@@ -44,22 +42,20 @@ impl CheckSummary {
             return Err("input contains no Markdown pages".to_string());
         }
         let violations = self.unresolved_fragments
-            + self.links_inside_code_spans
             + self.duplicated_section_headings
             + self.table_column_mismatches;
         if violations != 0 {
             return Err(format!(
-                "{}\nchecked {} Markdown page(s): {} unresolved fragments, {} links inside code spans, {} duplicated section headings, {} table column mismatches",
+                "{}\nchecked {} Markdown page(s): {} unresolved fragments, {} duplicated section headings, {} table column mismatches",
                 self.reports.join("\n"),
                 self.pages,
                 self.unresolved_fragments,
-                self.links_inside_code_spans,
                 self.duplicated_section_headings,
                 self.table_column_mismatches
             ));
         }
         println!(
-            "checked {} Markdown page(s): 0 unresolved fragments, 0 links inside code spans, 0 duplicated section headings, 0 table column mismatches",
+            "checked {} Markdown page(s): 0 unresolved fragments, 0 duplicated section headings, 0 table column mismatches",
             self.pages
         );
         Ok(())

@@ -1,6 +1,10 @@
 //! Registry-compatible Markdown page construction and generated-page checks.
 
 pub mod example;
+mod type_display;
+
+pub use type_display::TypeDisplay;
+use type_display::escape_literal_text;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -57,16 +61,10 @@ impl Heading {
                 "Markdown heading content must fit on one line",
             ));
         }
-        if matches!(self.style, HeadingStyle::Code) && self.content.contains('`') {
-            return Err(DocgenError::build(
-                "Markdown code heading content must not contain a backtick",
-            ));
-        }
-
         let marker = "#".repeat(usize::from(self.level));
         let content = match self.style {
             HeadingStyle::Plain => self.content.clone(),
-            HeadingStyle::Code => format!("`{}`", self.content),
+            HeadingStyle::Code => inline_code(&self.content),
         };
         Ok(format!("{marker} {content}"))
     }
@@ -75,12 +73,25 @@ impl Heading {
 #[derive(Debug)]
 enum PageChunk<K> {
     Markdown(String),
-    Link { target: K, label: String },
+    Literal {
+        literal: String,
+        in_table: bool,
+    },
+    Code {
+        literal: String,
+        in_table: bool,
+    },
+    Link {
+        target: K,
+        label: String,
+        in_table: bool,
+    },
 }
 
 #[derive(Debug)]
 enum TableCellPart<K> {
     Text(String),
+    Literal(String),
     Code(String),
     Link { target: K, label: String },
 }
@@ -129,6 +140,10 @@ impl<K> TableCell<K> {
         self.parts.push(TableCellPart::Text(text.into()));
     }
 
+    fn push_literal(&mut self, literal: impl Into<String>) {
+        self.parts.push(TableCellPart::Literal(literal.into()));
+    }
+
     pub fn push_code(&mut self, code: impl Into<String>) {
         self.parts.push(TableCellPart::Code(code.into()));
     }
@@ -174,6 +189,9 @@ where
     }
 
     pub fn push_str(&mut self, markdown: &str) {
+        if markdown.is_empty() {
+            return;
+        }
         match self.chunks.last_mut() {
             Some(PageChunk::Markdown(existing)) => existing.push_str(markdown),
             _ => self.chunks.push(PageChunk::Markdown(markdown.to_string())),
@@ -197,7 +215,7 @@ where
     ) -> Result<(), DocgenError> {
         self.heading(Heading::code(3, name))?;
         self.push_str("- **Type:** ");
-        self.write_table_cell(attribute_type);
+        self.write_inline_parts(attribute_type, false);
         self.push_str("\n- **Read-only**\n\n");
         if let Some(description) = description.filter(|text| !text.is_empty()) {
             self.push_str(description);
@@ -224,6 +242,7 @@ where
         self.chunks.push(PageChunk::Link {
             target,
             label: label.into(),
+            in_table: false,
         });
     }
 
@@ -292,12 +311,38 @@ where
         for chunk in self.chunks {
             match chunk {
                 PageChunk::Markdown(text) => markdown.push_str(&text),
-                PageChunk::Link { target, label } => {
+                PageChunk::Literal { literal, in_table } => {
+                    let escaped = escape_literal_text(&literal);
+                    markdown.push_str(&if in_table {
+                        escape_table_cell(&escaped)
+                    } else {
+                        escaped
+                    });
+                }
+                PageChunk::Code { literal, in_table } => {
+                    let code = if in_table {
+                        table_inline_code(&literal)
+                    } else {
+                        inline_code(&literal)
+                    };
+                    markdown.push_str(&code);
+                }
+                PageChunk::Link {
+                    target,
+                    label,
+                    in_table,
+                } => {
                     let slug = self.targets.get(&target).ok_or_else(|| {
                         DocgenError::build(format!(
                             "link target {target:?} has no heading: it was never written"
                         ))
                     })?;
+                    let label = escape_literal_text(&label);
+                    let label = if in_table {
+                        escape_table_cell(&label)
+                    } else {
+                        label
+                    };
                     markdown.push_str(&format!("[{label}](#{slug})"));
                 }
             }
@@ -329,12 +374,54 @@ where
     }
 
     fn write_table_cell(&mut self, cell: TableCell<K>) {
+        self.write_inline_parts(cell, true);
+    }
+
+    // Literal boundaries must not hide URL prefixes split across a sequence.
+    fn write_literal(&mut self, literal: String, in_table: bool) {
+        match self.chunks.last_mut() {
+            Some(PageChunk::Literal {
+                literal: existing,
+                in_table: existing_in_table,
+            }) if *existing_in_table == in_table => existing.push_str(&literal),
+            _ if literal.is_empty() => {}
+            _ => self.chunks.push(PageChunk::Literal { literal, in_table }),
+        }
+    }
+
+    // Keep source literals typed until finish, coalescing even across nested
+    // sequences or separate TypeDisplay writes before choosing delimiters.
+    fn write_code(&mut self, literal: String, in_table: bool) {
+        match self.chunks.last_mut() {
+            Some(PageChunk::Code {
+                literal: existing,
+                in_table: existing_in_table,
+            }) if *existing_in_table == in_table => existing.push_str(&literal),
+            _ if literal.is_empty() => {}
+            _ => self.chunks.push(PageChunk::Code { literal, in_table }),
+        }
+    }
+
+    fn write_inline_parts(&mut self, cell: TableCell<K>, in_table: bool) {
         for part in cell.parts {
             match part {
-                TableCellPart::Text(text) => self.push_str(&escape_table_cell(&text)),
-                TableCellPart::Code(code) => self.push_str(&inline_code(&code)),
+                TableCellPart::Text(text) => {
+                    self.push_str(&if in_table {
+                        escape_table_cell(&text)
+                    } else {
+                        text
+                    });
+                }
+                TableCellPart::Literal(literal) => self.write_literal(literal, in_table),
+                TableCellPart::Code(code) => {
+                    self.write_code(code, in_table);
+                }
                 TableCellPart::Link { target, label } => {
-                    self.link(target, escape_table_link_label(&label));
+                    self.chunks.push(PageChunk::Link {
+                        target,
+                        label,
+                        in_table,
+                    });
                 }
             }
         }
@@ -380,36 +467,32 @@ fn escape_table_cell(value: &str) -> String {
     escaped
 }
 
-fn escape_table_link_label(value: &str) -> String {
-    let value = escape_table_cell(value);
-    let mut escaped = String::with_capacity(value.len());
+fn table_inline_code(literal: &str) -> String {
+    let mut markdown = String::new();
+    let mut start = 0;
     let mut preceding_backslashes = 0_usize;
-
-    for character in value.chars() {
-        match character {
-            '\\' => {
-                escaped.push(character);
-                preceding_backslashes += 1;
-            }
-            '[' | ']' => {
-                if preceding_backslashes.is_multiple_of(2) {
-                    escaped.push('\\');
-                }
-                escaped.push(character);
-                preceding_backslashes = 0;
-            }
-            _ => {
-                escaped.push(character);
-                preceding_backslashes = 0;
-            }
+    for (index, character) in literal.char_indices() {
+        if character == '|' && !preceding_backslashes.is_multiple_of(2) {
+            // Comrak 0.54's table parser removes a backslash from odd runs
+            // before pipes, so one code span cannot retain an odd literal run.
+            // Split before the pipe; an invisible comment keeps the resulting
+            // code spans' backtick delimiters from touching.
+            markdown.push_str(&inline_code(&escape_table_cell(&literal[start..index])));
+            markdown.push_str("<!---->");
+            start = index;
+        }
+        if character == '\\' {
+            preceding_backslashes += 1;
+        } else {
+            preceding_backslashes = 0;
         }
     }
-
-    escaped
+    markdown.push_str(&inline_code(&escape_table_cell(&literal[start..])));
+    markdown
 }
 
 fn inline_code(value: &str) -> String {
-    let value = escape_table_cell(value);
+    let value = value.replace("\r\n", " ").replace(['\r', '\n'], " ");
     if value.is_empty() {
         return value;
     }
@@ -478,7 +561,6 @@ impl From<PageCheckError> for DocgenError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageViolationKind {
     UnresolvedFragment,
-    LinkInsideCodeSpan,
     DuplicateSectionHeading,
     TableColumnMismatch,
 }
@@ -561,14 +643,13 @@ struct CollectedHeading {
 }
 
 /// Parse a page once, then reuse that AST both for heading flattening and for
-/// link/code-span validation.
+/// link and table validation. Code-span contents are literal Markdown text.
 fn analyze_page(markdown: &str) -> PageAnalysis {
     let options = registry_options();
     let arena = Arena::new();
     let root = parse_document(&arena, markdown, &options);
     let mut heading_lines = Vec::new();
     let mut raw_links = Vec::new();
-    let mut code_links = Vec::new();
     let mut tables = Vec::new();
 
     for node in root.descendants() {
@@ -577,9 +658,6 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
             NodeValue::Heading(_) => heading_lines.push(data.sourcepos.start.line),
             NodeValue::Link(link) => {
                 raw_links.push((data.sourcepos.start.line, link.url.clone()));
-            }
-            NodeValue::Code(code) if contains_markdown_link(&code.literal) => {
-                code_links.push((data.sourcepos.start.line, code.literal.clone()));
             }
             NodeValue::Table(_) => tables.push(node),
             _ => {}
@@ -635,13 +713,6 @@ fn analyze_page(markdown: &str) -> PageAnalysis {
                 detail: format!("fragment-only link does not resolve: #{fragment}"),
             });
         }
-    }
-    for (line, literal) in code_links {
-        violations.push(PageViolation {
-            kind: PageViolationKind::LinkInsideCodeSpan,
-            line,
-            detail: format!("Markdown link is inside a code span: `{literal}`"),
-        });
     }
 
     PageAnalysis {
@@ -718,7 +789,7 @@ fn is_unescaped_pipe(bytes: &[u8], index: usize) -> bool {
 }
 
 fn registry_options() -> Options<'static> {
-    // Keep this identical to registry/src/docs_bundle.rs::render_markdown.
+    // Keep identical to carina-docs-bundle c6bfdce src/lib.rs::render_markdown.
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
@@ -749,54 +820,6 @@ impl HeadingAdapter for FlattenedHeadingCollector {
     fn exit(&self, output: &mut dyn fmt::Write, heading: &HeadingMeta) -> fmt::Result {
         writeln!(output, "</h{}>", heading.level)
     }
-}
-
-fn contains_markdown_link(markdown: &str) -> bool {
-    let bytes = markdown.as_bytes();
-    let mut open = 0;
-    while open < bytes.len() {
-        if bytes[open] != b'[' || is_escaped(bytes, open) {
-            open += 1;
-            continue;
-        }
-
-        let mut bracket_depth = 1_usize;
-        let mut cursor = open + 1;
-        while cursor < bytes.len() && bracket_depth != 0 {
-            if !is_escaped(bytes, cursor) {
-                match bytes[cursor] {
-                    b'[' => bracket_depth += 1,
-                    b']' => bracket_depth -= 1,
-                    _ => {}
-                }
-            }
-            cursor += 1;
-        }
-        if bracket_depth != 0 || cursor >= bytes.len() || bytes[cursor] != b'(' {
-            open += 1;
-            continue;
-        }
-
-        let mut paren_depth = 1_usize;
-        cursor += 1;
-        while cursor < bytes.len() {
-            if !is_escaped(bytes, cursor) {
-                match bytes[cursor] {
-                    b'(' => paren_depth += 1,
-                    b')' => {
-                        paren_depth -= 1;
-                        if paren_depth == 0 {
-                            return true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            cursor += 1;
-        }
-        open += 1;
-    }
-    false
 }
 
 fn is_escaped(bytes: &[u8], index: usize) -> bool {

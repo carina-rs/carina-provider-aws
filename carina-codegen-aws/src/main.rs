@@ -23,7 +23,7 @@ use carina_codegen_aws::kms_references::{
 };
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
-use carina_docgen::{Heading, PageBuilder, TableCell};
+use carina_docgen::{Heading, PageBuilder, TableCell, TypeDisplay};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
 
@@ -133,7 +133,15 @@ enum TypeOverride {
 
 struct ValueTypeOverride {
     type_code: String,
-    display: String,
+    display: MarkdownType,
+}
+
+fn pattern_display(prefix: impl Into<String>, pattern: &str) -> MarkdownType {
+    MarkdownType::sequence([
+        MarkdownType::text(prefix),
+        MarkdownType::code(pattern),
+        MarkdownType::text(")"),
+    ])
 }
 
 /// Rust and documentation use the same exact resource/path lookup. Enum
@@ -148,7 +156,10 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             format!(
                 "AttributeType::refined_string(None, Some({pattern:?}.to_string()), Some((Some({min_length}), Some({max_length}))), None)"
             ),
-            format!("String(length: {min_length}..={max_length}, pattern: `{pattern}`)"),
+            pattern_display(
+                format!("String(length: {min_length}..={max_length}, pattern: "),
+                pattern,
+            ),
         ),
         TypeOverride::AnonymousStringConstructor(constructor) => {
             let attr = attribute_type_from_code(constructor)
@@ -165,7 +176,10 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             };
             (
                 constructor.to_string(),
-                format!("String(length: {minimum}..={maximum}, pattern: `{pattern}`)"),
+                pattern_display(
+                    format!("String(length: {minimum}..={maximum}, pattern: "),
+                    pattern,
+                ),
             )
         }
         TypeOverride::SharedType(row) => {
@@ -176,19 +190,22 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                     .map(i64::to_string)
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{} (Int; allowed: {values})", row.identity().kind)
+                MarkdownType::text(format!("{} (Int; allowed: {values})", row.identity().kind))
             } else if let RawShape::String {
                 pattern: Some(pattern),
                 length: Some((Some(minimum), Some(maximum))),
                 ..
             } = attr.raw_shape()
             {
-                format!(
-                    "{} (String; length: {minimum}..={maximum}, pattern: `{pattern}`)",
-                    type_code_to_display(row.constructor_path())
+                pattern_display(
+                    format!(
+                        "{} (String; length: {minimum}..={maximum}, pattern: ",
+                        type_code_to_display(row.constructor_path())
+                    ),
+                    pattern,
                 )
             } else {
-                type_code_to_display(row.constructor_path())
+                MarkdownType::text(type_code_to_display(row.constructor_path()))
             };
             (row.constructor_path().to_string(), display)
         }
@@ -5443,132 +5460,7 @@ enum MarkdownTarget {
     Struct(MarkdownStructKey),
 }
 
-#[derive(Debug)]
-enum MarkdownType {
-    Plain(String),
-    Enum {
-        key: MarkdownEnumKey,
-        type_name: String,
-    },
-    Struct {
-        key: MarkdownStructKey,
-        name: String,
-    },
-    List(Box<MarkdownType>),
-    Map(Box<MarkdownType>),
-    Union(Vec<MarkdownType>),
-}
-
-impl MarkdownType {
-    fn contains_link(&self) -> bool {
-        match self {
-            Self::Enum { .. } | Self::Struct { .. } => true,
-            Self::List(item) | Self::Map(item) => item.contains_link(),
-            Self::Union(members) => members.iter().any(Self::contains_link),
-            Self::Plain(_) => false,
-        }
-    }
-
-    fn plain_text(&self) -> String {
-        match self {
-            Self::Plain(value) => value
-                .strip_prefix('`')
-                .and_then(|value| value.strip_suffix('`'))
-                .unwrap_or(value)
-                .to_string(),
-            Self::Union(members) => members
-                .iter()
-                .map(Self::plain_text)
-                .collect::<Vec<_>>()
-                .join(" | "),
-            Self::List(item) => format!("List<{}>", item.plain_text()),
-            Self::Map(item) if item.plain_text() == "String" => "Map".to_string(),
-            Self::Map(item) => format!("Map<String, {}>", item.plain_text()),
-            Self::Enum { type_name, .. } => format!("Enum ({type_name})"),
-            Self::Struct { name, .. } => format!("Struct({name})"),
-        }
-    }
-
-    fn write_to(&self, page: &mut PageBuilder<MarkdownTarget>) {
-        match self {
-            Self::Plain(value) => page.push_str(value),
-            Self::Union(members) => {
-                for (index, member) in members.iter().enumerate() {
-                    if index > 0 {
-                        page.push_str(" \\| ");
-                    }
-                    member.write_to(page);
-                }
-            }
-            Self::Enum { key, type_name } => {
-                page.link(
-                    MarkdownTarget::Enum(key.clone()),
-                    format!("Enum ({type_name})"),
-                );
-            }
-            Self::Struct { key, name } => {
-                page.link(
-                    MarkdownTarget::Struct(key.clone()),
-                    format!("Struct({name})"),
-                );
-            }
-            Self::List(item) if item.contains_link() || item.plain_text().contains('`') => {
-                page.push_str("List\\<");
-                item.write_to(page);
-                page.push_str("\\>");
-            }
-            Self::List(item) => page.push_str(&format!("`List<{}>`", item.plain_text())),
-            Self::Map(item) if item.contains_link() => {
-                page.push_str("Map\\<String, ");
-                item.write_to(page);
-                page.push_str("\\>");
-            }
-            Self::Map(_) if self.plain_text() == "Map" => page.push_str("Map"),
-            Self::Map(_) => page.push_str(&format!("`{}`", self.plain_text())),
-        }
-    }
-
-    fn table_cell(&self) -> TableCell<MarkdownTarget> {
-        let mut cell = TableCell::new();
-        self.write_to_table_cell(&mut cell);
-        cell
-    }
-
-    fn write_to_table_cell(&self, cell: &mut TableCell<MarkdownTarget>) {
-        match self {
-            Self::Plain(value) => cell.push_text(value),
-            Self::Union(members) => {
-                for (index, member) in members.iter().enumerate() {
-                    if index > 0 {
-                        cell.push_text(" \\| ");
-                    }
-                    member.write_to_table_cell(cell);
-                }
-            }
-            Self::Enum { key, type_name } => cell.push_link(
-                MarkdownTarget::Enum(key.clone()),
-                format!("Enum ({type_name})"),
-            ),
-            Self::Struct { key, name } => cell.push_link(
-                MarkdownTarget::Struct(key.clone()),
-                format!("Struct({name})"),
-            ),
-            Self::List(item) if item.contains_link() || item.plain_text().contains('`') => {
-                cell.push_text("List\\<");
-                item.write_to_table_cell(cell);
-                cell.push_text("\\>");
-            }
-            Self::List(item) => cell.push_code(format!("List<{}>", item.plain_text())),
-            Self::Map(item) if item.contains_link() => {
-                cell.push_text("Map\\<String, ");
-                item.write_to_table_cell(cell);
-                cell.push_text("\\>");
-            }
-            Self::Map(_) if self.plain_text() == "Map" => cell.push_text("Map"),
-            Self::Map(_) => cell.push_code(self.plain_text()),
-        }
-    }
-}
+type MarkdownType = TypeDisplay<MarkdownTarget>;
 
 #[derive(Debug)]
 struct MarkdownEnum {
@@ -5643,7 +5535,7 @@ fn discover_markdown_override(
     ) {
         discover_markdown_attribute_type(&attr_type, heading_path, namespace, enums, structs)
     } else {
-        Ok(MarkdownType::Plain(type_code_to_display(code)))
+        Ok(type_code_to_markdown(code))
     }
 }
 
@@ -5696,24 +5588,25 @@ fn discover_markdown_attribute_type(
                     },
                 );
             }
-            MarkdownType::Struct {
-                key,
-                name: name.to_string(),
-            }
+            MarkdownType::link(MarkdownTarget::Struct(key), format!("Struct({name})"))
         }
         RawShape::List { element_type, .. } => {
-            MarkdownType::List(Box::new(discover_markdown_attribute_type(
+            MarkdownType::list(discover_markdown_attribute_type(
                 element_type,
                 heading_path,
                 namespace,
                 enums,
                 structs,
-            )?))
+            )?)
         }
-        RawShape::Map { value, .. } => MarkdownType::Map(Box::new(
-            discover_markdown_attribute_type(value, heading_path, namespace, enums, structs)?,
-        )),
-        RawShape::Union(members) => MarkdownType::Union(
+        RawShape::Map { value, .. } => MarkdownType::map(discover_markdown_attribute_type(
+            value,
+            heading_path,
+            namespace,
+            enums,
+            structs,
+        )?),
+        RawShape::Union(members) => MarkdownType::union(
             members
                 .iter()
                 .map(|member| {
@@ -5750,38 +5643,38 @@ fn discover_markdown_attribute_type(
                     enums,
                 );
                 enums.get_mut(&key).expect("registered enum").dsl_aliases = dsl_aliases.to_vec();
-                MarkdownType::Enum {
-                    key,
-                    type_name: identity.kind.clone(),
-                }
+                MarkdownType::link(
+                    MarkdownTarget::Enum(key),
+                    format!("Enum ({})", identity.kind),
+                )
             } else {
-                MarkdownType::Plain(identity.kind.clone())
+                MarkdownType::text(identity.kind.clone())
             }
         }
-        RawShape::String { identity, .. } => MarkdownType::Plain(
+        RawShape::String { identity, .. } => MarkdownType::text(
             identity
                 .map(declared_scalar_display_name)
                 .unwrap_or_else(|| "String".to_string()),
         ),
         RawShape::Reference { identity, .. } => {
-            MarkdownType::Plain(declared_scalar_display_name(identity))
+            MarkdownType::text(declared_scalar_display_name(identity))
         }
         RawShape::Int {
             identity, range, ..
-        } => MarkdownType::Plain(if let Some(identity) = identity {
+        } => MarkdownType::text(if let Some(identity) = identity {
             declared_scalar_display_name(identity)
         } else if let Some((min, max)) = range {
             format!("Int({})", range_display_string(min, max))
         } else {
             "Int".to_string()
         }),
-        RawShape::Float { identity, .. } => MarkdownType::Plain(
+        RawShape::Float { identity, .. } => MarkdownType::text(
             identity
                 .map(declared_scalar_display_name)
                 .unwrap_or_else(|| "Float".to_string()),
         ),
-        RawShape::Bool => MarkdownType::Plain("Bool".to_string()),
-        RawShape::Duration => MarkdownType::Plain("Duration".to_string()),
+        RawShape::Bool => MarkdownType::text("Bool".to_string()),
+        RawShape::Duration => MarkdownType::text("Duration".to_string()),
         RawShape::UnloadedSchemaType(unloaded) => anyhow::bail!(
             "cannot document unloaded schema type {}",
             unloaded.identity()
@@ -6023,9 +5916,9 @@ fn generate_markdown_resource(
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
         let attr_type = if let Some(code) = reference_type_code(res.name, &snake_name) {
-            MarkdownType::Plain(type_code_to_display(code))
+            type_code_to_markdown(code)
         } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
-            MarkdownType::Plain(override_type.display)
+            override_type.display
         } else if let Some(&override_type) = type_overrides.get(extra.name) {
             discover_markdown_override(
                 override_type,
@@ -6035,9 +5928,9 @@ fn generate_markdown_resource(
                 &mut struct_defs,
             )?
         } else if is_aws_resource_id_property(extra.name) {
-            MarkdownType::Plain(resource_id_display(extra.name))
+            MarkdownType::text(resource_id_display(extra.name))
         } else {
-            MarkdownType::Plain("String".to_string())
+            MarkdownType::text("String".to_string())
         };
         let entry = MarkdownAttrInfo {
             snake_name: snake_name.clone(),
@@ -6062,7 +5955,7 @@ fn generate_markdown_resource(
             resource_identity_parts(res.name)
                 .and_then(|(service, resource)| shared_arn_constructor(service, resource))
                 .map(|constructor| type_code_to_display(&format!("super::{constructor}()")))
-                .map(MarkdownType::Plain)
+                .map(MarkdownType::text)
         } else {
             None
         }
@@ -6642,7 +6535,7 @@ fn generate_markdown_data_source(
                         let item = if let Some(override_type) =
                             resource_value_override(ds.name, &format!("{}[]", output.name))
                         {
-                            MarkdownType::Plain(override_type.display)
+                            override_type.display
                         } else {
                             discover_markdown_override(
                                 output.item_type,
@@ -6652,7 +6545,7 @@ fn generate_markdown_data_source(
                                 &mut struct_defs,
                             )?
                         };
-                        MarkdownType::List(Box::new(item))
+                        MarkdownType::list(item)
                     },
                     description: Description::authored(output.description),
                 })
@@ -6673,7 +6566,9 @@ fn generate_markdown_data_source(
             let required = if input.required { "Yes" } else { "No" };
             page.push_str(&format!("- **Required:** {}\n\n", required));
             if let Some(override_type) = resource_value_override(ds.name, input.name) {
-                page.push_str(&format!("- **Type:** {}\n\n", override_type.display));
+                page.push_str("- **Type:** ");
+                override_type.display.write_to(&mut page);
+                page.push_str("\n\n");
             } else if let Some(code) = input.type_override {
                 let ty = discover_markdown_override(
                     code,
@@ -6822,7 +6717,7 @@ fn discover_markdown_type(
         );
     }
     if let Some(override_type) = resource_value_override(resource_name, property_path) {
-        return Ok(MarkdownType::Plain(override_type.display));
+        return Ok(override_type.display);
     }
     // Per-(parent_struct, member) override wins over per-member and Smithy
     // default. Distinguishes a member name shared across structs (aws#302).
@@ -6862,7 +6757,10 @@ fn discover_markdown_type(
             values.iter().map(|value| value.to_string()).collect(),
             all_enums,
         );
-        return Ok(MarkdownType::Enum { key, type_name });
+        return Ok(MarkdownType::link(
+            MarkdownTarget::Enum(key),
+            format!("Enum ({type_name})"),
+        ));
     }
 
     let kind = model.shape_kind(target);
@@ -6870,22 +6768,20 @@ fn discover_markdown_type(
     Ok(match kind {
         Some(ShapeKind::String) => {
             if let Some(inferred) = infer_string_type(field_name) {
-                return Ok(MarkdownType::Plain(type_code_to_display(&inferred)));
+                return Ok(type_code_to_markdown(&inferred));
             }
-            MarkdownType::Plain("String".to_string())
+            MarkdownType::text("String".to_string())
         }
-        Some(ShapeKind::Boolean) => MarkdownType::Plain("Bool".to_string()),
+        Some(ShapeKind::Boolean) => MarkdownType::text("Bool".to_string()),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             let range = get_int_range(model, target, field_name);
             if let Some(r) = range {
-                MarkdownType::Plain(format!("Int({})", range_display_string(r.min, r.max)))
+                MarkdownType::text(format!("Int({})", range_display_string(r.min, r.max)))
             } else {
-                MarkdownType::Plain("Int".to_string())
+                MarkdownType::text("Int".to_string())
             }
         }
-        Some(ShapeKind::Float) | Some(ShapeKind::Double) => {
-            MarkdownType::Plain("Float".to_string())
-        }
+        Some(ShapeKind::Float) | Some(ShapeKind::Double) => MarkdownType::text("Float".to_string()),
         Some(ShapeKind::Enum) => {
             if let Some(values) = model.enum_values(target) {
                 // Prefer the Smithy shape name (PascalCase, e.g. "LogGroupClass")
@@ -6909,12 +6805,12 @@ fn discover_markdown_type(
                     values.into_iter().map(|(_, value)| value).collect(),
                     all_enums,
                 );
-                MarkdownType::Enum { key, type_name }
+                MarkdownType::link(MarkdownTarget::Enum(key), format!("Enum ({type_name})"))
             } else {
-                MarkdownType::Plain("String".to_string())
+                MarkdownType::text("String".to_string())
             }
         }
-        Some(ShapeKind::IntEnum) => MarkdownType::Plain("Int".to_string()),
+        Some(ShapeKind::IntEnum) => MarkdownType::text("Int".to_string()),
         Some(ShapeKind::List) => {
             if let Some(carina_smithy::Shape::List(list_shape)) = model.get_shape(target) {
                 let item = discover_markdown_type(
@@ -6932,9 +6828,9 @@ fn discover_markdown_type(
                     struct_defs,
                     discovering_structs,
                 )?;
-                MarkdownType::List(Box::new(item))
+                MarkdownType::list(item)
             } else {
-                MarkdownType::List(Box::new(MarkdownType::Plain("String".to_string())))
+                MarkdownType::list(MarkdownType::text("String"))
             }
         }
         Some(ShapeKind::Map) => {
@@ -6955,19 +6851,19 @@ fn discover_markdown_type(
                     discovering_structs,
                 )?
             } else {
-                MarkdownType::Plain("String".to_string())
+                MarkdownType::text("String".to_string())
             };
-            MarkdownType::Map(Box::new(value))
+            MarkdownType::map(value)
         }
         Some(ShapeKind::Structure | ShapeKind::Union) => {
             let shape_name = SmithyModel::shape_name(target).to_string();
             if kind == Some(ShapeKind::Structure)
                 && (shape_name == "TagList" || shape_name == "Tag")
             {
-                return Ok(MarkdownType::Plain("Map".to_string()));
+                return Ok(MarkdownType::text("Map".to_string()));
             }
             if kind == Some(ShapeKind::Structure) && shape_name == "AttributeBooleanValue" {
-                return Ok(MarkdownType::Plain("Bool".to_string()));
+                return Ok(MarkdownType::text("Bool".to_string()));
             }
             let structure = if let Some(structure) = model.get_structure(target) {
                 StructRepresentation::from_structure(structure)
@@ -6977,10 +6873,10 @@ fn discover_markdown_type(
                 anyhow::bail!("Cannot find Smithy struct or union {target}");
             };
             if let Some(active_key) = discovering_structs.get(target) {
-                return Ok(MarkdownType::Struct {
-                    key: active_key.clone(),
-                    name: shape_name,
-                });
+                return Ok(MarkdownType::link(
+                    MarkdownTarget::Struct(active_key.clone()),
+                    format!("Struct({shape_name})"),
+                ));
             }
 
             let child_enum_namespace = format!("{enum_namespace}.{shape_name}");
@@ -7034,10 +6930,7 @@ fn discover_markdown_type(
                     },
                 );
             }
-            MarkdownType::Struct {
-                key,
-                name: shape_name,
-            }
+            MarkdownType::link(MarkdownTarget::Struct(key), format!("Struct({shape_name})"))
         }
         Some(
             ShapeKind::Blob
@@ -7049,9 +6942,9 @@ fn discover_markdown_type(
         )
         | None => {
             if let Some(inferred) = infer_string_type(field_name) {
-                MarkdownType::Plain(type_code_to_display(&inferred))
+                type_code_to_markdown(&inferred)
             } else {
-                MarkdownType::Plain("String".to_string())
+                MarkdownType::text("String".to_string())
             }
         }
     })
@@ -7111,36 +7004,38 @@ fn split_top_level_commas(value: &str) -> Vec<&str> {
     parts
 }
 
-/// Convert a Rust type code string to a human-readable display name.
-///
-/// Display names use PascalCase consistently (e.g. `IamRoleArn`, not
-/// `iam_role_arn`). Container types like `AttributeType::list(...)` are
-/// rendered as `List<Inner>` so docs never leak Rust constructor syntax.
-fn type_code_to_display(type_code: &str) -> String {
-    // Container types: AttributeType::list(...) and AttributeType::map(...)
+/// Build a type display without rendering collection contents as Markdown.
+fn type_code_to_markdown(type_code: &str) -> MarkdownType {
     if let Some(inner) = type_code
         .strip_prefix("AttributeType::union(vec![")
         .and_then(|s| s.strip_suffix("])"))
     {
-        return split_top_level_commas(inner)
-            .into_iter()
-            .map(|member| type_code_to_display(member.trim()))
-            .collect::<Vec<_>>()
-            .join(" \\| ");
+        return MarkdownType::union(
+            split_top_level_commas(inner)
+                .into_iter()
+                .map(|member| type_code_to_markdown(member.trim())),
+        );
     }
     if let Some(inner) = type_code
         .strip_prefix("AttributeType::list(")
         .and_then(|s| s.strip_suffix(')'))
     {
-        return format!("`List<{}>`", type_code_to_display(inner));
+        return MarkdownType::list(type_code_to_markdown(inner));
     }
     if let Some(inner) = type_code
         .strip_prefix("AttributeType::map(")
         .and_then(|s| s.strip_suffix(')'))
     {
-        return format!("`Map<String, {}>`", type_code_to_display(inner));
+        return MarkdownType::map(type_code_to_markdown(inner));
     }
+    MarkdownType::text(type_code_to_display(type_code))
+}
 
+/// Convert a scalar Rust type code string to a literal display name.
+///
+/// Display names use PascalCase consistently (e.g. `IamRoleArn`, not
+/// `iam_role_arn`). Collections and unions are parsed by `type_code_to_markdown`.
+fn type_code_to_display(type_code: &str) -> String {
     match type_code {
         PLAIN_STRING_TYPE_CODE => "String".to_string(),
         "AttributeType::bool()" => "Bool".to_string(),
@@ -10028,21 +9923,27 @@ mod tests {
 
     #[test]
     fn type_display_names_include_route53_hosted_zone_id_union() {
+        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+        type_code_to_markdown(
+            "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
+        )
+        .write_to(&mut page);
         assert_eq!(
-            type_code_to_display(
-                "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])"
-            ),
-            "CloudFrontHostedZoneId \\| Route53HostedZoneId"
+            page.finish().expect("valid union display"),
+            r"CloudFrontHostedZoneId \| Route53HostedZoneId"
         );
     }
 
     #[test]
     fn type_display_union_splits_only_on_top_level_commas() {
+        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+        type_code_to_markdown(
+            "AttributeType::union(vec![super::route53_hosted_zone_id(a, b), super::cloudfront_hosted_zone_id()])",
+        )
+        .write_to(&mut page);
         assert_eq!(
-            type_code_to_display(
-                "AttributeType::union(vec![super::route53_hosted_zone_id(a, b), super::cloudfront_hosted_zone_id()])"
-            ),
-            "Route53HostedZoneId \\| CloudFrontHostedZoneId"
+            page.finish().expect("valid union display"),
+            r"Route53HostedZoneId \| CloudFrontHostedZoneId"
         );
     }
 
@@ -11291,6 +11192,31 @@ mod tests {
 
         assert!(
             markdown.contains("- **Type:** [Struct(Options)](#options-1)"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_type_display_preserves_literal_patterns() {
+        let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
+        let display = pattern_display("String(pattern: ", pattern);
+        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        page.table(["Type"], [[display.table_cell()]]).unwrap();
+        page.push_str("\n");
+        MarkdownType::list(display).write_to(&mut page);
+
+        let markdown = page.finish().expect("literal regex passes page validation");
+        assert_eq!(
+            markdown
+                .matches(&format!("String(pattern: `{pattern}`)"))
+                .count(),
+            3,
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains(&format!("List\\<String(pattern: `{pattern}`)\\>")),
             "{markdown}"
         );
     }
