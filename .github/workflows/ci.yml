@@ -20,6 +20,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check
+      - name: Check AWS types without service features
+        run: cargo check -p carina-aws-types --no-default-features
+      - name: Check AWS types with the awscc service features
+        run: cargo check -p carina-aws-types --no-default-features --features cloudcontrol,kms,s3,sts
 
   test:
     name: Test
@@ -36,6 +40,8 @@ jobs:
       - name: Test acceptance state helpers
         run: bash acceptance-tests/shell-tests/state_helpers.sh
       - run: cargo test
+      - name: Test AWS types with all features, including doctests
+        run: cargo test -p carina-aws-types --all-features
 
   validate-examples:
     name: Validate Examples
