@@ -206,7 +206,7 @@ operation:
    Codegen checks the decision against the Smithy `@readonly`, `@idempotent`
    and `@idempotencyToken` traits, and fails on a contradiction.
 2. Run `./scripts/generate-provider.sh`. It regenerates
-   `resend_safety_generated.rs` and the workspace `clippy.toml`.
+   `resend_safety_generated.rs`.
 3. Call the generated method. Operations without a token return the SDK
    builder, as before. Token-bearing operations return a `TokenOperation`.
    Set its request fields with `.configure(|input| ...)` and send it with
@@ -215,8 +215,10 @@ operation:
    of its own.
 
 Calling an operation that has no decision fails to compile, because the
-wrapper has no method for it. Creating a raw `aws_sdk_*::Client` is rejected
-by the generated `clippy.toml`.
+wrapper has no method for it. A raw `aws_sdk_*::Client` cannot be created at
+all: the provider has no `aws-sdk-*` or `aws-config` dependency, and
+`carina-aws-types` exports only each SDK's non-client modules plus guarded
+handles whose sole constructor installs `ResendGuard`.
 
 ### Step 6: Add Provider Dispatch
 
@@ -272,7 +274,7 @@ Downloaded models are cached in `carina-provider-aws/tests/fixtures/smithy/` wit
 | `provider_generated.rs` | Yes | `generate-provider.sh` |
 | `send_models_generated.rs` (typed create/update inputs and capture contract) | Yes | `generate-provider.sh` |
 | `resend_safety_generated.rs` (wrapper clients, resend decisions) | Yes | `generate-provider.sh` |
-| `clippy.toml` (workspace root) | Yes | `generate-provider.sh` |
+| `clippy.toml` (workspace root) | No | Hand-written |
 | `services/*.rs` | No | Hand-written |
 | `provider.rs` dispatch | No | Hand-written |
 | Client construction | Yes, as `from_bounded_config` on each wrapper | `generate-provider.sh` |

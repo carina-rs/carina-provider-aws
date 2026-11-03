@@ -3,7 +3,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use aws_sdk_s3::Client as S3Client;
+use carina_aws_types::Idempotency;
+use carina_aws_types::sdk::s3::S3Client;
 use carina_core::differ::Diff;
 use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
@@ -171,13 +172,12 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
     )
 }
 
-// This test-only raw client stages and inspects winterbaume state outside the
-// provider; provider operations still use the generated guarded wrapper.
-#[allow(clippy::disallowed_methods)]
+// The guarded facade also stages and inspects winterbaume state. Its conservative
+// lookup never grants resend permission to a possibly sent setup operation.
 async fn provider_with_s3() -> (AwsProvider, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    let s3_client = S3Client::new(&sdk_config);
+    let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
     (provider_from_config(sdk_config), s3_client)
 }
 
@@ -489,6 +489,7 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
         .expect("create S3 bucket");
 
     let raw_location = client
+        .inner()
         .get_bucket_location()
         .bucket(bucket)
         .send()

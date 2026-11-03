@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::{
+use carina_aws_types::sdk::s3::types::{
     DeleteMarkerReplication, DeleteMarkerReplicationStatus, Destination, ReplicationConfiguration,
     ReplicationRule, ReplicationRuleAndOperator, ReplicationRuleFilter, ReplicationRuleStatus,
     StorageClass, Tag,

@@ -49,7 +49,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -82,7 +82,7 @@ impl AwsProvider {
                 .ec2_client
                 .describe_vpc_attribute()
                 .vpc_id(vpc_id_str)
-                .attribute(aws_sdk_ec2::types::VpcAttributeName::EnableDnsSupport)
+                .attribute(carina_aws_types::sdk::ec2::types::VpcAttributeName::EnableDnsSupport)
                 .send()
                 .await
                 .map_err(|error| {
@@ -93,7 +93,7 @@ impl AwsProvider {
                 .ec2_client
                 .describe_vpc_attribute()
                 .vpc_id(vpc_id_str)
-                .attribute(aws_sdk_ec2::types::VpcAttributeName::EnableDnsHostnames)
+                .attribute(carina_aws_types::sdk::ec2::types::VpcAttributeName::EnableDnsHostnames)
                 .send()
                 .await
                 .map_err(|error| {
@@ -179,7 +179,7 @@ impl AwsProvider {
         let mut create_vpc_builder = self.ec2_client.create_vpc().tag_specifications(
             build_tag_specification_with_create_token(
                 tags.as_ref(),
-                aws_sdk_ec2::types::ResourceType::Vpc,
+                carina_aws_types::sdk::ec2::types::ResourceType::Vpc,
                 client_token,
             ),
         );
@@ -206,10 +206,12 @@ impl AwsProvider {
 
         // Handle instance_tenancy if specified
         if let Some(tenancy) = instance_tenancy {
-            let tenancy_enum = match tenancy.as_str() {
-                "dedicated" => aws_sdk_ec2::types::Tenancy::Dedicated,
-                "host" => aws_sdk_ec2::types::Tenancy::Host,
-                _ => aws_sdk_ec2::types::Tenancy::Default,
+            let tenancy_enum = if tenancy == "dedicated" {
+                carina_aws_types::sdk::ec2::types::Tenancy::Dedicated
+            } else if tenancy == "host" {
+                carina_aws_types::sdk::ec2::types::Tenancy::Host
+            } else {
+                carina_aws_types::sdk::ec2::types::Tenancy::Default
             };
             create_vpc_builder = create_vpc_builder.instance_tenancy(tenancy_enum);
         }
@@ -244,7 +246,7 @@ impl AwsProvider {
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_support(
-                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                    carina_aws_types::sdk::ec2::types::AttributeBooleanValue::builder()
                         .value(enabled)
                         .build(),
                 )
@@ -264,7 +266,7 @@ impl AwsProvider {
                 .modify_vpc_attribute()
                 .vpc_id(vpc_id)
                 .enable_dns_hostnames(
-                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                    carina_aws_types::sdk::ec2::types::AttributeBooleanValue::builder()
                         .value(enabled)
                         .build(),
                 )
@@ -307,7 +309,7 @@ impl AwsProvider {
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
                 .enable_dns_support(
-                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                    carina_aws_types::sdk::ec2::types::AttributeBooleanValue::builder()
                         .value(enabled)
                         .build(),
                 )
@@ -324,7 +326,7 @@ impl AwsProvider {
                 .modify_vpc_attribute()
                 .vpc_id(&vpc_id)
                 .enable_dns_hostnames(
-                    aws_sdk_ec2::types::AttributeBooleanValue::builder()
+                    carina_aws_types::sdk::ec2::types::AttributeBooleanValue::builder()
                         .value(enabled)
                         .build(),
                 )

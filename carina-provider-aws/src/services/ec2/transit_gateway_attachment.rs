@@ -7,7 +7,7 @@ use carina_core::resource::{
 };
 use carina_core::schema::CompiledResourceSchema;
 
-use aws_sdk_ec2::types::TransitGatewayAttachmentState;
+use carina_aws_types::sdk::ec2::types::TransitGatewayAttachmentState;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
@@ -79,8 +79,10 @@ fn build_create_transit_gateway_attachment_options(
     id: &ResourceId,
     options_value: Option<&Value>,
     schema: &CompiledResourceSchema,
-) -> ProviderResult<Option<aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions>> {
-    use aws_sdk_ec2::types::{
+) -> ProviderResult<
+    Option<carina_aws_types::sdk::ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions>,
+> {
+    use carina_aws_types::sdk::ec2::types::{
         ApplianceModeSupportValue, DnsSupportValue, Ipv6SupportValue,
         SecurityGroupReferencingSupportValue,
     };
@@ -94,7 +96,8 @@ fn build_create_transit_gateway_attachment_options(
         .insert("options".to_string(), options_value.clone());
     let resource = &projected;
     let mut options =
-        aws_sdk_ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions::builder();
+        carina_aws_types::sdk::ec2::types::CreateTransitGatewayVpcAttachmentRequestOptions::builder(
+        );
     let mut has_options = false;
 
     if let Some(v) =
@@ -229,7 +232,7 @@ impl AwsProvider {
 
         req = req.tag_specifications(build_tag_specification_with_create_token(
             tags.as_ref(),
-            aws_sdk_ec2::types::ResourceType::TransitGatewayAttachment,
+            carina_aws_types::sdk::ec2::types::ResourceType::TransitGatewayAttachment,
             client_token,
         ));
 
@@ -333,7 +336,7 @@ impl AwsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_ec2::types::{
+    use carina_aws_types::sdk::ec2::types::{
         ApplianceModeSupportValue, DnsSupportValue, Ipv6SupportValue,
         SecurityGroupReferencingSupportValue, TransitGatewayVpcAttachment,
         TransitGatewayVpcAttachmentOptions,

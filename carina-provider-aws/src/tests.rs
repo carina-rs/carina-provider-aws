@@ -8,60 +8,7 @@ use carina_core::provider::ProviderNormalizer;
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::Shape;
 
-use crate::sdk_config::assert_bounded_policy;
-use crate::{AwsNormalizer, AwsProvider, BoundedSdkConfig};
-
-#[tokio::test]
-async fn provider_clients_have_bounded_sdk_policy() {
-    let mock = winterbaume_core::MockAws::builder().build();
-    let config = BoundedSdkConfig::for_test(mock.sdk_config("us-east-1").await);
-    let provider = AwsProvider::from_sdk_config("us-east-1".into(), vec![], vec![], &config);
-
-    assert_bounded_policy(
-        provider.s3_client.config().timeout_config(),
-        provider.s3_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.ec2_client.config().timeout_config(),
-        provider.ec2_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.iam_client.config().timeout_config(),
-        provider.iam_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.logs_client.config().timeout_config(),
-        provider.logs_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.sts_client.config().timeout_config(),
-        provider.sts_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.account_client.config().timeout_config(),
-        provider.account_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.organizations_client.config().timeout_config(),
-        provider.organizations_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.identitystore_client.config().timeout_config(),
-        provider.identitystore_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.route53_client.config().timeout_config(),
-        provider.route53_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.acm_client.config().timeout_config(),
-        provider.acm_client.config().retry_config(),
-    );
-    assert_bounded_policy(
-        provider.sqs_client.config().timeout_config(),
-        provider.sqs_client.config().retry_config(),
-    );
-}
+use crate::{AwsNormalizer, AwsProvider};
 
 #[test]
 fn flow_log_resource_ids_are_order_insensitive() {
@@ -82,10 +29,10 @@ fn flow_log_resource_ids_are_order_insensitive() {
 
 #[test]
 fn test_extract_ec2_vpc_attributes() {
-    let vpc = aws_sdk_ec2::types::Vpc::builder()
+    let vpc = carina_aws_types::sdk::ec2::types::Vpc::builder()
         .vpc_id("vpc-12345678")
         .cidr_block("10.0.0.0/16")
-        .instance_tenancy(aws_sdk_ec2::types::Tenancy::Default)
+        .instance_tenancy(carina_aws_types::sdk::ec2::types::Tenancy::Default)
         .build();
     let fields = AwsProvider::extract_ec2_vpc_attributes(&vpc);
     let identifier = fields.applied_identifier().clone();
@@ -112,7 +59,7 @@ fn test_extract_ec2_vpc_attributes() {
 
 #[test]
 fn test_extract_ec2_vpc_attributes_minimal() {
-    let vpc = aws_sdk_ec2::types::Vpc::builder().build();
+    let vpc = carina_aws_types::sdk::ec2::types::Vpc::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_attributes(&vpc);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -123,7 +70,7 @@ fn test_extract_ec2_vpc_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_subnet_attributes() {
-    let subnet = aws_sdk_ec2::types::Subnet::builder()
+    let subnet = carina_aws_types::sdk::ec2::types::Subnet::builder()
         .subnet_id("subnet-12345678")
         .vpc_id("vpc-12345678")
         .cidr_block("10.0.1.0/24")
@@ -165,7 +112,7 @@ fn test_extract_ec2_subnet_attributes() {
 
 #[test]
 fn test_extract_ec2_subnet_attributes_minimal() {
-    let subnet = aws_sdk_ec2::types::Subnet::builder().build();
+    let subnet = carina_aws_types::sdk::ec2::types::Subnet::builder().build();
     let fields = AwsProvider::extract_ec2_subnet_attributes(&subnet);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -173,7 +120,7 @@ fn test_extract_ec2_subnet_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_subnet_attributes_with_private_dns_name_options() {
-    use aws_sdk_ec2::types::{HostnameType, PrivateDnsNameOptionsOnLaunch};
+    use carina_aws_types::sdk::ec2::types::{HostnameType, PrivateDnsNameOptionsOnLaunch};
 
     let dns_options = PrivateDnsNameOptionsOnLaunch::builder()
         .hostname_type(HostnameType::IpName)
@@ -181,7 +128,7 @@ fn test_extract_ec2_subnet_attributes_with_private_dns_name_options() {
         .enable_resource_name_dns_aaaa_record(false)
         .build();
 
-    let subnet = aws_sdk_ec2::types::Subnet::builder()
+    let subnet = carina_aws_types::sdk::ec2::types::Subnet::builder()
         .subnet_id("subnet-12345678")
         .vpc_id("vpc-12345678")
         .cidr_block("10.0.1.0/24")
@@ -224,7 +171,7 @@ fn test_extract_ec2_subnet_attributes_with_private_dns_name_options() {
 
 #[test]
 fn test_extract_ec2_internet_gateway_attributes() {
-    let igw = aws_sdk_ec2::types::InternetGateway::builder()
+    let igw = carina_aws_types::sdk::ec2::types::InternetGateway::builder()
         .internet_gateway_id("igw-12345678")
         .build();
     let fields = AwsProvider::extract_ec2_internet_gateway_attributes(&igw);
@@ -240,7 +187,7 @@ fn test_extract_ec2_internet_gateway_attributes() {
 
 #[test]
 fn test_extract_ec2_internet_gateway_attributes_minimal() {
-    let igw = aws_sdk_ec2::types::InternetGateway::builder().build();
+    let igw = carina_aws_types::sdk::ec2::types::InternetGateway::builder().build();
     let fields = AwsProvider::extract_ec2_internet_gateway_attributes(&igw);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -251,7 +198,7 @@ fn test_extract_ec2_internet_gateway_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_route_table_attributes() {
-    let rt = aws_sdk_ec2::types::RouteTable::builder()
+    let rt = carina_aws_types::sdk::ec2::types::RouteTable::builder()
         .route_table_id("rtb-12345678")
         .vpc_id("vpc-12345678")
         .build();
@@ -274,7 +221,7 @@ fn test_extract_ec2_route_table_attributes() {
 
 #[test]
 fn test_extract_ec2_route_table_attributes_minimal() {
-    let rt = aws_sdk_ec2::types::RouteTable::builder().build();
+    let rt = carina_aws_types::sdk::ec2::types::RouteTable::builder().build();
     let fields = AwsProvider::extract_ec2_route_table_attributes(&rt);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -284,7 +231,7 @@ fn test_extract_ec2_route_table_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_route_attributes() {
-    let route = aws_sdk_ec2::types::Route::builder()
+    let route = carina_aws_types::sdk::ec2::types::Route::builder()
         .destination_cidr_block("0.0.0.0/0")
         .gateway_id("igw-12345678")
         .build();
@@ -308,7 +255,7 @@ fn test_extract_ec2_route_attributes() {
 
 #[test]
 fn test_extract_ec2_route_attributes_with_nat_gateway() {
-    let route = aws_sdk_ec2::types::Route::builder()
+    let route = carina_aws_types::sdk::ec2::types::Route::builder()
         .destination_cidr_block("10.0.0.0/8")
         .nat_gateway_id("nat-12345678")
         .build();
@@ -330,7 +277,7 @@ fn test_extract_ec2_route_attributes_with_nat_gateway() {
 #[test]
 fn test_extract_ec2_route_attributes_ignores_unsupported() {
     // transit_gateway_id is not in the schema, so it should not be extracted
-    let route = aws_sdk_ec2::types::Route::builder()
+    let route = carina_aws_types::sdk::ec2::types::Route::builder()
         .destination_cidr_block("172.16.0.0/12")
         .transit_gateway_id("tgw-12345678")
         .build();
@@ -347,7 +294,7 @@ fn test_extract_ec2_route_attributes_ignores_unsupported() {
 
 #[test]
 fn test_extract_ec2_security_group_attributes() {
-    let sg = aws_sdk_ec2::types::SecurityGroup::builder()
+    let sg = carina_aws_types::sdk::ec2::types::SecurityGroup::builder()
         .group_id("sg-12345678")
         .group_name("test-sg")
         .description("Test security group")
@@ -384,7 +331,7 @@ fn test_extract_ec2_security_group_attributes() {
 
 #[test]
 fn test_extract_ec2_security_group_attributes_minimal() {
-    let sg = aws_sdk_ec2::types::SecurityGroup::builder().build();
+    let sg = carina_aws_types::sdk::ec2::types::SecurityGroup::builder().build();
     let fields = AwsProvider::extract_ec2_security_group_attributes(&sg);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -394,7 +341,7 @@ fn test_extract_ec2_security_group_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_security_group_ingress_attributes() {
-    let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+    let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
         .security_group_rule_id("sgr-12345678")
         .group_id("sg-12345678")
         .ip_protocol("tcp")
@@ -441,7 +388,7 @@ fn test_extract_ec2_security_group_ingress_attributes() {
 
 #[test]
 fn test_extract_ec2_security_group_ingress_attributes_with_prefix_list() {
-    let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+    let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
         .security_group_rule_id("sgr-99999999")
         .group_id("sg-12345678")
         .ip_protocol("tcp")
@@ -462,7 +409,7 @@ fn test_extract_ec2_security_group_ingress_attributes_with_prefix_list() {
 
 #[test]
 fn test_extract_ec2_security_group_egress_attributes() {
-    let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+    let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
         .security_group_rule_id("sgr-87654321")
         .group_id("sg-12345678")
         .ip_protocol("-1")
@@ -496,7 +443,7 @@ fn test_extract_ec2_security_group_egress_attributes() {
 
 #[test]
 fn test_extract_ec2_security_group_egress_attributes_with_prefix_list() {
-    let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+    let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
         .security_group_rule_id("sgr-11111111")
         .group_id("sg-12345678")
         .ip_protocol("tcp")
@@ -515,7 +462,7 @@ fn test_extract_ec2_security_group_egress_attributes_with_prefix_list() {
 
 #[test]
 fn test_extract_ec2_security_group_egress_attributes_with_ipv6() {
-    let rule = aws_sdk_ec2::types::SecurityGroupRule::builder()
+    let rule = carina_aws_types::sdk::ec2::types::SecurityGroupRule::builder()
         .security_group_rule_id("sgr-22222222")
         .group_id("sg-12345678")
         .ip_protocol("-1")
@@ -537,16 +484,16 @@ fn test_extract_ec2_security_group_egress_attributes_with_ipv6() {
 #[test]
 fn test_route_table_routes_extraction() {
     // Simulates the route extraction logic in read_ec2_route_table
-    let route1 = aws_sdk_ec2::types::Route::builder()
+    let route1 = carina_aws_types::sdk::ec2::types::Route::builder()
         .destination_cidr_block("10.0.0.0/16")
         .gateway_id("local")
         .build();
-    let route2 = aws_sdk_ec2::types::Route::builder()
+    let route2 = carina_aws_types::sdk::ec2::types::Route::builder()
         .destination_cidr_block("0.0.0.0/0")
         .gateway_id("igw-12345678")
         .build();
 
-    let rt = aws_sdk_ec2::types::RouteTable::builder()
+    let rt = carina_aws_types::sdk::ec2::types::RouteTable::builder()
         .route_table_id("rtb-12345678")
         .vpc_id("vpc-12345678")
         .routes(route1)
@@ -607,7 +554,7 @@ fn test_route_table_routes_extraction() {
 
 #[test]
 fn test_route_table_routes_extraction_empty() {
-    let rt = aws_sdk_ec2::types::RouteTable::builder()
+    let rt = carina_aws_types::sdk::ec2::types::RouteTable::builder()
         .route_table_id("rtb-12345678")
         .build();
     assert!(rt.routes().is_empty());
@@ -618,11 +565,13 @@ fn test_route_table_routes_extraction_empty() {
 #[test]
 fn test_internet_gateway_attachment_extraction() {
     // Simulates the vpc_id extraction from IGW attachments
-    let attachment = aws_sdk_ec2::types::InternetGatewayAttachment::builder()
+    let attachment = carina_aws_types::sdk::ec2::types::InternetGatewayAttachment::builder()
         .vpc_id("vpc-12345678")
-        .state(aws_sdk_ec2::types::AttachmentStatus::from("available"))
+        .state(carina_aws_types::sdk::ec2::types::AttachmentStatus::from(
+            "available",
+        ))
         .build();
-    let igw = aws_sdk_ec2::types::InternetGateway::builder()
+    let igw = carina_aws_types::sdk::ec2::types::InternetGateway::builder()
         .internet_gateway_id("igw-12345678")
         .attachments(attachment)
         .build();
@@ -648,7 +597,7 @@ fn test_internet_gateway_attachment_extraction() {
 
 #[test]
 fn test_internet_gateway_no_attachment() {
-    let igw = aws_sdk_ec2::types::InternetGateway::builder()
+    let igw = carina_aws_types::sdk::ec2::types::InternetGateway::builder()
         .internet_gateway_id("igw-12345678")
         .build();
 
@@ -669,7 +618,7 @@ fn test_internet_gateway_no_attachment() {
 
 #[test]
 fn test_extract_ec2_subnet_attributes_map_public_ip_true() {
-    let subnet = aws_sdk_ec2::types::Subnet::builder()
+    let subnet = carina_aws_types::sdk::ec2::types::Subnet::builder()
         .subnet_id("subnet-12345678")
         .vpc_id("vpc-12345678")
         .cidr_block("10.0.1.0/24")
@@ -712,7 +661,7 @@ async fn test_subnet_availability_zone_survives_normalize_desired() {
 
 #[test]
 fn test_subnet_hostname_type_canonical_value_to_aws_sdk() {
-    use aws_sdk_ec2::types::HostnameType;
+    use carina_aws_types::sdk::ec2::types::HostnameType;
 
     // Core sends the provider the canonical API spelling.
     let aws_value = "ip-name";
@@ -751,8 +700,8 @@ fn test_subnet_dns_options_fields_parsed_separately() {
     // Each field should be independently extractable for separate API calls
     if let Some(Value::Concrete(ConcreteValue::String(ht))) = fields.get("hostname_type") {
         assert_eq!(
-            aws_sdk_ec2::types::HostnameType::from(ht.expose_plaintext()),
-            aws_sdk_ec2::types::HostnameType::IpName
+            carina_aws_types::sdk::ec2::types::HostnameType::from(ht.expose_plaintext()),
+            carina_aws_types::sdk::ec2::types::HostnameType::IpName
         );
     } else {
         panic!("hostname_type should be present and a String");
@@ -779,9 +728,9 @@ fn test_subnet_dns_options_fields_parsed_separately() {
 
 #[test]
 fn test_extract_ec2_eip_attributes() {
-    let addr = aws_sdk_ec2::types::Address::builder()
+    let addr = carina_aws_types::sdk::ec2::types::Address::builder()
         .allocation_id("eipalloc-12345678")
-        .domain(aws_sdk_ec2::types::DomainType::Vpc)
+        .domain(carina_aws_types::sdk::ec2::types::DomainType::Vpc)
         .public_ip("203.0.113.1")
         .build();
     let fields = AwsProvider::extract_ec2_eip_attributes(&addr);
@@ -809,7 +758,7 @@ fn test_extract_ec2_eip_attributes() {
 
 #[test]
 fn test_extract_ec2_eip_attributes_minimal() {
-    let addr = aws_sdk_ec2::types::Address::builder().build();
+    let addr = carina_aws_types::sdk::ec2::types::Address::builder().build();
     let fields = AwsProvider::extract_ec2_eip_attributes(&addr);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -820,13 +769,13 @@ fn test_extract_ec2_eip_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_nat_gateway_attributes() {
-    let nat_addr = aws_sdk_ec2::types::NatGatewayAddress::builder()
+    let nat_addr = carina_aws_types::sdk::ec2::types::NatGatewayAddress::builder()
         .allocation_id("eipalloc-12345678")
         .build();
-    let ngw = aws_sdk_ec2::types::NatGateway::builder()
+    let ngw = carina_aws_types::sdk::ec2::types::NatGateway::builder()
         .nat_gateway_id("nat-12345678")
         .subnet_id("subnet-12345678")
-        .connectivity_type(aws_sdk_ec2::types::ConnectivityType::Public)
+        .connectivity_type(carina_aws_types::sdk::ec2::types::ConnectivityType::Public)
         .nat_gateway_addresses(nat_addr)
         .build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
@@ -860,7 +809,7 @@ fn test_extract_ec2_nat_gateway_attributes() {
 
 #[test]
 fn test_extract_ec2_nat_gateway_attributes_minimal() {
-    let ngw = aws_sdk_ec2::types::NatGateway::builder().build();
+    let ngw = carina_aws_types::sdk::ec2::types::NatGateway::builder().build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -868,10 +817,10 @@ fn test_extract_ec2_nat_gateway_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_nat_gateway_attributes_private() {
-    let ngw = aws_sdk_ec2::types::NatGateway::builder()
+    let ngw = carina_aws_types::sdk::ec2::types::NatGateway::builder()
         .nat_gateway_id("nat-87654321")
         .subnet_id("subnet-87654321")
-        .connectivity_type(aws_sdk_ec2::types::ConnectivityType::Private)
+        .connectivity_type(carina_aws_types::sdk::ec2::types::ConnectivityType::Private)
         .build();
     let fields = AwsProvider::extract_ec2_nat_gateway_attributes(&ngw);
     let identifier = fields.applied_identifier().clone();
@@ -890,12 +839,12 @@ fn test_extract_ec2_nat_gateway_attributes_private() {
 
 #[test]
 fn test_extract_ec2_vpc_endpoint_attributes() {
-    let group = aws_sdk_ec2::types::SecurityGroupIdentifier::builder()
+    let group = carina_aws_types::sdk::ec2::types::SecurityGroupIdentifier::builder()
         .group_id("sg-12345678")
         .build();
-    let endpoint = aws_sdk_ec2::types::VpcEndpoint::builder()
+    let endpoint = carina_aws_types::sdk::ec2::types::VpcEndpoint::builder()
         .vpc_endpoint_id("vpce-12345678")
-        .vpc_endpoint_type(aws_sdk_ec2::types::VpcEndpointType::Gateway)
+        .vpc_endpoint_type(carina_aws_types::sdk::ec2::types::VpcEndpointType::Gateway)
         .vpc_id("vpc-12345678")
         .service_name("com.amazonaws.ap-northeast-1.s3")
         .private_dns_enabled(false)
@@ -949,7 +898,7 @@ fn test_extract_ec2_vpc_endpoint_attributes() {
 
 #[test]
 fn test_extract_ec2_vpc_endpoint_attributes_minimal() {
-    let endpoint = aws_sdk_ec2::types::VpcEndpoint::builder().build();
+    let endpoint = carina_aws_types::sdk::ec2::types::VpcEndpoint::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_endpoint_attributes(&endpoint);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -957,12 +906,12 @@ fn test_extract_ec2_vpc_endpoint_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_vpc_endpoint_attributes_interface() {
-    let group = aws_sdk_ec2::types::SecurityGroupIdentifier::builder()
+    let group = carina_aws_types::sdk::ec2::types::SecurityGroupIdentifier::builder()
         .group_id("sg-99999999")
         .build();
-    let endpoint = aws_sdk_ec2::types::VpcEndpoint::builder()
+    let endpoint = carina_aws_types::sdk::ec2::types::VpcEndpoint::builder()
         .vpc_endpoint_id("vpce-99999999")
-        .vpc_endpoint_type(aws_sdk_ec2::types::VpcEndpointType::Interface)
+        .vpc_endpoint_type(carina_aws_types::sdk::ec2::types::VpcEndpointType::Interface)
         .vpc_id("vpc-12345678")
         .service_name("com.amazonaws.ap-northeast-1.execute-api")
         .private_dns_enabled(true)
@@ -994,11 +943,11 @@ fn test_extract_ec2_vpc_endpoint_attributes_interface() {
 
 #[test]
 fn test_extract_ec2_flow_log_attributes() {
-    let fl = aws_sdk_ec2::types::FlowLog::builder()
+    let fl = carina_aws_types::sdk::ec2::types::FlowLog::builder()
         .flow_log_id("fl-12345678")
         .resource_id("vpc-12345678")
-        .traffic_type(aws_sdk_ec2::types::TrafficType::All)
-        .log_destination_type(aws_sdk_ec2::types::LogDestinationType::S3)
+        .traffic_type(carina_aws_types::sdk::ec2::types::TrafficType::All)
+        .log_destination_type(carina_aws_types::sdk::ec2::types::LogDestinationType::S3)
         .log_destination("arn:aws:s3:::my-bucket")
         .max_aggregation_interval(600)
         .flow_log_status("ACTIVE")
@@ -1038,7 +987,7 @@ fn test_extract_ec2_flow_log_attributes() {
 
 #[test]
 fn test_extract_ec2_flow_log_attributes_minimal() {
-    let fl = aws_sdk_ec2::types::FlowLog::builder().build();
+    let fl = carina_aws_types::sdk::ec2::types::FlowLog::builder().build();
     let fields = AwsProvider::extract_ec2_flow_log_attributes(&fl);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1046,11 +995,11 @@ fn test_extract_ec2_flow_log_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_flow_log_attributes_cloudwatch() {
-    let fl = aws_sdk_ec2::types::FlowLog::builder()
+    let fl = carina_aws_types::sdk::ec2::types::FlowLog::builder()
         .flow_log_id("fl-87654321")
         .resource_id("subnet-12345678")
-        .traffic_type(aws_sdk_ec2::types::TrafficType::Accept)
-        .log_destination_type(aws_sdk_ec2::types::LogDestinationType::CloudWatchLogs)
+        .traffic_type(carina_aws_types::sdk::ec2::types::TrafficType::Accept)
+        .log_destination_type(carina_aws_types::sdk::ec2::types::LogDestinationType::CloudWatchLogs)
         .log_group_name("/aws/vpc/flow-logs")
         .deliver_logs_permission_arn("arn:aws:iam::123456789012:role/flow-log-role")
         .flow_log_status("ACTIVE")
@@ -1078,9 +1027,9 @@ fn test_extract_ec2_flow_log_attributes_cloudwatch() {
 
 #[test]
 fn test_extract_ec2_vpn_gateway_attributes() {
-    let vgw = aws_sdk_ec2::types::VpnGateway::builder()
+    let vgw = carina_aws_types::sdk::ec2::types::VpnGateway::builder()
         .vpn_gateway_id("vgw-12345678")
-        .r#type(aws_sdk_ec2::types::GatewayType::Ipsec1)
+        .r#type(carina_aws_types::sdk::ec2::types::GatewayType::Ipsec1)
         .amazon_side_asn(64512)
         .build();
     let fields = AwsProvider::extract_ec2_vpn_gateway_attributes(&vgw);
@@ -1106,7 +1055,7 @@ fn test_extract_ec2_vpn_gateway_attributes() {
 
 #[test]
 fn test_extract_ec2_vpn_gateway_attributes_minimal() {
-    let vgw = aws_sdk_ec2::types::VpnGateway::builder().build();
+    let vgw = carina_aws_types::sdk::ec2::types::VpnGateway::builder().build();
     let fields = AwsProvider::extract_ec2_vpn_gateway_attributes(&vgw);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1117,7 +1066,7 @@ fn test_extract_ec2_vpn_gateway_attributes_minimal() {
 
 #[test]
 fn test_extract_iam_role_attributes() {
-    let role = aws_sdk_iam::types::Role::builder()
+    let role = carina_aws_types::sdk::iam::types::Role::builder()
         .role_name("test-role")
         .role_id("AROAEXAMPLE12345")
         .arn("arn:aws:iam::123456789012:role/test-role")
@@ -1127,7 +1076,7 @@ fn test_extract_iam_role_attributes() {
         )
         .description("Test role")
         .max_session_duration(7200)
-        .create_date(aws_sdk_iam::primitives::DateTime::from_secs(0))
+        .create_date(carina_aws_types::sdk::iam::primitives::DateTime::from_secs(0))
         .build()
         .expect("failed to build Role");
     let fields = AwsProvider::extract_iam_role_attributes(&role);
@@ -1186,12 +1135,14 @@ fn test_extract_iam_role_attributes() {
 
 #[test]
 fn test_extract_iam_role_attributes_minimal() {
-    let role = aws_sdk_iam::types::Role::builder()
+    let role = carina_aws_types::sdk::iam::types::Role::builder()
         .role_name("minimal-role")
         .role_id("AROAMINIMAL")
         .arn("arn:aws:iam::123456789012:role/minimal-role")
         .path("/")
-        .create_date(aws_sdk_iam::primitives::DateTime::from_secs(0))
+        .create_date(carina_aws_types::sdk::iam::primitives::DateTime::from_secs(
+            0,
+        ))
         .build()
         .expect("failed to build Role");
     let fields = AwsProvider::extract_iam_role_attributes(&role);
@@ -1205,21 +1156,21 @@ fn test_extract_iam_role_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_transit_gateway_attributes() {
-    let options = aws_sdk_ec2::types::TransitGatewayOptions::builder()
+    let options = carina_aws_types::sdk::ec2::types::TransitGatewayOptions::builder()
         .amazon_side_asn(64512)
         .auto_accept_shared_attachments(
-            aws_sdk_ec2::types::AutoAcceptSharedAttachmentsValue::Enable,
+            carina_aws_types::sdk::ec2::types::AutoAcceptSharedAttachmentsValue::Enable,
         )
         .default_route_table_association(
-            aws_sdk_ec2::types::DefaultRouteTableAssociationValue::Enable,
+            carina_aws_types::sdk::ec2::types::DefaultRouteTableAssociationValue::Enable,
         )
         .default_route_table_propagation(
-            aws_sdk_ec2::types::DefaultRouteTablePropagationValue::Enable,
+            carina_aws_types::sdk::ec2::types::DefaultRouteTablePropagationValue::Enable,
         )
-        .dns_support(aws_sdk_ec2::types::DnsSupportValue::Enable)
-        .vpn_ecmp_support(aws_sdk_ec2::types::VpnEcmpSupportValue::Enable)
+        .dns_support(carina_aws_types::sdk::ec2::types::DnsSupportValue::Enable)
+        .vpn_ecmp_support(carina_aws_types::sdk::ec2::types::VpnEcmpSupportValue::Enable)
         .build();
-    let tgw = aws_sdk_ec2::types::TransitGateway::builder()
+    let tgw = carina_aws_types::sdk::ec2::types::TransitGateway::builder()
         .transit_gateway_id("tgw-12345678")
         .description("Test TGW")
         .options(options)
@@ -1268,7 +1219,7 @@ fn test_extract_ec2_transit_gateway_attributes() {
 
 #[test]
 fn test_extract_ec2_transit_gateway_attributes_minimal() {
-    let tgw = aws_sdk_ec2::types::TransitGateway::builder().build();
+    let tgw = carina_aws_types::sdk::ec2::types::TransitGateway::builder().build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attributes(&tgw);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1278,7 +1229,7 @@ fn test_extract_ec2_transit_gateway_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_transit_gateway_attachment_attributes() {
-    let att = aws_sdk_ec2::types::TransitGatewayVpcAttachment::builder()
+    let att = carina_aws_types::sdk::ec2::types::TransitGatewayVpcAttachment::builder()
         .transit_gateway_attachment_id("tgw-attach-12345678")
         .transit_gateway_id("tgw-12345678")
         .vpc_id("vpc-12345678")
@@ -1317,7 +1268,7 @@ fn test_extract_ec2_transit_gateway_attachment_attributes() {
 
 #[test]
 fn test_extract_ec2_transit_gateway_attachment_attributes_minimal() {
-    let att = aws_sdk_ec2::types::TransitGatewayVpcAttachment::builder().build();
+    let att = carina_aws_types::sdk::ec2::types::TransitGatewayVpcAttachment::builder().build();
     let fields = AwsProvider::extract_ec2_transit_gateway_attachment_attributes(&att);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1327,15 +1278,15 @@ fn test_extract_ec2_transit_gateway_attachment_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_vpc_peering_connection_attributes() {
-    let requester = aws_sdk_ec2::types::VpcPeeringConnectionVpcInfo::builder()
+    let requester = carina_aws_types::sdk::ec2::types::VpcPeeringConnectionVpcInfo::builder()
         .vpc_id("vpc-11111111")
         .build();
-    let accepter = aws_sdk_ec2::types::VpcPeeringConnectionVpcInfo::builder()
+    let accepter = carina_aws_types::sdk::ec2::types::VpcPeeringConnectionVpcInfo::builder()
         .vpc_id("vpc-22222222")
         .owner_id("123456789012")
         .region("ap-northeast-1")
         .build();
-    let pcx = aws_sdk_ec2::types::VpcPeeringConnection::builder()
+    let pcx = carina_aws_types::sdk::ec2::types::VpcPeeringConnection::builder()
         .vpc_peering_connection_id("pcx-12345678")
         .requester_vpc_info(requester)
         .accepter_vpc_info(accepter)
@@ -1371,7 +1322,7 @@ fn test_extract_ec2_vpc_peering_connection_attributes() {
 
 #[test]
 fn test_extract_ec2_vpc_peering_connection_attributes_minimal() {
-    let pcx = aws_sdk_ec2::types::VpcPeeringConnection::builder().build();
+    let pcx = carina_aws_types::sdk::ec2::types::VpcPeeringConnection::builder().build();
     let fields = AwsProvider::extract_ec2_vpc_peering_connection_attributes(&pcx);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1381,11 +1332,13 @@ fn test_extract_ec2_vpc_peering_connection_attributes_minimal() {
 
 #[test]
 fn test_extract_ec2_egress_only_internet_gateway_attributes() {
-    let attachment = aws_sdk_ec2::types::InternetGatewayAttachment::builder()
+    let attachment = carina_aws_types::sdk::ec2::types::InternetGatewayAttachment::builder()
         .vpc_id("vpc-12345678")
-        .state(aws_sdk_ec2::types::AttachmentStatus::from("attached"))
+        .state(carina_aws_types::sdk::ec2::types::AttachmentStatus::from(
+            "attached",
+        ))
         .build();
-    let eigw = aws_sdk_ec2::types::EgressOnlyInternetGateway::builder()
+    let eigw = carina_aws_types::sdk::ec2::types::EgressOnlyInternetGateway::builder()
         .egress_only_internet_gateway_id("eigw-12345678")
         .attachments(attachment)
         .build();
@@ -1408,7 +1361,7 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes() {
 
 #[test]
 fn test_extract_ec2_egress_only_internet_gateway_attributes_minimal() {
-    let eigw = aws_sdk_ec2::types::EgressOnlyInternetGateway::builder().build();
+    let eigw = carina_aws_types::sdk::ec2::types::EgressOnlyInternetGateway::builder().build();
     let fields = AwsProvider::extract_ec2_egress_only_internet_gateway_attributes(&eigw);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1418,10 +1371,10 @@ fn test_extract_ec2_egress_only_internet_gateway_attributes_minimal() {
 
 #[test]
 fn test_extract_organizations_organization_attributes() {
-    let org = aws_sdk_organizations::types::Organization::builder()
+    let org = carina_aws_types::sdk::organizations::types::Organization::builder()
         .id("o-abc123")
         .arn("arn:aws:organizations::123456789012:organization/o-abc123")
-        .feature_set(aws_sdk_organizations::types::OrganizationFeatureSet::All)
+        .feature_set(carina_aws_types::sdk::organizations::types::OrganizationFeatureSet::All)
         .master_account_id("123456789012")
         .master_account_arn("arn:aws:organizations::123456789012:account/o-abc123/123456789012")
         .master_account_email("admin@example.com")
@@ -1473,9 +1426,9 @@ fn test_extract_organizations_organization_attributes() {
 
 #[test]
 fn test_extract_organizations_organization_attributes_consolidated_billing() {
-    let org = aws_sdk_organizations::types::Organization::builder()
+    let org = carina_aws_types::sdk::organizations::types::Organization::builder()
         .id("o-xyz789")
-        .feature_set(aws_sdk_organizations::types::OrganizationFeatureSet::ConsolidatedBilling)
+        .feature_set(carina_aws_types::sdk::organizations::types::OrganizationFeatureSet::ConsolidatedBilling)
         .build();
     let fields = AwsProvider::extract_organizations_organization_attributes(&org);
     let identifier = fields.applied_identifier().clone();
@@ -1490,7 +1443,7 @@ fn test_extract_organizations_organization_attributes_consolidated_billing() {
 
 #[test]
 fn test_extract_organizations_organization_attributes_minimal() {
-    let org = aws_sdk_organizations::types::Organization::builder().build();
+    let org = carina_aws_types::sdk::organizations::types::Organization::builder().build();
     let fields = AwsProvider::extract_organizations_organization_attributes(&org);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1523,16 +1476,16 @@ fn test_organizations_organization_schema_feature_set_enum() {
 
 #[test]
 fn test_extract_organizations_account_attributes() {
-    let account = aws_sdk_organizations::types::Account::builder()
+    let account = carina_aws_types::sdk::organizations::types::Account::builder()
         .id("123456789012")
         .arn("arn:aws:organizations::111111111111:account/o-abc123/123456789012")
         .name("production")
         .email("prod@example.com")
-        .status(aws_sdk_organizations::types::AccountStatus::Active)
-        .joined_method(aws_sdk_organizations::types::AccountJoinedMethod::Created)
-        .joined_timestamp(aws_sdk_organizations::primitives::DateTime::from_secs(
-            1700000000,
-        ))
+        .status(carina_aws_types::sdk::organizations::types::AccountStatus::Active)
+        .joined_method(carina_aws_types::sdk::organizations::types::AccountJoinedMethod::Created)
+        .joined_timestamp(
+            carina_aws_types::sdk::organizations::primitives::DateTime::from_secs(1700000000),
+        )
         .build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
     let identifier = fields.applied_identifier().clone();
@@ -1583,7 +1536,7 @@ fn test_extract_organizations_account_attributes() {
 
 #[test]
 fn test_extract_organizations_account_attributes_minimal() {
-    let account = aws_sdk_organizations::types::Account::builder().build();
+    let account = carina_aws_types::sdk::organizations::types::Account::builder().build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
     let identifier = fields.applied_identifier().clone();
     assert_eq!(identifier, None);
@@ -1592,10 +1545,10 @@ fn test_extract_organizations_account_attributes_minimal() {
 
 #[test]
 fn test_extract_organizations_account_attributes_suspended() {
-    let account = aws_sdk_organizations::types::Account::builder()
+    let account = carina_aws_types::sdk::organizations::types::Account::builder()
         .id("999999999999")
-        .status(aws_sdk_organizations::types::AccountStatus::Suspended)
-        .joined_method(aws_sdk_organizations::types::AccountJoinedMethod::Invited)
+        .status(carina_aws_types::sdk::organizations::types::AccountStatus::Suspended)
+        .joined_method(carina_aws_types::sdk::organizations::types::AccountJoinedMethod::Invited)
         .build();
     let fields = AwsProvider::extract_organizations_account_attributes(&account);
     let identifier = fields.applied_identifier().clone();

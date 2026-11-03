@@ -27,7 +27,7 @@ impl AwsProvider {
         };
 
         // Describe route tables filtered by association ID
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let filter = Filter::builder()
             .name("association.route-table-association-id")

@@ -1169,12 +1169,13 @@ pub fn generate_provider_module(
          use std::future::Future;\n\n\
          use aws_smithy_runtime_api::client::orchestrator::HttpResponse;\n\
          use aws_smithy_runtime_api::client::result::SdkError;\n\
-         use carina_aws_types::{Idempotency, ResendGuard};\n\n\
+         use carina_aws_types::Idempotency;\n\n\
          use crate::aws_operation::{AwsOperation, ClientToken, DecidedOperationError, DecidedSend, NoToken, TokenBearing, TokenOperation, WithToken};\n\
          use crate::helpers::TokenSendPermit;\n\
          use crate::sdk_config::BoundedSdkConfig;\n\n",
     );
 
+    let mut client_names = HashMap::new();
     for service_name in &services {
         let model = model_for_service(models, service_name)
             .expect("validate_overrides verified every decided service model");
@@ -1188,6 +1189,7 @@ pub fn generate_provider_module(
         operations.sort_by_key(|entry| entry.operation);
 
         let client_name = client_type_name(service_shape_id, service_shape);
+        client_names.insert(*service_name, client_name.clone());
         code.push_str(&format!(
             "/// Guarded AWS service client with a closed, generated operation API.\n\
              ///\n\
@@ -1197,43 +1199,39 @@ pub fn generate_provider_module(
              /// Token-bearing operations return `TokenOperation` and must be sent via\n\
              /// `retry_aws_operation_with_token` or `send_aws_operation_with_token`.\n\
              pub(crate) struct {client_name} {{\n\
-             \x20   inner: aws_sdk_{service_name}::Client,\n\
+             \x20   inner: carina_aws_types::sdk::{service_name}::{client_name},\n\
              }}\n\n\
              // Decisions can outlive their current call sites; every decided operation remains\n\
              // available through the closed generated client API.\n\
              #[allow(dead_code)]\n\
              impl {client_name} {{\n\
-             \x20   // Raw SDK client construction is confined to generated guarded wrappers.\n\
-             \x20   #[allow(clippy::disallowed_methods)]\n\
              \x20   pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self {{\n\
              \x20       Self {{\n\
-             \x20           inner: aws_sdk_{service_name}::Client::from_conf(\n\
-             \x20               aws_sdk_{service_name}::config::Builder::from(config.sdk_config())\n\
-             \x20                   .interceptor(ResendGuard::new({service_name}_idempotency))\n\
-             \x20                   .build(),\n\
-             \x20           ),\n\
+             \x20           inner: carina_aws_types::sdk::{service_name}::{client_name}::new(config.sdk_config(), {service_name}_idempotency),\n\
              \x20       }}\n\
              \x20   }}\n\n\
              \x20   #[cfg(test)]\n\
-             \x20   pub(crate) fn config(&self) -> &aws_sdk_{service_name}::Config {{\n\
-             \x20       self.inner.config()\n\
+             \x20   pub(crate) fn guarded_client(&self) -> &carina_aws_types::sdk::{service_name}::{client_name} {{\n\
+             \x20       &self.inner\n\
              \x20   }}\n\n"
         ));
         for entry in &operations {
             let operation_method = entry.operation.to_snake_case();
             let fluent_builder = format!(
-                "aws_sdk_{service_name}::operation::{operation_method}::builders::{}FluentBuilder",
+                "carina_aws_types::sdk::{service_name}::operation::{operation_method}::builders::{}FluentBuilder",
                 entry.operation
             );
-            let operation = format!("self.inner.{operation_method}()");
+            let operation = format!("self.inner.inner().{operation_method}()");
             let (return_type, body) = match entry.decision {
                 Decision::Token(_) => {
                     let input_builder = format!(
-                        "aws_sdk_{service_name}::operation::{operation_method}::builders::{}InputBuilder",
+                        "carina_aws_types::sdk::{service_name}::operation::{operation_method}::builders::{}InputBuilder",
                         entry.operation
                     );
                     (
-                        format!("TokenOperation<{input_builder}, aws_sdk_{service_name}::Client>"),
+                        format!(
+                            "TokenOperation<{input_builder}, carina_aws_types::sdk::{service_name}::{client_name}>"
+                        ),
                         format!(
                             "TokenOperation::new({input_builder}::default(), self.inner.clone())"
                         ),
@@ -1269,18 +1267,19 @@ pub fn generate_provider_module(
     let mut ordered_overrides = overrides.iter().collect::<Vec<_>>();
     ordered_overrides.sort_by_key(|entry| (entry.service, entry.operation));
     for entry in &ordered_overrides {
+        let client_name = &client_names[entry.service];
         let operation_module = entry.operation.to_snake_case();
         let (builder, marker) = match entry.decision {
             Decision::Token(_) => (
                 format!(
-                    "aws_sdk_{}::operation::{operation_module}::builders::{}InputBuilder",
+                    "carina_aws_types::sdk::{}::operation::{operation_module}::builders::{}InputBuilder",
                     entry.service, entry.operation
                 ),
                 "WithToken",
             ),
             Decision::ReadOnly | Decision::Idempotent | Decision::NotIdempotent => (
                 format!(
-                    "aws_sdk_{}::operation::{operation_module}::builders::{}FluentBuilder",
+                    "carina_aws_types::sdk::{}::operation::{operation_module}::builders::{}FluentBuilder",
                     entry.service, entry.operation
                 ),
                 "NoToken",
@@ -1292,8 +1291,8 @@ pub fn generate_provider_module(
             "/// {}\n\
              impl AwsOperation for {builder} {{\n\
              \x20   type Resend = {marker};\n\
-             \x20   type Output = aws_sdk_{}::operation::{operation_module}::{}Output;\n\
-             \x20   type Error = aws_sdk_{}::operation::{operation_module}::{}Error;\n\n\
+             \x20   type Output = carina_aws_types::sdk::{}::operation::{operation_module}::{}Output;\n\
+             \x20   type Error = carina_aws_types::sdk::{}::operation::{operation_module}::{}Error;\n\n\
              \x20   const NAME: &'static str = \"{}.{}\";\n\
              \x20   const IDEMPOTENCY: Idempotency = {idempotency};\n\
              }}\n\n",
@@ -1307,7 +1306,7 @@ pub fn generate_provider_module(
         ));
 
         code.push_str(&format!(
-            "impl DecidedOperationError for aws_sdk_{}::operation::{operation_module}::{}Error {{\n\
+            "impl DecidedOperationError for carina_aws_types::sdk::{}::operation::{operation_module}::{}Error {{\n\
              \x20   const NAME: &'static str = <{builder} as AwsOperation>::NAME;\n\
              \x20   const IDEMPOTENCY: Idempotency = <{builder} as AwsOperation>::IDEMPOTENCY;\n\
              }}\n\n",
@@ -1323,7 +1322,7 @@ pub fn generate_provider_module(
                      \x20       self.{setter}(token.as_str())\n\
                      \x20   }}\n\
                      }}\n\n\
-                     impl TokenOperation<{builder}, aws_sdk_{}::Client> {{\n\
+                     impl TokenOperation<{builder}, carina_aws_types::sdk::{}::{client_name}> {{\n\
                      \x20   // The permit proves the invocation token was applied before this network send.\n\
                      \x20   // The error is the SDK's SdkError passed through unchanged.\n\
                      \x20   #[allow(clippy::result_large_err)]\n\
@@ -1333,11 +1332,11 @@ pub fn generate_provider_module(
                      \x20       permit: TokenSendPermit,\n\
                      \x20   ) -> impl Future<Output = Result<<Self as AwsOperation>::Output, SdkError<<Self as AwsOperation>::Error, HttpResponse>>> + Send {{\n\
                      \x20       self.send_with_token_using(token, permit, |input, client| async move {{\n\
-                     \x20           input.send_with(&client).await\n\
+                     \x20           input.send_with(client.inner()).await\n\
                      \x20       }})\n\
                      \x20   }}\n\
                      }}\n\n\
-                     impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<{builder}, aws_sdk_{}::Client> {{\n\
+                     impl<'a> DecidedSend<(&'a ClientToken, TokenSendPermit)> for TokenOperation<{builder}, carina_aws_types::sdk::{}::{client_name}> {{\n\
                      \x20   fn send(\n\
                      \x20       self,\n\
                      \x20       (token, permit): (&'a ClientToken, TokenSendPermit),\n\
@@ -1364,65 +1363,6 @@ pub fn generate_provider_module(
     }
 
     Ok(code)
-}
-
-/// Generate the workspace Clippy policy from the same closed resend decision table.
-pub fn generate_clippy_config(overrides: &[Override]) -> String {
-    let mut services = overrides
-        .iter()
-        .map(|entry| entry.service)
-        .collect::<Vec<_>>();
-    services.sort_unstable();
-    services.dedup();
-
-    let mut code = String::from(
-        "# @generated by carina-codegen-aws. Do not edit by hand.\n\n\
-         disallowed-methods = [\n",
-    );
-    for loader in ["defaults", "from_env", "load_from_env", "load_defaults"] {
-        code.push_str(&format!(
-            "    {{ path = \"aws_config::{loader}\", reason = \"build SDK config through BoundedSdkConfig::load so wasm32 guests use host credentials\" }},\n"
-        ));
-    }
-    for (path, reason) in [
-        (
-            "carina_core::provider::ReadOutcome::found",
-            "construct successful managed reads through carina-provider-aws/src/read_model.rs",
-        ),
-        (
-            "carina_core::provider::AppliedState::new",
-            "construct applied read state through carina-provider-aws/src/read_model.rs",
-        ),
-        (
-            "carina_core::provider::AppliedState::from_identifier",
-            "construct applied read state through carina-provider-aws/src/read_model.rs",
-        ),
-        (
-            "carina_core::resource::State::existing",
-            "construct data-source read state through carina-provider-aws/src/read_model.rs",
-        ),
-    ] {
-        code.push_str(&format!(
-            "    {{ path = \"{path}\", reason = \"{reason}\" }},\n"
-        ));
-    }
-    for service in services {
-        for constructor in ["new", "from_conf"] {
-            code.push_str(&format!(
-                "    {{ path = \"aws_sdk_{service}::Client::{constructor}\", reason = \"use the generated service wrapper in carina-provider-aws/src/resend_safety_generated.rs\" }},\n"
-            ));
-        }
-    }
-
-    // KMS has a handwritten regional wrapper because it resolves references,
-    // rather than implementing a managed resource's send operations.
-    for constructor in ["new", "from_conf"] {
-        code.push_str(&format!(
-            "    {{ path = \"aws_sdk_kms::Client::{constructor}\", reason = \"use the bounded KMS wrapper in carina-provider-aws/src/references.rs\" }},\n"
-        ));
-    }
-    code.push_str("]\n");
-    code
 }
 
 fn client_type_name(service_shape_id: &str, service_shape: &ServiceShape) -> String {
@@ -1702,66 +1642,58 @@ mod tests {
 
         let generated = generate_provider_module(&models, &overrides).expect("generation succeeds");
 
-        assert!(generated.contains("use carina_aws_types::{Idempotency, ResendGuard};"));
+        assert!(generated.contains("use carina_aws_types::Idempotency;"));
         assert!(!generated.contains("use crate::resend_guard::ResendGuard;"));
 
         assert!(generated.contains(
-            "impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder"
+            "impl AwsOperation for carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder"
         ));
         assert!(generated.contains("type Resend = WithToken;"));
-        assert!(
-            generated.contains(
-                "type Output = aws_sdk_test::operation::create_thing::CreateThingOutput;"
-            )
-        );
-        assert!(
-            generated
-                .contains("type Error = aws_sdk_test::operation::create_thing::CreateThingError;")
-        );
+        assert!(generated.contains(
+            "type Output = carina_aws_types::sdk::test::operation::create_thing::CreateThingOutput;"
+        ));
+        assert!(generated.contains(
+            "type Error = carina_aws_types::sdk::test::operation::create_thing::CreateThingError;"
+        ));
         assert!(generated.contains("const NAME: &'static str = \"test.CreateThing\";"));
         assert!(
             generated.contains("const IDEMPOTENCY: Idempotency = Idempotency::IdempotencyToken;")
         );
         let metadata_start = generated
-            .find("impl AwsOperation for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder")
+            .find("impl AwsOperation for carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder")
             .expect("generated metadata impl");
         let metadata_end = generated[metadata_start..]
             .find("impl DecidedOperationError")
             .expect("generated error metadata impl");
         assert!(!generated[metadata_start..metadata_start + metadata_end].contains("fn send("));
         assert!(!generated.contains(
-            "impl DecidedSend<()> for aws_sdk_test::operation::create_thing::builders::CreateThingFluentBuilder"
+            "impl DecidedSend<()> for carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingFluentBuilder"
         ));
         assert!(generated.contains("impl<'a> DecidedSend<"));
         assert!(generated.contains(
-            "for TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder, aws_sdk_test::Client>"
+            "for TokenOperation<carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder, carina_aws_types::sdk::test::TestClient>"
         ));
-        assert!(generated.contains("input.send_with(&client).await"));
+        assert!(generated.contains("input.send_with(client.inner()).await"));
         assert!(!generated.contains("CreateThingFluentBuilder"));
         assert!(generated.contains(
             "// The error is the SDK's SdkError passed through unchanged.\n    #[allow(clippy::result_large_err)]\n    fn send_with_token("
         ));
         assert_eq!(generated.matches("clippy::result_large_err").count(), 1);
         assert!(!generated.contains("#![allow(clippy::disallowed_methods)]"));
-        assert_eq!(
-            generated
-                .matches("#[allow(clippy::disallowed_methods)]")
-                .count(),
-            1
-        );
+        assert!(!generated.contains("clippy::disallowed_methods"));
         assert!(generated.contains(
-            "impl DecidedOperationError for aws_sdk_test::operation::create_thing::CreateThingError"
+            "impl DecidedOperationError for carina_aws_types::sdk::test::operation::create_thing::CreateThingError"
         ));
         assert!(generated.contains(
-            "const NAME: &'static str = <aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::NAME;"
+            "const NAME: &'static str = <carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::NAME;"
         ));
         assert!(generated.contains(
-            "const IDEMPOTENCY: Idempotency = <aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::IDEMPOTENCY;"
+            "const IDEMPOTENCY: Idempotency = <carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder as AwsOperation>::IDEMPOTENCY;"
         ));
-        assert!(generated.contains("impl TokenBearing for aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder"));
+        assert!(generated.contains("impl TokenBearing for carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder"));
         assert!(generated.contains("self.client_token(token.as_str())"));
         assert!(generated.contains("pub(crate) struct TestClient"));
-        assert!(generated.contains("inner: aws_sdk_test::Client"));
+        assert!(generated.contains("inner: carina_aws_types::sdk::test::TestClient"));
         assert!(generated.contains(
             "Methods exist only for operations decided in\n/// `carina-codegen-aws/src/resend_safety.rs` (`OVERRIDES`)."
         ));
@@ -1773,14 +1705,17 @@ mod tests {
             generated
                 .contains("pub(crate) fn from_bounded_config(config: &BoundedSdkConfig) -> Self")
         );
-        assert!(generated.contains("aws_sdk_test::config::Builder::from(config.sdk_config())"));
-        assert!(generated.contains(".interceptor(ResendGuard::new(test_idempotency))"));
+        assert!(generated.contains(
+            "carina_aws_types::sdk::test::TestClient::new(config.sdk_config(), test_idempotency)"
+        ));
+        assert!(!generated.contains("::config::Builder"));
+        assert!(!generated.contains("::Client"));
         assert!(!generated.contains("pub(crate) fn from_conf("));
         assert!(generated.contains(
-            "pub(crate) fn create_thing(&self) -> TokenOperation<aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder, aws_sdk_test::Client>"
+            "pub(crate) fn create_thing(&self) -> TokenOperation<carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder, carina_aws_types::sdk::test::TestClient>"
         ));
         assert!(generated.contains(
-            "TokenOperation::new(aws_sdk_test::operation::create_thing::builders::CreateThingInputBuilder::default(), self.inner.clone())"
+            "TokenOperation::new(carina_aws_types::sdk::test::operation::create_thing::builders::CreateThingInputBuilder::default(), self.inner.clone())"
         ));
         assert!(!generated.contains("DECIDED_OPERATIONS"));
         assert!(!generated.contains("TOKEN_OPERATIONS"));
@@ -1796,11 +1731,11 @@ mod tests {
 
         assert!(generated.contains("pub(crate) struct TestClient"));
         assert!(generated.contains(
-            "pub(crate) fn get_thing(&self) -> aws_sdk_test::operation::get_thing::builders::GetThingFluentBuilder"
+            "pub(crate) fn get_thing(&self) -> carina_aws_types::sdk::test::operation::get_thing::builders::GetThingFluentBuilder"
         ));
-        assert!(generated.contains("self.inner.get_thing()"));
+        assert!(generated.contains("self.inner.inner().get_thing()"));
         assert!(generated.contains(
-            "impl DecidedSend<()> for aws_sdk_test::operation::get_thing::builders::GetThingFluentBuilder"
+            "impl DecidedSend<()> for carina_aws_types::sdk::test::operation::get_thing::builders::GetThingFluentBuilder"
         ));
         assert!(!generated.contains("pub(crate) fn create_thing(&self)"));
     }
@@ -1831,42 +1766,5 @@ mod tests {
 
         assert!(generated.contains("pub(crate) struct FancyServiceClient"));
         assert!(!generated.contains("pub(crate) struct TestClient"));
-    }
-
-    #[test]
-    fn generated_clippy_config_denies_sdk_default_credentials_loaders() {
-        let generated = generate_clippy_config(&[]);
-
-        for loader in ["defaults", "from_env", "load_from_env", "load_defaults"] {
-            let entry = format!(
-                "{{ path = \"aws_config::{loader}\", reason = \"build SDK config through BoundedSdkConfig::load so wasm32 guests use host credentials\" }}"
-            );
-            assert!(generated.contains(&entry), "missing {entry}: {generated}");
-        }
-    }
-
-    #[test]
-    fn generated_clippy_config_denies_raw_clients_and_raw_read_state_constructors() {
-        let overrides = [
-            entry("CreateThing", Decision::Token("ClientToken")),
-            entry("GetThing", Decision::ReadOnly),
-        ];
-
-        let generated = generate_clippy_config(&overrides);
-
-        assert!(generated.contains("disallowed-methods = ["));
-        assert!(generated.contains("aws_sdk_test::Client::new"));
-        assert!(generated.contains("aws_sdk_test::Client::from_conf"));
-        assert_eq!(generated.matches("aws_sdk_test::Client::").count(), 2);
-        for path in [
-            "carina_core::provider::ReadOutcome::found",
-            "carina_core::provider::AppliedState::new",
-            "carina_core::provider::AppliedState::from_identifier",
-            "carina_core::resource::State::existing",
-        ] {
-            assert!(generated.contains(path), "missing {path}: {generated}");
-        }
-        assert!(!generated.contains("FluentBuilder::send"));
-        assert!(!generated.contains("FluentBuilder::customize"));
     }
 }

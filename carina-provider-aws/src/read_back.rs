@@ -46,8 +46,8 @@ impl ReadBackRequirement {
                 .get_enum_attr(schema, self.predicate.input_attribute())
                 .map(|value| {
                     value.is_some_and(|value| {
-                        aws_sdk_acm::types::ValidationMethod::from(value.api_value())
-                            == aws_sdk_acm::types::ValidationMethod::Dns
+                        carina_aws_types::sdk::acm::types::ValidationMethod::from(value.api_value())
+                            == carina_aws_types::sdk::acm::types::ValidationMethod::Dns
                     })
                 })
                 .map_err(|error| crate::helpers::enum_attr_error(&resource.id, error)),

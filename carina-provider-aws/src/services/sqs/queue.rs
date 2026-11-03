@@ -7,7 +7,7 @@
 //! via `extra_attributes` (see `carina-codegen-aws/src/resource_defs.rs::
 //! sqs_resources`); the map↔flat packing lives here.
 
-use aws_sdk_sqs::types::QueueAttributeName;
+use carina_aws_types::sdk::sqs::types::QueueAttributeName;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 

@@ -7,9 +7,6 @@ description = "AWS provider for Carina infrastructure management tool"
 repository = "https://github.com/carina-rs/carina-provider-aws"
 homepage = "https://github.com/carina-rs/carina-provider-aws"
 
-[lib]
-doctest = false
-
 [[bin]]
 name = "carina-provider-aws"
 path = "src/main.rs"
@@ -25,23 +22,11 @@ carina-aws-types = { path = "../carina-aws-types" }
 carina-plugin-sdk = { workspace = true }
 carina-provider-protocol = { workspace = true }
 indexmap = "2"
-aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
 aws-credential-types = { version = "1" }
 aws-smithy-async = { version = "1", features = ["rt-tokio"] }
 aws-smithy-types = { version = "1" }
 aws-smithy-runtime-api = { version = "1" }
 aws-types = { version = "1" }
-aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-cloudwatchlogs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-ec2 = { version = "1.273.0", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-iam = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-organizations = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-identitystore = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-route53 = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-acm = { version = "1.125.0", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-sqs = { version = "1", default-features = false, features = ["behavior-version-latest"] }
-aws-sdk-kms = { version = "1.127.0", default-features = false, features = ["behavior-version-latest"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -49,7 +34,6 @@ heck = "0.5"
 urlencoding = "2"
 regex = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-aws-sdk-account = { version = "1", default-features = false, features = ["behavior-version-latest"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -63,6 +47,7 @@ wasi = "0.14"
 # `wasi:http` to a real endpoint). PoC seed for #355 (STS data source);
 # follow-ups will reuse the same dev-deps for other services.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+aws-smithy-runtime = { version = "1", features = ["client"] }
 carina-core = { workspace = true, features = ["test-support", "test-utils"] }
 carina-codegen-aws = { path = "../carina-codegen-aws" }
 # Enable the test constructor for integration tests without exposing it in production.

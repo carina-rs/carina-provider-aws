@@ -133,7 +133,7 @@ impl AwsProvider {
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags.as_ref() {
             for (key, value) in tag_map {
                 if let Value::Concrete(ConcreteValue::String(val)) = value {
-                    let tag = aws_sdk_iam::types::Tag::builder()
+                    let tag = carina_aws_types::sdk::iam::types::Tag::builder()
                         .key(key)
                         .value(val.expose_plaintext())
                         .build()
@@ -250,7 +250,7 @@ impl AwsProvider {
                     _ => true,
                 };
                 if should_add {
-                    let tag = aws_sdk_iam::types::Tag::builder()
+                    let tag = carina_aws_types::sdk::iam::types::Tag::builder()
                         .key(key)
                         .value(val.expose_plaintext())
                         .build()

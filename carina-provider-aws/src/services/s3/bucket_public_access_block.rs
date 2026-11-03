@@ -1,4 +1,4 @@
-use aws_sdk_s3::types::PublicAccessBlockConfiguration;
+use carina_aws_types::sdk::s3::types::PublicAccessBlockConfiguration;
 use carina_core::provider::ProviderResult;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::resource::{

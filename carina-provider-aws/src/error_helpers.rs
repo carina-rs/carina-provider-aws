@@ -348,12 +348,12 @@ fn is_not_found_error_code(code: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_iam::error::SdkError;
-    use aws_sdk_iam::operation::list_roles::ListRolesError;
-    use aws_sdk_iam::types::error::ServiceFailureException;
     use aws_smithy_runtime_api::http::{Response, StatusCode};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ErrorMetadata;
+    use carina_aws_types::sdk::iam::error::SdkError;
+    use carina_aws_types::sdk::iam::operation::list_roles::ListRolesError;
+    use carina_aws_types::sdk::iam::types::error::ServiceFailureException;
     use carina_core::provider::ProviderError as CoreProviderError;
 
     fn list_roles_service_error_with_meta(
@@ -534,10 +534,13 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_uses_operation_identity_from_the_error_type() {
-        use aws_sdk_cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError;
+        use carina_aws_types::sdk::cloudwatchlogs::operation::describe_log_groups::DescribeLogGroupsError;
 
-        let sdk_err: aws_sdk_cloudwatchlogs::error::SdkError<DescribeLogGroupsError> =
-            aws_sdk_cloudwatchlogs::error::SdkError::timeout_error("response timed out");
+        let sdk_err: carina_aws_types::sdk::cloudwatchlogs::error::SdkError<
+            DescribeLogGroupsError,
+        > = carina_aws_types::sdk::cloudwatchlogs::error::SdkError::timeout_error(
+            "response timed out",
+        );
 
         let pe = api_error_with_meta("Failed to describe log groups", sdk_err);
 
@@ -550,10 +553,10 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_appends_outcome_unknown_only_for_non_idempotent_operation() {
-        use aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+        use carina_aws_types::sdk::ec2::operation::create_vpc::CreateVpcError;
 
-        let sdk_err: aws_sdk_ec2::error::SdkError<CreateVpcError> =
-            aws_sdk_ec2::error::SdkError::timeout_error("response timed out");
+        let sdk_err: carina_aws_types::sdk::ec2::error::SdkError<CreateVpcError> =
+            carina_aws_types::sdk::ec2::error::SdkError::timeout_error("response timed out");
 
         let pe = api_error_with_meta("Failed to create VPC", sdk_err);
         let rendered = pe.to_string();
@@ -566,7 +569,7 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_uses_sticky_outcome_from_provider_retries() {
-        use aws_sdk_ec2::operation::create_vpc::CreateVpcError;
+        use carina_aws_types::sdk::ec2::operation::create_vpc::CreateVpcError;
 
         let service_error = CreateVpcError::generic(
             ErrorMetadata::builder()
@@ -595,10 +598,10 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_does_not_mark_token_bearing_create_as_outcome_unknown() {
-        use aws_sdk_ec2::operation::create_nat_gateway::CreateNatGatewayError;
+        use carina_aws_types::sdk::ec2::operation::create_nat_gateway::CreateNatGatewayError;
 
-        let sdk_err: aws_sdk_ec2::error::SdkError<CreateNatGatewayError> =
-            aws_sdk_ec2::error::SdkError::timeout_error("response timed out");
+        let sdk_err: carina_aws_types::sdk::ec2::error::SdkError<CreateNatGatewayError> =
+            carina_aws_types::sdk::ec2::error::SdkError::timeout_error("response timed out");
 
         let pe = api_error_with_meta("Failed to create NAT gateway", sdk_err);
 
@@ -608,7 +611,7 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_acm_resource_not_found() {
-        use aws_sdk_acm::operation::describe_certificate::DescribeCertificateError;
+        use carina_aws_types::sdk::acm::operation::describe_certificate::DescribeCertificateError;
 
         let sdk_err = operation_service_error_with_meta(
             400,
@@ -629,7 +632,7 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_iam_no_such_entity() {
-        use aws_sdk_iam::operation::get_role::GetRoleError;
+        use carina_aws_types::sdk::iam::operation::get_role::GetRoleError;
 
         let sdk_err = operation_service_error_with_meta(
             404,
@@ -650,7 +653,7 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_ec2_invalid_group() {
-        use aws_sdk_ec2::operation::describe_security_groups::DescribeSecurityGroupsError;
+        use carina_aws_types::sdk::ec2::operation::describe_security_groups::DescribeSecurityGroupsError;
 
         let sdk_err = operation_service_error_with_meta(
             400,
@@ -692,7 +695,7 @@ mod tests {
 
     #[test]
     fn api_error_with_meta_returns_not_found_for_http_404() {
-        use aws_sdk_s3::operation::head_bucket::HeadBucketError;
+        use carina_aws_types::sdk::s3::operation::head_bucket::HeadBucketError;
 
         let sdk_err = operation_service_error_with_meta(
             404,

@@ -20,7 +20,7 @@ use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2SubnetReadModelSupplement;
 use crate::send_models_generated::{Ec2SubnetCreateInput, Ec2SubnetUpdateInput};
-use aws_sdk_ec2::types::{AttributeBooleanValue, HostnameType};
+use carina_aws_types::sdk::ec2::types::{AttributeBooleanValue, HostnameType};
 use std::net::Ipv6Addr;
 
 // `read_ec2_subnet` must store `availability_zone` as the AWS canonical
@@ -159,7 +159,7 @@ fn canonical_ipv6_cidr(value: &str) -> Result<String, String> {
 }
 
 fn associated_ipv6_cidr(
-    associations: &[aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation],
+    associations: &[carina_aws_types::sdk::ec2::types::SubnetIpv6CidrBlockAssociation],
 ) -> Option<&str> {
     associations
         .iter()
@@ -167,7 +167,7 @@ fn associated_ipv6_cidr(
             association
                 .ipv6_cidr_block_state()
                 .and_then(|state| state.state())
-                == Some(&aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associated)
+                == Some(&carina_aws_types::sdk::ec2::types::SubnetCidrBlockStateCode::Associated)
         })
         .and_then(|association| association.ipv6_cidr_block())
 }
@@ -193,7 +193,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -346,7 +346,7 @@ impl AwsProvider {
             .vpc_id(&vpc_id)
             .tag_specifications(build_tag_specification_with_create_token(
                 tags.as_ref(),
-                aws_sdk_ec2::types::ResourceType::Subnet,
+                carina_aws_types::sdk::ec2::types::ResourceType::Subnet,
                 client_token,
             ));
         if let Some(cidr_block) = cidr_block {
@@ -680,22 +680,25 @@ mod tests {
             )))
         );
 
-        let associating = aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation::builder()
+        let associating = carina_aws_types::sdk::ec2::types::SubnetIpv6CidrBlockAssociation::builder()
             .ipv6_cidr_block("2001:db8:1::/64")
             .ipv6_cidr_block_state(
-                aws_sdk_ec2::types::SubnetCidrBlockState::builder()
-                    .state(aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associating)
+                carina_aws_types::sdk::ec2::types::SubnetCidrBlockState::builder()
+                    .state(carina_aws_types::sdk::ec2::types::SubnetCidrBlockStateCode::Associating)
                     .build(),
             )
             .build();
-        let associated = aws_sdk_ec2::types::SubnetIpv6CidrBlockAssociation::builder()
-            .ipv6_cidr_block("2001:db8::/64")
-            .ipv6_cidr_block_state(
-                aws_sdk_ec2::types::SubnetCidrBlockState::builder()
-                    .state(aws_sdk_ec2::types::SubnetCidrBlockStateCode::Associated)
-                    .build(),
-            )
-            .build();
+        let associated =
+            carina_aws_types::sdk::ec2::types::SubnetIpv6CidrBlockAssociation::builder()
+                .ipv6_cidr_block("2001:db8::/64")
+                .ipv6_cidr_block_state(
+                    carina_aws_types::sdk::ec2::types::SubnetCidrBlockState::builder()
+                        .state(
+                            carina_aws_types::sdk::ec2::types::SubnetCidrBlockStateCode::Associated,
+                        )
+                        .build(),
+                )
+                .build();
         assert_eq!(
             associated_ipv6_cidr(&[associating, associated]),
             Some("2001:db8::/64")

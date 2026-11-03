@@ -160,7 +160,7 @@ impl AwsProvider {
             }
             Err(err) => {
                 // Handle bucket not found
-                use aws_sdk_s3::error::SdkError;
+                use carina_aws_types::sdk::s3::error::SdkError;
 
                 let error_kind = match &err {
                     SdkError::ServiceError(service_err) => {
@@ -221,15 +221,18 @@ impl AwsProvider {
         let mut req = self.s3_client.create_bucket().bucket(&bucket_name);
 
         if let Some(namespace) = bucket_namespace {
-            req =
-                req.bucket_namespace(aws_sdk_s3::types::BucketNamespace::from(namespace.as_str()));
+            req = req.bucket_namespace(carina_aws_types::sdk::s3::types::BucketNamespace::from(
+                namespace.as_str(),
+            ));
         }
 
         // `region` is a read-only output, not a placement input. Derive the
         // LocationConstraint only from the provider region even if a caller supplies
         // that attribute while carina-core still permits read-only writes (carina#3766).
         if let Some(region) = create_bucket_location_constraint(&self.region) {
-            use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration};
+            use carina_aws_types::sdk::s3::types::{
+                BucketLocationConstraint, CreateBucketConfiguration,
+            };
             let constraint = BucketLocationConstraint::from(region);
             let config = CreateBucketConfiguration::builder()
                 .location_constraint(constraint)
@@ -360,7 +363,8 @@ impl AwsProvider {
             // Collect versions
             for version in response.versions() {
                 if let Some(key) = version.key() {
-                    let mut oid = aws_sdk_s3::types::ObjectIdentifier::builder().key(key);
+                    let mut oid =
+                        carina_aws_types::sdk::s3::types::ObjectIdentifier::builder().key(key);
                     if let Some(vid) = version.version_id() {
                         oid = oid.version_id(vid);
                     }
@@ -377,7 +381,8 @@ impl AwsProvider {
             // Collect delete markers
             for marker in response.delete_markers() {
                 if let Some(key) = marker.key() {
-                    let mut oid = aws_sdk_s3::types::ObjectIdentifier::builder().key(key);
+                    let mut oid =
+                        carina_aws_types::sdk::s3::types::ObjectIdentifier::builder().key(key);
                     if let Some(vid) = marker.version_id() {
                         oid = oid.version_id(vid);
                     }
@@ -393,7 +398,7 @@ impl AwsProvider {
 
             // Batch delete (max 1000 per request)
             if !objects_to_delete.is_empty() {
-                let delete = aws_sdk_s3::types::Delete::builder()
+                let delete = carina_aws_types::sdk::s3::types::Delete::builder()
                     .set_objects(Some(objects_to_delete))
                     .quiet(true)
                     .build()
@@ -468,7 +473,7 @@ impl AwsProvider {
         tags: Option<&Value>,
     ) -> ProviderResult<()> {
         if let Some(Value::Concrete(ConcreteValue::Map(tag_map))) = tags {
-            use aws_sdk_s3::types::{Tag, Tagging};
+            use carina_aws_types::sdk::s3::types::{Tag, Tagging};
             let tags: Vec<Tag> = tag_map
                 .iter()
                 .filter_map(|(k, v)| {
@@ -547,7 +552,7 @@ impl AwsProvider {
                 .send()
                 .await
                 .map_err(|err| {
-                    use aws_sdk_s3::error::SdkError;
+                    use carina_aws_types::sdk::s3::error::SdkError;
                     let kind = match &err {
                         SdkError::ServiceError(svc) => classify_head_bucket_status(
                             svc.raw().status().as_u16(),
@@ -683,11 +688,13 @@ fn classify_head_bucket_status(status: u16, is_not_found_error: bool) -> HeadBuc
 }
 
 /// Check if an S3 SDK error is a "not configured" error that should be silently ignored.
-pub(crate) fn is_s3_not_configured_error<E: aws_sdk_s3::error::ProvideErrorMetadata>(
-    err: &aws_sdk_s3::error::SdkError<E>,
+pub(crate) fn is_s3_not_configured_error<
+    E: carina_aws_types::sdk::s3::error::ProvideErrorMetadata,
+>(
+    err: &carina_aws_types::sdk::s3::error::SdkError<E>,
     expected_code: &str,
 ) -> bool {
-    use aws_sdk_s3::error::SdkError;
+    use carina_aws_types::sdk::s3::error::SdkError;
     match err {
         SdkError::ServiceError(service_err) => service_err.err().code() == Some(expected_code),
         _ => false,

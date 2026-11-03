@@ -18,7 +18,7 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        use aws_sdk_ec2::types::Filter;
+        use carina_aws_types::sdk::ec2::types::Filter;
 
         let applied_identifier = identifier;
         let identifier = identifier.as_str();
@@ -83,7 +83,7 @@ impl AwsProvider {
         let ec2 = &self.ec2_client;
         let tag_specification = build_tag_specification_with_create_token(
             tags.as_ref(),
-            aws_sdk_ec2::types::ResourceType::SecurityGroup,
+            carina_aws_types::sdk::ec2::types::ResourceType::SecurityGroup,
             client_token,
         );
         let result = retry_aws_operation(RetryPolicy::default(), || {

@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use aws_sdk_ec2::types::{ResourceType, Tag, TagSpecification};
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
+use carina_aws_types::sdk::ec2::types::{ResourceType, Tag, TagSpecification};
 use tokio::time::sleep;
 
 use carina_aws_types::{FinalAttempt, Idempotency, SendClassification, Transience};
