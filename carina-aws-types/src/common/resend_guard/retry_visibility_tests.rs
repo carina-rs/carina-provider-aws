@@ -53,6 +53,7 @@ enum Reply {
     User,
     Status(u16),
     CodedStatus(u16, &'static str),
+    ResponseFields { code: String, request_id: String },
     Stall,
 }
 
@@ -128,6 +129,7 @@ struct Script {
     started_attempts: Vec<u32>,
     final_sdk_attempt: u32,
     final_failure: Option<String>,
+    response_fields: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +154,7 @@ impl HttpConnector for Connector {
             script.replies.pop_front().expect("script exhausted")
         };
         let secret = self.secret;
+        let script = self.script.clone();
         HttpConnectorFuture::new(async move {
             match reply {
                 Reply::Io => Err(ConnectorError::io(Box::new(ConnectionReset::new(
@@ -170,6 +173,23 @@ impl HttpConnector for Connector {
                     response.add_extension(ErrorMetadata::builder().code(code)
                         .message("Authorization=Bearer private-service-message; Credential=AKID/private-service-message")
                         .build());
+                    Ok(response)
+                }
+                Reply::ResponseFields { code, request_id } => {
+                    let mut response = http_response(503);
+                    response
+                        .headers_mut()
+                        .insert("x-amzn-requestid", request_id);
+                    let metadata = ErrorMetadata::builder().code(code).build();
+                    script.lock().expect("script lock").response_fields.push((
+                        metadata.code().expect("injected code").to_owned(),
+                        response
+                            .headers()
+                            .get("x-amzn-requestid")
+                            .expect("injected request ID")
+                            .to_owned(),
+                    ));
+                    response.add_extension(metadata);
                     Ok(response)
                 }
                 Reply::Stall => std::future::pending().await,
@@ -613,84 +633,247 @@ async fn each_retry_reports_the_previous_failure_and_early_final_failure_is_coun
     );
 }
 
-async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_value: &str) {
-    let (operation, output, script) = operation([Reply::Io, Reply::Io, Reply::Io], 3, secret);
-    let error = operation.invoke(()).await.expect_err("retried then failed");
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
-    let mut raw_messages = Vec::new();
-    while let Some(error) = source {
-        raw_messages.push(error.to_string());
-        source = error.source();
-    }
-    for location in ["display", "source"] {
-        for payload in [
-            format!("{expected_request_value}-{location}"),
-            format!("Authorization=Bearer {expected_request_value}-bypass-{location}"),
-            format!("Credential=AKID/{expected_request_value}-bypass-{location}"),
-        ] {
-            assert!(
-                raw_messages
-                    .iter()
-                    .any(|message| message.contains(&payload)),
-                "secret must actually occur in the {location} error"
-            );
-        }
-    }
-    let script = script.lock().expect("script lock");
-    assert_eq!(script.requests.len(), 3);
-    for request in &script.requests {
-        assert!(
-            request.contains(expected_request_value),
-            "secret must actually reach the connector"
+#[test]
+fn retry_error_codes_require_the_complete_bounded_ascii_shape() {
+    let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
+    for code in [
+        "A".to_owned(),
+        ":".to_owned(),
+        "Az09.:_-".to_owned(),
+        "A".repeat(64),
+    ] {
+        let error = OrchestratorError::operation(Error::erase(
+            ErrorMetadata::builder().code(&code).build(),
+        ));
+        assert_eq!(
+            retry_summary(&error, Some(&response)),
+            format!("HTTP 503 {code}")
         );
     }
+    for code in [
+        "".to_owned(),
+        "A".repeat(65),
+        "a code".to_owned(),
+        "code=value".to_owned(),
+        "code/value".to_owned(),
+        "code\n".to_owned(),
+        "code\r".to_owned(),
+        "code\0".to_owned(),
+        "café".to_owned(),
+    ] {
+        let error = OrchestratorError::operation(Error::erase(
+            ErrorMetadata::builder().code(&code).build(),
+        ));
+        assert_eq!(
+            retry_summary(&error, Some(&response)),
+            "HTTP 503",
+            "invalid code must be omitted in full"
+        );
+    }
+}
+
+#[test]
+fn retry_request_ids_require_the_complete_bounded_ascii_shape() {
+    for request_id in [
+        "A".to_owned(),
+        "=".to_owned(),
+        "Az09+/=_-".to_owned(),
+        "A".repeat(128),
+    ] {
+        let error = OrchestratorError::operation(Error::erase(
+            ErrorMetadata::builder()
+                .code("SlowDown")
+                .custom("aws_request_id", &request_id)
+                .build(),
+        ));
+        let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
+        assert_eq!(
+            retry_summary(&error, Some(&response)),
+            format!("HTTP 503 SlowDown; request_id: {request_id}")
+        );
+    }
+    for request_id in [
+        "".to_owned(),
+        "A".repeat(129),
+        "an id".to_owned(),
+        "id:value".to_owned(),
+        "id.value".to_owned(),
+        "id\n".to_owned(),
+        "id\r".to_owned(),
+        "id\0".to_owned(),
+        "café".to_owned(),
+    ] {
+        let error = OrchestratorError::operation(Error::erase(
+            ErrorMetadata::builder()
+                .code("SlowDown")
+                .custom("aws_request_id", &request_id)
+                .build(),
+        ));
+        let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
+        assert_eq!(
+            retry_summary(&error, Some(&response)),
+            "HTTP 503 SlowDown",
+            "invalid metadata ID must be omitted in full"
+        );
+    }
+    let error = OrchestratorError::operation(Error::erase(
+        ErrorMetadata::builder().code("SlowDown").build(),
+    ));
+    let mut response = http_response(503);
+    response
+        .headers_mut()
+        .insert("x-amzn-requestid", "A".repeat(128));
+    assert_eq!(
+        retry_summary(&error, Some(&response)),
+        format!("HTTP 503 SlowDown; request_id: {}", "A".repeat(128))
+    );
+    response
+        .headers_mut()
+        .insert("x-amzn-requestid", "A".repeat(129));
+    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+}
+
+async fn assert_secret_is_not_printed(secret: RequestSecret, expected_request_value: &str) {
+    {
+        let (operation, output, script) = operation([Reply::Io, Reply::Io, Reply::Io], 3, secret);
+        let error = operation.invoke(()).await.expect_err("retried then failed");
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut raw_messages = Vec::new();
+        while let Some(error) = source {
+            raw_messages.push(error.to_string());
+            source = error.source();
+        }
+        for location in ["display", "source"] {
+            for payload in [
+                format!("{expected_request_value}-{location}"),
+                format!("Authorization=Bearer {expected_request_value}-bypass-{location}"),
+                format!("Credential=AKID/{expected_request_value}-bypass-{location}"),
+            ] {
+                assert!(
+                    raw_messages
+                        .iter()
+                        .any(|message| message.contains(&payload)),
+                    "secret must actually occur in the {location} error"
+                );
+            }
+        }
+        let script = script.lock().expect("script lock");
+        assert_eq!(script.requests.len(), 3);
+        for request in &script.requests {
+            assert!(
+                request.contains(expected_request_value),
+                "secret must actually reach the connector"
+            );
+        }
+        let lines = output.lines();
+        assert_lines(
+            &lines,
+            &[
+                "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector io error (ConnectionReset)",
+                "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector io error (ConnectionReset)",
+                "  Gave up test.DescribeThing after 3 SDK attempts",
+            ],
+            0.05..=2.0,
+        );
+        let values = [
+            AUTH_SIGNATURE,
+            AUTH_CREDENTIAL,
+            SESSION_TOKEN,
+            QUERY_SIGNATURE,
+            QUERY_CREDENTIAL,
+            QUERY_TOKEN,
+            OTHER_QUERY_VALUE,
+        ];
+        for line in &lines {
+            for value in values {
+                assert!(!line.contains(value), "retry output leaked {value}");
+            }
+            assert!(!line.contains("Authorization="));
+            assert!(!line.contains("Credential="));
+            assert!(!line.contains("connection reset"));
+            assert!(!line.contains('?'));
+        }
+        // Final free-text rendering retains its existing best-effort redaction.
+        // Check only the covered payloads, not the newly introduced bypass forms.
+        let final_failure = script
+            .final_failure
+            .as_ref()
+            .expect("final rendered failure");
+        for location in ["display", "source"] {
+            for value in values {
+                assert!(
+                    !final_failure.contains(&format!("{value}-{location}")),
+                    "final rendering leaked a covered {location} payload"
+                );
+            }
+        }
+        assert!(
+            !final_failure.contains('?'),
+            "URL queries must remain redacted"
+        );
+        assert!(final_failure.contains("connection reset"));
+    }
+
+    // Both fields are untrusted even after the SDK parsed them into metadata.
+    // These payloads have the secret's header/query syntax, outside the allowed shapes.
+    let payload = match secret {
+        RequestSecret::None => unreachable!("secret tests always inject a secret"),
+        RequestSecret::Authorization => format!("Authorization=Bearer {expected_request_value}"),
+        RequestSecret::SessionToken => format!("X-Amz-Security-Token: {expected_request_value}"),
+        RequestSecret::QuerySignature => {
+            format!("https://example.test/?X-Amz-Signature={expected_request_value}")
+        }
+    };
+    let (operation, output, script) = operation(
+        [
+            Reply::ResponseFields {
+                code: payload.clone(),
+                request_id: "valid-request-id".to_owned(),
+            },
+            Reply::ResponseFields {
+                code: "SlowDown".to_owned(),
+                request_id: payload.clone(),
+            },
+            Reply::ResponseFields {
+                code: "SlowDown".to_owned(),
+                request_id: "valid-request-id".to_owned(),
+            },
+            Reply::Status(400),
+        ],
+        4,
+        secret,
+    );
+    operation
+        .invoke(())
+        .await
+        .expect_err("retried HTTP failures");
+    let script = script.lock().expect("script lock");
+    assert_eq!(script.requests.len(), 4);
+    assert_eq!(
+        script.response_fields,
+        [
+            (payload.clone(), "valid-request-id".to_owned()),
+            ("SlowDown".to_owned(), payload),
+            ("SlowDown".to_owned(), "valid-request-id".to_owned()),
+        ]
+    );
     let lines = output.lines();
+    for line in &lines {
+        assert!(
+            !line.contains(expected_request_value),
+            "response metadata leaked a secret"
+        );
+    }
     assert_lines(
         &lines,
         &[
-            "  Retrying test.DescribeThing (SDK attempt 2/3 after {secs}s): connector io error (ConnectionReset)",
-            "  Retrying test.DescribeThing (SDK attempt 3/3 after {secs}s): connector io error (ConnectionReset)",
-            "  Gave up test.DescribeThing after 3 SDK attempts",
+            "  Retrying test.DescribeThing (SDK attempt 2/4 after {secs}s): HTTP 503; request_id: valid-request-id",
+            "  Retrying test.DescribeThing (SDK attempt 3/4 after {secs}s): HTTP 503 SlowDown",
+            "  Retrying test.DescribeThing (SDK attempt 4/4 after {secs}s): HTTP 503 SlowDown; request_id: valid-request-id",
+            "  Gave up test.DescribeThing after 4 SDK attempts",
         ],
         0.05..=2.0,
     );
-    let values = [
-        AUTH_SIGNATURE,
-        AUTH_CREDENTIAL,
-        SESSION_TOKEN,
-        QUERY_SIGNATURE,
-        QUERY_CREDENTIAL,
-        QUERY_TOKEN,
-        OTHER_QUERY_VALUE,
-    ];
-    for line in &lines {
-        for value in values {
-            assert!(!line.contains(value), "retry output leaked {value}");
-        }
-        assert!(!line.contains("Authorization="));
-        assert!(!line.contains("Credential="));
-        assert!(!line.contains("connection reset"));
-        assert!(!line.contains('?'));
-    }
-    // Final free-text rendering retains its existing best-effort redaction.
-    // Check only the covered payloads, not the newly introduced bypass forms.
-    let final_failure = script
-        .final_failure
-        .as_ref()
-        .expect("final rendered failure");
-    for location in ["display", "source"] {
-        for value in values {
-            assert!(
-                !final_failure.contains(&format!("{value}-{location}")),
-                "final rendering leaked a covered {location} payload"
-            );
-        }
-    }
-    assert!(
-        !final_failure.contains('?'),
-        "URL queries must remain redacted"
-    );
-    assert!(final_failure.contains("connection reset"));
 }
 
 #[tokio::test]

@@ -152,6 +152,32 @@ fn find_source<'a, T: std::error::Error + 'static>(
     None
 }
 
+// Admit complete ASCII fields before they can enter retry output. Rejected
+// values are omitted, rather than shortened or passed through redaction.
+struct RetryErrorCode<'a>(&'a str);
+
+impl<'a> RetryErrorCode<'a> {
+    fn parse(value: &'a str) -> Option<Self> {
+        ((1..=64).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".:_-".contains(&byte)))
+        .then_some(Self(value))
+    }
+}
+
+struct RetryRequestId<'a>(&'a str);
+
+impl<'a> RetryRequestId<'a> {
+    fn parse(value: &'a str) -> Option<Self> {
+        ((1..=128).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"+/=_-".contains(&byte)))
+        .then_some(Self(value))
+    }
+}
+
 /// Retry diagnostics use only typed fields, never error Display/Debug text.
 fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
     if (error.is_response_error() || error.is_operation_error())
@@ -165,15 +191,23 @@ fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpRespons
             .as_operation_error()
             .and_then(|error| error.downcast_ref::<ErrorMetadata>())
             .or_else(|| find_source::<ErrorMetadata>(error));
-        if let Some(code) = metadata.and_then(ErrorMetadata::code) {
+        if let Some(code) = metadata
+            .and_then(ErrorMetadata::code)
+            .and_then(RetryErrorCode::parse)
+        {
             summary.push(' ');
-            summary.push_str(code);
+            summary.push_str(code.0);
         }
         if let Some(request_id) = request_id(response)
-            .or_else(|| metadata.and_then(|metadata| metadata.extra("aws_request_id")))
+            .and_then(RetryRequestId::parse)
+            .or_else(|| {
+                metadata
+                    .and_then(|metadata| metadata.extra("aws_request_id"))
+                    .and_then(RetryRequestId::parse)
+            })
         {
             summary.push_str("; request_id: ");
-            summary.push_str(request_id);
+            summary.push_str(request_id.0);
         }
         return summary;
     }
