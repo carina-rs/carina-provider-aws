@@ -1,6 +1,8 @@
 //! SDK retry guard that aggregates every attempt into one operation verdict.
 
-use std::io;
+use std::sync::LazyLock;
+use std::time::Instant;
+use std::{fmt, io};
 
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::Intercept;
@@ -8,12 +10,14 @@ use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextRef, BeforeTransmitInterceptorContextRef, Error,
     FinalizerInterceptorContextMut, FinalizerInterceptorContextRef, InterceptorContext,
 };
-use aws_smithy_runtime_api::client::orchestrator::{Metadata, OrchestratorError};
+use aws_smithy_runtime_api::client::orchestrator::{HttpResponse, Metadata, OrchestratorError};
 use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
-use aws_smithy_types::retry::ErrorKind;
+use aws_smithy_types::error::ErrorMetadata;
+use aws_smithy_types::retry::{ErrorKind, RetryConfig};
+use regex::Regex;
 
 use super::send_outcome::{
     AttemptOutcome, AttemptPhase, FinalAttempt, Idempotency, OperationSendFailure,
@@ -51,9 +55,18 @@ pub(super) fn classify_attempt(
 struct PreviousAttempt {
     outcome: AttemptOutcome,
     failure: String,
+    retry_summary: String,
+    finished_at: Instant,
 }
 
 impl Storable for PreviousAttempt {
+    type Storer = StoreReplace<Self>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LastStartedAttempt(RequestAttempts);
+
+impl Storable for LastStartedAttempt {
     type Storer = StoreReplace<Self>;
 }
 
@@ -64,33 +77,129 @@ impl Storable for MaybeSentAttempt {
     type Storer = StoreReplace<Self>;
 }
 
+fn error_message(error: &(dyn std::error::Error + 'static)) -> String {
+    // Match the Display/source-chain portion of DisplayErrorContext. Its Debug
+    // tail may contain requests or signing data, so it must not reach stderr.
+    // Display and source messages can themselves contain signing data. Sanitize
+    // each separately so an Authorization value cannot swallow the next cause.
+    static URL_QUERY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)(\b[a-z][a-z0-9+.-]*://[^\s?<>"']*)\?[^\s<>"']*"#)
+            .expect("valid URL query pattern")
+    });
+    static AUTHORIZATION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)(\bauthorization\b["']?\s*:\s*)[^\r\n]*"#)
+            .expect("valid Authorization pattern")
+    });
+    static SIGNING_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r#"(?i)(\b(?:x-amz-(?:signature|security-token|credential)|signature)\b["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s&,;]+)"#,
+        )
+        .expect("valid signing value pattern")
+    });
+    let redact = |message: &str| {
+        let message = URL_QUERY.replace_all(message, "${1}");
+        let message = AUTHORIZATION.replace_all(&message, "${1}[REDACTED]");
+        SIGNING_VALUE
+            .replace_all(&message, "${1}[REDACTED]")
+            .into_owned()
+    };
+    let mut rendered = redact(&error.to_string());
+    let mut source = error.source();
+    while let Some(error) = source {
+        rendered.push_str(": ");
+        rendered.push_str(&redact(&error.to_string()));
+        source = error.source();
+    }
+    rendered
+}
+
 fn rendered_failure(
     error: &(dyn std::error::Error + 'static),
     response: Option<&aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
 ) -> String {
-    let mut rendered = error.to_string();
-    let mut source = error.source();
-    while let Some(error) = source {
-        rendered.push_str(": ");
-        rendered.push_str(&error.to_string());
-        source = error.source();
-    }
+    let mut rendered = error_message(error);
     if let Some(response) = response {
         rendered.push_str(&format!("; status: {}", response.status().as_u16()));
-        for header in [
-            "x-amzn-requestid",
-            "x-amzn-request-id",
-            "x-amz-request-id",
-            "x-amz-id-2",
-        ] {
-            if let Some(request_id) = response.headers().get(header) {
-                rendered.push_str("; request_id: ");
-                rendered.push_str(request_id);
-                break;
-            }
+        if let Some(request_id) = request_id(response) {
+            rendered.push_str("; request_id: ");
+            rendered.push_str(request_id);
         }
     }
     rendered
+}
+
+fn request_id(response: &HttpResponse) -> Option<&str> {
+    [
+        "x-amzn-requestid",
+        "x-amzn-request-id",
+        "x-amz-request-id",
+        "x-amz-id-2",
+    ]
+    .into_iter()
+    .find_map(|header| response.headers().get(header))
+}
+
+fn find_source<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(typed) = error.downcast_ref::<T>() {
+            return Some(typed);
+        }
+        current = error.source();
+    }
+    None
+}
+
+// Admit complete ASCII codes before they can enter retry output. Rejected
+// values are omitted, rather than shortened or passed through redaction.
+struct RetryErrorCode<'a>(&'a str);
+
+impl<'a> RetryErrorCode<'a> {
+    fn parse(value: &'a str) -> Option<Self> {
+        ((1..=64).contains(&value.len())
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".:_-".contains(&byte)))
+        .then_some(Self(value))
+    }
+}
+
+/// Retry diagnostics use only typed fields, never error Display/Debug text.
+fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
+    if (error.is_response_error() || error.is_operation_error())
+        && let Some(response) = response
+    {
+        let mut summary = format!("HTTP {}", response.status().as_u16());
+        // Type erasure doesn't retain ProvideErrorMetadata. Use metadata
+        // only when it is directly available or exposed as a typed cause;
+        // modeled errors that hide it get status only.
+        let metadata = error
+            .as_operation_error()
+            .and_then(|error| error.downcast_ref::<ErrorMetadata>())
+            .or_else(|| find_source::<ErrorMetadata>(error));
+        if let Some(code) = metadata
+            .and_then(ErrorMetadata::code)
+            .and_then(RetryErrorCode::parse)
+        {
+            summary.push(' ');
+            summary.push_str(code.0);
+        }
+        return summary;
+    }
+    match OrchestratorKind::of(error) {
+        OrchestratorKind::Connector(kind) => match kind {
+            ConnectorKind::Timeout => "connector timeout".to_string(),
+            ConnectorKind::Io => match find_source::<io::Error>(error) {
+                Some(error) => format!("connector io error ({:?})", error.kind()),
+                None => "connector io error".to_string(),
+            },
+            ConnectorKind::User | ConnectorKind::Other(..) => "connector error".to_string(),
+        },
+        OrchestratorKind::Timeout => "Timeout".to_string(),
+        OrchestratorKind::Other => "Other".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -152,15 +261,26 @@ impl OrchestratorKind {
 }
 
 /// Associates one service client's SDK metadata with generated resend policy.
-#[derive(Debug)]
 pub struct ResendGuard {
     lookup: fn(&str) -> Idempotency,
+    output: Box<dyn Fn(&str) + Send + Sync>,
+}
+
+impl fmt::Debug for ResendGuard {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResendGuard")
+            .field("lookup", &self.lookup)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ResendGuard {
     /// Creates a guard using the service's generated idempotency lookup.
     pub fn new(lookup: fn(&str) -> Idempotency) -> Self {
-        Self { lookup }
+        Self {
+            lookup,
+            output: Box::new(|line| eprintln!("{line}")),
+        }
     }
 }
 
@@ -176,6 +296,7 @@ impl Intercept for ResendGuard {
     ) -> Result<(), BoxError> {
         cfg.interceptor_state()
             .store_put(AttemptPhase::BeforeTransmit);
+        cfg.interceptor_state().unset::<LastStartedAttempt>();
         Ok(())
     }
 
@@ -185,10 +306,16 @@ impl Intercept for ResendGuard {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        let attempt = cfg
+        let started_at = Instant::now();
+        let attempts = cfg
             .load::<RequestAttempts>()
-            .map(RequestAttempts::attempts)
-            .unwrap_or(1);
+            .copied()
+            .unwrap_or_else(|| RequestAttempts::new(1));
+        // The SDK advances RequestAttempts before sleeping. Retain its value
+        // here so a timeout during backoff doesn't count an unstarted attempt.
+        cfg.interceptor_state()
+            .store_put(LastStartedAttempt(attempts));
+        let attempt = attempts.attempts();
         let previous_phase = attempt_phase(cfg);
         cfg.interceptor_state()
             .store_put(AttemptPhase::BeforeTransmit);
@@ -213,12 +340,30 @@ impl Intercept for ResendGuard {
             PreviousAttempt {
                 outcome,
                 failure: "failure details unavailable".to_string(),
+                retry_summary: "Other".to_string(),
+                finished_at: started_at,
             }
         });
         if previous.outcome == AttemptOutcome::MaybeSent {
             cfg.interceptor_state().store_put(MaybeSentAttempt);
         }
         cfg.interceptor_state().unset::<PreviousAttempt>();
+
+        if let Some(metadata) = cfg.load::<Metadata>() {
+            let max = cfg
+                .load::<RetryConfig>()
+                .map(RetryConfig::max_attempts)
+                .unwrap_or_else(|| RetryConfig::standard().max_attempts());
+            let elapsed = started_at
+                .duration_since(previous.finished_at)
+                .as_secs_f64();
+            (self.output)(&format!(
+                "  Retrying {}.{} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {}",
+                metadata.service(),
+                metadata.name(),
+                previous.retry_summary,
+            ));
+        }
 
         if previous.outcome.resend_is_safe(idempotency) {
             return Ok(());
@@ -309,8 +454,18 @@ impl Intercept for ResendGuard {
             .and_then(Result::err)
             .map(|error| rendered_failure(error, context.response()))
             .unwrap_or_else(|| "failure details unavailable".to_string());
-        cfg.interceptor_state()
-            .store_put(PreviousAttempt { outcome, failure });
+        let retry_summary = context
+            .output_or_error()
+            .and_then(Result::err)
+            .map(|error| retry_summary(error, context.response()))
+            .unwrap_or_else(|| "Other".to_string());
+        let finished_at = Instant::now();
+        cfg.interceptor_state().store_put(PreviousAttempt {
+            outcome,
+            failure,
+            retry_summary,
+            finished_at,
+        });
         Ok(())
     }
 
@@ -354,12 +509,39 @@ impl Intercept for ResendGuard {
         *error = error_kind.with_source(Box::new(failure));
         Ok(())
     }
+
+    fn read_after_execution(
+        &self,
+        context: &FinalizerInterceptorContextRef<'_>,
+        _runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        if !matches!(context.output_or_error(), Some(Err(_))) {
+            return Ok(());
+        }
+        if let (Some(attempt), Some(metadata)) =
+            (cfg.load::<LastStartedAttempt>(), cfg.load::<Metadata>())
+            && attempt.0.attempts() > 1
+        {
+            (self.output)(&format!(
+                "  Gave up {}.{} after {} SDK attempts",
+                metadata.service(),
+                metadata.name(),
+                attempt.0.attempts(),
+            ));
+        }
+        Ok(())
+    }
 }
+
+#[cfg(test)]
+mod retry_visibility_tests;
 
 #[cfg(test)]
 mod tests {
     use std::io;
 
+    use aws_smithy_async::time::StaticTimeSource;
     use aws_smithy_runtime_api::client::interceptors::Intercept;
     use aws_smithy_runtime_api::client::interceptors::context::{Input, InterceptorContext};
     use aws_smithy_runtime_api::client::orchestrator::{
@@ -429,6 +611,7 @@ mod tests {
 
     fn runtime_components() -> RuntimeComponents {
         RuntimeComponentsBuilder::for_tests()
+            .with_time_source(Some(StaticTimeSource::new(std::time::UNIX_EPOCH)))
             .build()
             .expect("test runtime components")
     }
