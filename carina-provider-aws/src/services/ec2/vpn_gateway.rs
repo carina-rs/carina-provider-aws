@@ -72,7 +72,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2VpnGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2VpnGatewayCreateParts {

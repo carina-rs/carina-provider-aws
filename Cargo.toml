@@ -22,8 +22,8 @@ version = "0.8.0"
 # Every crate in this workspace must build against the same carina revision;
 # pin it once here so the crates cannot drift apart.
 [workspace.dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina", rev = "5488910d" }
-carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "5488910d" }
-carina-plugin-host = { git = "https://github.com/carina-rs/carina", rev = "5488910d" }
-carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "5488910d" }
-carina-provider-resolver = { git = "https://github.com/carina-rs/carina", rev = "5488910d" }
+carina-core = { git = "https://github.com/carina-rs/carina", rev = "ae8d2515d79ff27346f50ce7730863cdf436c1f7" }
+carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "ae8d2515d79ff27346f50ce7730863cdf436c1f7" }
+carina-plugin-host = { git = "https://github.com/carina-rs/carina", rev = "ae8d2515d79ff27346f50ce7730863cdf436c1f7" }
+carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "ae8d2515d79ff27346f50ce7730863cdf436c1f7" }
+carina-provider-resolver = { git = "https://github.com/carina-rs/carina", rev = "ae8d2515d79ff27346f50ce7730863cdf436c1f7" }

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use carina_core::parser::{ExpandedInferredFile, LoadedProviderContext, ProviderConfig};
+use carina_core::paths::ResolvedPath;
 use carina_core::provider::{BoxFuture, ProviderError, ProviderFactory};
 use carina_core::resource::{ConcreteValue, DeferredValue, ProviderResource, Resource, Value};
 use carina_plugin_host::{
@@ -84,11 +85,12 @@ fn test_egress(
         declaration.sha256().as_str(),
     );
     std::fs::write(directory.join("carina-providers.lock"), lock).expect("write test consent");
-    let (lock, _) = LockFile::load(directory)
+    let project_dir = ResolvedPath::new(directory).expect("resolve test directory");
+    let (lock, _) = LockFile::load(&project_dir)
         .expect("read test consent")
         .expect("test consent file")
         .into_parts();
-    lock.locked_egress(&declaration, directory)
+    lock.locked_egress(&declaration, &project_dir)
         .expect("test consent matches guest")
 }
 

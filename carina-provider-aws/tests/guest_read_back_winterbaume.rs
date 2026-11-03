@@ -106,8 +106,8 @@ mod guest {
             let verdict = dispatch_create(&provider, &id, request)
                 .expect_err("guest create must reject invalid resolved inputs");
             assert_eq!(service.requests.load(Ordering::Relaxed), 0);
-            let proto::CreateVerdict::Untracked(error) = *verdict else {
-                panic!("validation must fail before tracking a create: {verdict:?}");
+            let proto::CreateVerdict::NotCreated(error) = *verdict else {
+                panic!("validation must report NotCreated: {verdict:?}");
             };
             assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
             assert_eq!(error.resource_id.as_ref(), Some(&id));

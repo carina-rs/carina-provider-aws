@@ -536,7 +536,7 @@ mod tests {
             detail.operation.as_deref(),
             Some("s3.PutObjectLockConfiguration")
         );
-        assert_eq!(detail.code.as_deref(), Some(expected_code));
+        assert_eq!(detail.code(), Some(expected_code));
         let rendered = error.to_string();
         assert!(
             rendered.contains(expected),

@@ -84,7 +84,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2VpcEndpointCreateInput::decode(resource, _schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2VpcEndpointCreateParts {
@@ -114,7 +114,7 @@ impl AwsProvider {
             .transpose()
         {
             Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let private_dns_enabled = private_dns_enabled.into_inner();
         let resource_configuration_arn = resource_configuration_arn.into_inner();

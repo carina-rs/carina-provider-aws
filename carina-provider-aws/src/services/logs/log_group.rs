@@ -97,7 +97,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match LogsLogGroupCreateInput::decode(resource, _schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::LogsLogGroupCreateParts {
@@ -121,7 +121,7 @@ impl AwsProvider {
             log_group_name.clone(),
         ) {
             Ok(identifier) => identifier,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
 
         let mut req = self
@@ -153,7 +153,7 @@ impl AwsProvider {
         }
 
         if let Err(error) = req.send().await {
-            return Err(attempt.untracked(
+            return Err(attempt.not_created(
                 api_error_with_meta("Failed to create log group", error)
                     .for_resource(resource.id.clone()),
             ));

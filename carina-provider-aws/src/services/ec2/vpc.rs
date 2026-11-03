@@ -145,7 +145,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2VpcCreateInput::decode(resource, _schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2VpcCreateParts {
@@ -172,7 +172,7 @@ impl AwsProvider {
             ipv4_ipam_pool_id.as_deref(),
             ipv4_netmask_length,
         ) {
-            return Err(attempt.untracked(error));
+            return Err(attempt.not_created(error));
         }
 
         // Create VPC with optional instance_tenancy
@@ -193,7 +193,7 @@ impl AwsProvider {
             let ipv4_netmask_length = match i32::try_from(ipv4_netmask_length) {
                 Ok(value) => value,
                 Err(_) => {
-                    return Err(attempt.untracked(
+                    return Err(attempt.not_created(
                         ProviderError::invalid_input(
                             "ipv4_netmask_length is outside the EC2 integer range",
                         )

@@ -258,7 +258,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2SubnetCreateInput::decode(resource, schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2SubnetCreateParts {
@@ -299,7 +299,7 @@ impl AwsProvider {
         let tags = crate::send_model::optional_tags_value(tags);
         let vpc_id = vpc_id.into_inner();
         if availability_zone.is_some() && availability_zone_id.is_some() {
-            return Err(attempt.untracked(
+            return Err(attempt.not_created(
                 ProviderError::invalid_input(
                     "availability_zone and availability_zone_id are mutually exclusive",
                 )
@@ -315,7 +315,7 @@ impl AwsProvider {
             map_public_ip_on_launch,
             private_dns_name_options_on_launch.as_ref(),
         ) {
-            return Err(attempt.untracked(error));
+            return Err(attempt.not_created(error));
         }
         let ipv6_native_value = ipv6_native.unwrap_or(false);
 
@@ -327,7 +327,7 @@ impl AwsProvider {
             ipv4_netmask_length,
             !ipv6_native_value,
         ) {
-            return Err(attempt.untracked(error));
+            return Err(attempt.not_created(error));
         }
         if let Err(error) = validate_subnet_cidr_source(
             &resource.id,
@@ -337,7 +337,7 @@ impl AwsProvider {
             ipv6_netmask_length,
             ipv6_native_value,
         ) {
-            return Err(attempt.untracked(error));
+            return Err(attempt.not_created(error));
         }
 
         let mut req = self

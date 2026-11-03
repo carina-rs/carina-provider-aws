@@ -277,7 +277,7 @@ impl AwsProvider {
     ) -> Result<A::Step, A::Verdict> {
         let input = match Ec2NatGatewayCreateInput::decode(resource, _schema) {
             Ok(input) => input,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         let sent = input.sent();
         let crate::send_models_generated::Ec2NatGatewayCreateParts {
@@ -340,7 +340,7 @@ impl AwsProvider {
             availability_zone_addresses.as_ref(),
         ) {
             Ok(value) => value,
-            Err(error) => return Err(attempt.untracked(error)),
+            Err(error) => return Err(attempt.not_created(error)),
         };
         if !availability_zone_addresses.is_empty() {
             req = req.configure(|builder| {
