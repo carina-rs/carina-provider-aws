@@ -1394,6 +1394,40 @@ mod tests {
     }
 
     #[test]
+    fn logs_log_group_retention_witness_dispatches_through_the_sdk_bridge() {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS schemas must build a dispatch table");
+        let row = carina_aws_types::AwsType::LogsLogGroupRetentionInDays;
+        let expected = row.identity();
+        let logs = cache
+            .schemas()
+            .iter()
+            .find(|schema| schema.parts().resource_type == "logs.LogGroup")
+            .expect("generated LogGroup schema");
+        let RawShape::Int {
+            identity: Some(identity),
+            range: None,
+            validate: Some(_),
+        } = logs.parts().attributes["retention_in_days"]
+            .attr_type()
+            .raw_shape()
+        else {
+            panic!("retention must be the shared validated Int");
+        };
+        assert_eq!(identity, &expected);
+        let identity = wire_identity(&expected);
+        dispatch_custom_type_validation(&cache, &identity, "30")
+            .expect("member must pass SDK dispatch as an integer");
+        let error = dispatch_custom_type_validation(&cache, &identity, "2")
+            .expect_err("non-member must fail SDK dispatch")
+            .to_string();
+        let values = row.allowed_int_values().expect("integer enum values");
+        assert!(error.contains("allowed values"), "{error}");
+        assert!(error.contains(&format!("{values:?}")), "{error}");
+    }
+
+    #[test]
     fn region_config_witness_dispatches_through_the_sdk_bridge() {
         let provider = AwsProcessProvider::new();
         let cache = ProviderSchemaCache::from_provider(&provider)

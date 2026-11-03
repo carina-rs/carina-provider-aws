@@ -76,10 +76,19 @@ this repository (`carina-provider-aws/Cargo.toml` references it as
 
 `carina-aws-types` owns all direct `aws-sdk-*` and `aws-config` dependencies.
 Provider crates must not add either dependency, including in dev or target
-sections. Use `carina_aws_types::sdk::<service>` for SDK types, operations, errors, and
-primitives. The facade never re-exports raw `Client`, `Config`, or `config`;
-compile-fail doctests enforce that boundary. Its service handles are constructed
-only with a permanent `ResendGuard` and the service's idempotency lookup.
+sections. Each `aws-sdk-*` dependency is optional and selected by a feature
+matching its `sdk` module name, including `cloudcontrol`. No service features are
+enabled by default. Enable the services a consumer uses in its `carina-aws-types`
+dependency; the provider explicitly enables its twelve services in its normal
+dependency. Tests inherit those features; the dev-dependency adds only
+`test-utils`. Codegen uses only shared types and enables no services.
+`GuardedAssumeRoleProvider` and `AssumeRoleFailure` require `sts`; S3 Express
+protection requires `s3`. Features select whole services and never change their
+construction guarantees. Use `carina_aws_types::sdk::<service>` for SDK types,
+operations, errors, and primitives. The facade never re-exports raw `Client`,
+`Config`, or `config`; compile-fail doctests enforce that boundary. Its service
+handles are constructed only with a permanent `ResendGuard` and the service's
+idempotency lookup.
 S3 Express session authentication is disabled. A rejecting Express credentials
 provider also prevents an unguarded internal CreateSession client when an
 operation overrides that flag.

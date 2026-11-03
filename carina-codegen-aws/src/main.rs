@@ -114,22 +114,56 @@ impl TryFrom<Args> for ResolvedArgs {
     }
 }
 
-/// Unified type override for resource-scoped property overrides.
-/// Allows overriding string type, enum values, integer range, or integer enum
-/// for a specific (resource_type, property_name) pair.
+/// Resource-scoped value refinements and shared type identities.
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
 enum TypeOverride {
-    /// Override to a specific string type (e.g., "super::super::iam::role::arn()")
-    StringType(&'static str),
-    /// Override to an enum with specific values
-    Enum(Vec<&'static str>),
-    /// Override to an integer range (min, max)
-    IntRange(i64, i64),
-    /// Override to an integer enum with specific allowed values
-    IntEnum(Vec<i64>),
+    /// Anonymous String refinement; does not introduce an identifier identity.
+    RefinedString {
+        pattern: &'static str,
+        min_length: u64,
+        max_length: u64,
+    },
+    /// Use the identity, validation, and allowed-value metadata of a shared row.
+    SharedType(AwsType),
     /// Override only the enum identity, retaining Smithy values and DSL aliases.
     EnumIdentity(AwsType),
+}
+
+struct ValueTypeOverride {
+    type_code: String,
+    display: String,
+}
+
+/// Rust and documentation use the same exact resource/path lookup. Enum
+/// identities retain their separate Smithy-shape lookup in enum_identity_override.
+fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
+    let (type_code, display) = match resource_type_overrides().get(&(resource, property_path))? {
+        TypeOverride::RefinedString {
+            pattern,
+            min_length,
+            max_length,
+        } => (
+            format!(
+                "AttributeType::refined_string(None, Some({pattern:?}.to_string()), Some((Some({min_length}), Some({max_length}))), None)"
+            ),
+            format!("String(length: {min_length}..={max_length}, pattern: `{pattern}`)"),
+        ),
+        TypeOverride::SharedType(row) => {
+            let display = if let Some(values) = row.allowed_int_values() {
+                let values = values
+                    .iter()
+                    .map(i64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} (Int; allowed: {values})", row.identity().kind)
+            } else {
+                type_code_to_display(row.constructor_path())
+            };
+            (row.constructor_path().to_string(), display)
+        }
+        TypeOverride::EnumIdentity(_) => return None,
+    };
+    Some(ValueTypeOverride { type_code, display })
 }
 
 /// Information about a detected enum type
@@ -512,7 +546,13 @@ fn emit_replacement_builder(
                     None => Err("missing"),
                     Some(attr) if attr.is_read_only => Err("read-only"),
                     Some(attr)
-                        if !attr.is_plain_string || attr.type_code != PLAIN_STRING_TYPE_CODE =>
+                        if !attr.is_plain_string
+                            || (attr.type_code != PLAIN_STRING_TYPE_CODE
+                                && !matches!(
+                                    resource_type_overrides()
+                                        .get(&(resource_type_name, provider_name_snake.as_str())),
+                                    Some(TypeOverride::RefinedString { .. })
+                                )) =>
                     {
                         Err("not a plain string")
                     }
@@ -1524,6 +1564,8 @@ fn collect_resource_attributes_unvalidated(
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
         let type_code = if let Some(code) = reference_type_code(res.name, &snake_name) {
             code.to_string()
+        } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
+            override_type.type_code
         } else if let Some(&override_type) = type_overrides.get(extra.name) {
             override_type.to_string()
         } else if let Some(inferred) = infer_string_type(extra.name) {
@@ -2667,6 +2709,9 @@ fn resolve_type(
     if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
         return Ok((code.to_string(), None));
     }
+    if let Some(override_type) = resource_value_override(ctx.resource_name, &ctx.property_path) {
+        return Ok((override_type.type_code, None));
+    }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
         return Ok((override_type.to_string(), None));
@@ -2903,6 +2948,10 @@ fn generate_struct_type(
         let (field_type, enum_info) =
             if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
                 (code.to_string(), None)
+            } else if let Some(override_type) =
+                resource_value_override(ctx.resource_name, &ctx.property_path)
+            {
+                (override_type.type_code, None)
             } else if let Some(t) = override_type {
                 (t.to_string(), None)
             } else {
@@ -5933,28 +5982,26 @@ fn generate_markdown_resource(
         }
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
-        let type_display = if let Some(code) = reference_type_code(res.name, &snake_name) {
-            type_code_to_display(code)
+        let attr_type = if let Some(code) = reference_type_code(res.name, &snake_name) {
+            MarkdownType::Plain(type_code_to_display(code))
+        } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
+            MarkdownType::Plain(override_type.display)
         } else if let Some(&override_type) = type_overrides.get(extra.name) {
-            type_code_to_display(override_type)
+            discover_markdown_override(
+                override_type,
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
         } else if is_aws_resource_id_property(extra.name) {
-            resource_id_display(extra.name)
+            MarkdownType::Plain(resource_id_display(extra.name))
         } else {
-            "String".to_string()
+            MarkdownType::Plain("String".to_string())
         };
         let entry = MarkdownAttrInfo {
             snake_name: snake_name.clone(),
-            attr_type: if let Some(code) = type_overrides.get(extra.name) {
-                discover_markdown_override(
-                    code,
-                    std::slice::from_ref(&snake_name),
-                    &namespace,
-                    &mut all_enums,
-                    &mut struct_defs,
-                )?
-            } else {
-                MarkdownType::Plain(type_display)
-            },
+            attr_type,
             is_required: required_overrides.contains(extra.name)
                 && !read_only_overrides.contains(extra.name),
             description: extra.description.map(Description::authored),
@@ -6716,6 +6763,9 @@ fn discover_markdown_type(
             struct_defs,
         );
     }
+    if let Some(override_type) = resource_value_override(resource_name, property_path) {
+        return Ok(MarkdownType::Plain(override_type.display));
+    }
     // Per-(parent_struct, member) override wins over per-member and Smithy
     // default. Distinguishes a member name shared across structs (aws#302).
     if let Some(parent) = parent_struct
@@ -7238,13 +7288,39 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 }
 
 /// Unified resource-specific property type overrides.
-/// Maps (Smithy resource name, property name) to a TypeOverride.
+/// Value overrides use (resource name, full DSL property path), including []/{}
+/// markers. EnumIdentity entries use their existing Smithy shape/member keys.
 /// Use this when a property needs resource-specific type treatment that differs
 /// from global overrides or pattern-based inference.
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
             HashMap::from([
+                (
+                    ("logs.LogGroup", "log_group_name"),
+                    // Smithy com.amazonaws.cloudwatchlogs#LogGroupName:
+                    // length 1..512 and pattern ^[.\-_/#A-Za-z0-9]+$.
+                    // CreateLogGroup also forbids the prefix aws/:
+                    // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html
+                    // Leave that create-only rule to AWS: custom scalar validators
+                    // require an identity and are not portable anonymous refinements.
+                    // Match AWSCC's exact anonymous pattern and length metadata
+                    // so name references are assignable in both directions:
+                    // carina-provider-awscc/src/schemas/generated/logs/log_group.rs
+                    TypeOverride::RefinedString {
+                        pattern: r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                        min_length: 1,
+                        max_length: 512,
+                    },
+                ),
+                (
+                    ("logs.LogGroup", "retention_in_days"),
+                    // PutRetentionPolicyRequest$retentionInDays -> Days:
+                    // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html
+                    // Share AWSCC's established RetentionInDays identity and
+                    // validated Int shape through the common catalog.
+                    TypeOverride::SharedType(AwsType::LogsLogGroupRetentionInDays),
+                ),
                 (
                     ("route53.RecordSet", "Type"),
                     TypeOverride::EnumIdentity(AwsType::DnsRecordType),
@@ -7603,6 +7679,151 @@ mod tests {
             ExampleKind::DataSource,
         )
         .expect("checked data-source Markdown fixture")
+    }
+
+    fn logs_log_group_value_fixture() -> (ResourceDef, SmithyModel) {
+        let mut resource = resource_defs::logs_resources().remove(0);
+        resource.extra_read_only.push("nested");
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.cloudwatchlogs#CreateLogGroup": {
+                  "type": "operation",
+                  "input": {"target": "com.amazonaws.cloudwatchlogs#CreateLogGroupRequest"}
+                },
+                "com.amazonaws.cloudwatchlogs#CreateLogGroupRequest": {
+                  "type": "structure",
+                  "members": {
+                    "logGroupName": {
+                      "target": "com.amazonaws.cloudwatchlogs#LogGroupName",
+                      "traits": {"smithy.api#required": {}}
+                    },
+                    "kmsKeyId": {"target": "smithy.api#String"},
+                    "logGroupClass": {"target": "com.amazonaws.cloudwatchlogs#LogGroupClass"},
+                    "deletionProtectionEnabled": {"target": "smithy.api#Boolean"}
+                  }
+                },
+                "com.amazonaws.cloudwatchlogs#LogGroup": {
+                  "type": "structure",
+                  "members": {
+                    "logGroupName": {"target": "com.amazonaws.cloudwatchlogs#LogGroupName"},
+                    "kmsKeyId": {"target": "smithy.api#String"},
+                    "logGroupClass": {"target": "com.amazonaws.cloudwatchlogs#LogGroupClass"},
+                    "deletionProtectionEnabled": {"target": "smithy.api#Boolean"},
+                    "retentionInDays": {"target": "smithy.api#Integer"},
+                    "nested": {"target": "com.amazonaws.cloudwatchlogs#Nested"}
+                  }
+                },
+                "com.amazonaws.cloudwatchlogs#Nested": {
+                  "type": "structure",
+                  "members": {
+                    "logGroupName": {"target": "com.amazonaws.cloudwatchlogs#LogGroupName"},
+                    "retentionInDays": {"target": "smithy.api#Integer"}
+                  }
+                },
+                "com.amazonaws.cloudwatchlogs#LogGroupName": {
+                  "type": "string",
+                  "traits": {
+                    "smithy.api#length": {"min": 1, "max": 512},
+                    "smithy.api#pattern": "^[.\\-_/#A-Za-z0-9]+$"
+                  }
+                },
+                "com.amazonaws.cloudwatchlogs#LogGroupClass": {
+                  "type": "enum",
+                  "members": {
+                    "STANDARD": {
+                      "target": "smithy.api#Unit",
+                      "traits": {"smithy.api#enumValue": "STANDARD"}
+                    }
+                  }
+                }
+              }
+            }"##,
+        )
+        .expect("parse Logs value-refinement fixture");
+        (resource, model)
+    }
+
+    #[test]
+    fn logs_log_group_codegen_refines_name_at_exact_path() {
+        let (resource, model) = logs_log_group_value_fixture();
+        let generated = generate_resource(&resource, &model).expect("generate Logs schema");
+        assert!(
+            generated.contains(
+                "AttributeSchema::required(\"log_group_name\", AttributeType::refined_string("
+            ),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("Some((Some(1), Some(512)))"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains(r#"Some("^[.\\-_/#A-Za-z0-9]{1,512}\\z".to_string())"#),
+            "match AWSCC's exact anonymous name refinement: {generated}"
+        );
+        assert!(
+            generated
+                .contains("StructField::optional(\"log_group_name\", AttributeType::string())"),
+            "a nested name with the same Smithy target must stay unchanged: {generated}"
+        );
+
+        let model = string_fixture_model(&[("logGroupName", true)], &[("logGroupName", true)]);
+        let resource = provider_fixture_resource("ec2.FlowLog", "", &["logGroupName"], vec![]);
+        let collected = collect_resource_attributes_unvalidated(&resource, &model, &[])
+            .expect("collect unrelated resource");
+        assert_eq!(collected.attrs[0].type_code, PLAIN_STRING_TYPE_CODE);
+    }
+
+    #[test]
+    fn logs_log_group_codegen_retention_uses_shared_integer_enum() {
+        let (resource, model) = logs_log_group_value_fixture();
+        let collected =
+            collect_resource_attributes(&resource, &model).expect("collect Logs schema");
+        let retention = collected
+            .attrs
+            .iter()
+            .find(|attr| attr.snake_name == "retention_in_days")
+            .expect("retention attribute");
+        assert_eq!(
+            retention.type_code,
+            "carina_aws_types::logs_log_group_retention_in_days()"
+        );
+        assert_eq!(retention.send_type, SendFieldType::Int);
+        let generated = generate_resource(&resource, &model).expect("generate Logs schema");
+        assert!(
+            generated
+                .contains("StructField::optional(\"retention_in_days\", AttributeType::int())"),
+            "the override must not match nested suffixes: {generated}"
+        );
+    }
+
+    #[test]
+    fn logs_log_group_codegen_markdown_documents_value_constraints() {
+        let (resource, model) = logs_log_group_value_fixture();
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect("generate Logs markdown");
+        assert!(
+            markdown.contains("String(length: 1..=512, pattern: `^[.\\-_/#A-Za-z0-9]{1,512}\\z`)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("RetentionInDays (Int; allowed: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("| `log_group_name` | String |"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("| `retention_in_days` | Int |"),
+            "{markdown}"
+        );
     }
 
     const PROVIDER_FIXTURE_FIELDS: &[&str] = &[

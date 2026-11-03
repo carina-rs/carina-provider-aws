@@ -45,6 +45,31 @@ fn metadata_string(
     AttributeType::refined_string(Some(identity), Some(pattern.to_string()), length, None)
 }
 
+/// Construct an identity-bearing Int restricted to the given allowed values.
+///
+/// Catalog rows supply `values:` so both providers can expose the same set
+/// through `allowed_int_values()` and use this validator for native and SDK
+/// custom-type dispatch.
+pub fn validated_int_enum(identity: TypeIdentity, valid_values: &'static [i64]) -> AttributeType {
+    AttributeType::refined_int_with_validator(
+        identity,
+        None,
+        legacy_validator(move |value| {
+            if let Value::Concrete(ConcreteValue::Int(value)) = value {
+                if valid_values.contains(value) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Value {value} is not valid; allowed values are: {valid_values:?}"
+                    ))
+                }
+            } else {
+                Err("Expected integer".to_string())
+            }
+        }),
+    )
+}
+
 fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> AttributeType {
     let pattern = format!("^{prefix}-[0-9a-f]{{8,}}$");
     AttributeType::refined_string_with_validator(
@@ -606,6 +631,20 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: dns_record_type_type,
     },
+    /// CloudWatch Logs retention days, sharing AWSCC's established identity.
+    /// Source: PutRetentionPolicyRequest$retentionInDays -> Days.
+    /// https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html
+    LogsLogGroupRetentionInDays => logs_log_group_retention_in_days {
+        segments: ["logs", "LogGroup"],
+        kind: "RetentionInDays",
+        valid_sample: "30",
+        values: [
+            1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096,
+            1827, 2192, 2557, 2922, 3288, 3653,
+        ],
+        has_validator: true,
+        constructor: validated_int_enum,
+    },
     /// Identity Store ID.
     IdentityStoreId => identity_store_id {
         segments: ["identitystore", "Store"],
@@ -1023,6 +1062,43 @@ mod tests {
     }
 
     #[test]
+    fn logs_log_group_retention_integer_enum_matches_awscc() {
+        let row = AwsType::ALL
+            .iter()
+            .copied()
+            .find(|row| row.identity().to_string() == "aws.logs.LogGroup.RetentionInDays")
+            .expect("shared Logs retention catalog entry");
+        let values: &[i64] = &[
+            1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557,
+            2922, 3288, 3653,
+        ];
+        assert_eq!(row.identity().segments, ["logs", "LogGroup"]);
+        assert_eq!(row.identity().kind, "RetentionInDays");
+        assert_eq!(row.allowed_int_values(), Some(values));
+        assert_eq!(
+            row.constructor_path(),
+            "carina_aws_types::logs_log_group_retention_in_days()"
+        );
+        let attr = row.attribute_type();
+        let RawShape::Int {
+            identity: Some(identity),
+            range: None,
+            validate: Some(validate),
+        } = attr.raw_shape()
+        else {
+            panic!("Logs retention must match AWSCC's validated Int shape");
+        };
+        assert_eq!(identity, &row.identity());
+        assert!(row.has_validator());
+        assert!(validate(&Value::Concrete(ConcreteValue::Int(30))).is_ok());
+        let error = validate(&Value::Concrete(ConcreteValue::Int(2)))
+            .expect_err("non-member must fail")
+            .to_string();
+        assert!(error.contains("allowed values"), "{error}");
+        assert!(error.contains(&format!("{values:?}")), "{error}");
+    }
+
+    #[test]
     fn all_identities_are_unique_and_match_their_constructors() {
         let mut identities = HashSet::new();
 
@@ -1050,6 +1126,7 @@ mod tests {
             AwsType::AvailabilityZone,
             AwsType::AvailabilityZoneId,
             AwsType::S3LifecycleDate,
+            AwsType::LogsLogGroupRetentionInDays,
             AwsType::IamRoleId,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
@@ -1084,8 +1161,8 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            38,
-            "the pre-catalog validator contract changed"
+            39,
+            "the shared catalog validator contract changed"
         );
 
         let declared = AwsType::ALL
@@ -1104,9 +1181,15 @@ mod tests {
                 "validator declaration disagrees with constructor for {aws_type:?}"
             );
             if let Some(validator) = validator {
-                let sample = Value::Concrete(ConcreteValue::String(
-                    aws_type.valid_sample().to_string().into(),
-                ));
+                let sample = Value::Concrete(match attribute_type.raw_shape() {
+                    RawShape::Int { .. } => ConcreteValue::Int(
+                        aws_type
+                            .valid_sample()
+                            .parse()
+                            .expect("integer catalog sample"),
+                    ),
+                    _ => ConcreteValue::String(aws_type.valid_sample().to_string().into()),
+                });
                 assert!(
                     validator(&sample).is_ok(),
                     "declared sample {:?} must pass the validator for {aws_type:?}",
@@ -1194,6 +1277,7 @@ KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
+LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true
 IdentityStoreId|aws|identitystore/Store|Id|d-1234567890|false
 SsoPrincipalId|aws|sso/Principal|Id|12345678-1234-1234-1234-123456789abc|false
 SsoInstanceArn|aws|sso/Instance|Arn|arn:aws:sso:::instance/ssoins-1234567890abcdef|false

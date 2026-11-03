@@ -20,6 +20,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check
+      - name: Check AWS types without service features
+        run: cargo check -p carina-aws-types --no-default-features
+      - name: Check AWS types with the awscc service features
+        run: cargo check -p carina-aws-types --no-default-features --features cloudcontrol,kms,s3,sts
 
   test:
     name: Test
@@ -36,6 +40,8 @@ jobs:
       - name: Test acceptance state helpers
         run: bash acceptance-tests/shell-tests/state_helpers.sh
       - run: cargo test
+      - name: Test AWS types with all features, including doctests
+        run: cargo test -p carina-aws-types --all-features
 
   validate-examples:
     name: Validate Examples
@@ -146,7 +152,7 @@ jobs:
           key: vela-cli-${{ runner.os }}-4611418f8a84426b4b79077cae3f59357ca09ff7
       - name: Install vela-cli
         if: steps.cache-vela.outputs.cache-hit != 'true'
-        run: cargo install --git https://github.com/mizzy/vela --rev 4611418f8a84426b4b79077cae3f59357ca09ff7 vela-cli --quiet
+        run: cargo install --force --git https://github.com/mizzy/vela --rev 4611418f8a84426b4b79077cae3f59357ca09ff7 vela-cli --quiet
       - name: Optimize WASM with vela
         run: vela optimize target/wasm32-wasip2/release/carina-provider-aws.wasm -o target/wasm32-wasip2/release/carina-provider-aws.wasm
       - uses: actions/upload-artifact@v4
