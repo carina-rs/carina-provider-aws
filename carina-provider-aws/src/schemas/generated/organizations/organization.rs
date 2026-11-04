@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_FEATURE_SET: &[&str] = &["ALL", "CONSOLIDATED_BILLING"];
 
@@ -43,25 +43,25 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("id", AttributeType::string())
+            AttributeSchema::provider_populated("id", AttributeType::refined_string(None, Some("^o-[a-z0-9]{10,32}\\z".to_string()), Some((Some(12), Some(34))), None))
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase lette... (read-only)")
                 .with_provider_name("Id")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("master_account_arn", super::arn())
+            AttributeSchema::provider_populated("master_account_arn", carina_aws_types::organizations_account_arn())
                 .with_description("The Amazon Resource Name (ARN) of the account that is designated as the management account for the organization. For more information about ARNs in Or... (read-only)")
                 .with_provider_name("MasterAccountArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("master_account_email", types::email())
+            AttributeSchema::provider_populated("master_account_email", carina_aws_types::organizations_account_email())
                 .with_description("The email address that is associated with the Amazon Web Services account that is designated as the management account for the organization. (read-only)")
                 .with_provider_name("MasterAccountEmail")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("master_account_id", super::aws_account_id())
+            AttributeSchema::provider_populated("master_account_id", carina_aws_types::aws_account_id())
                 .with_description("The unique identifier (ID) of the management account of an organization. The regex pattern for an account ID string requires exactly 12 digits. (read-only)")
                 .with_provider_name("MasterAccountId")
                 .build(),
