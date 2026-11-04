@@ -692,6 +692,56 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: validated_int_enum,
     },
+    /// SQS queue ARN, including the queue-name grammar and FIFO suffix limit.
+    /// The service authorization reference's queue resource is
+    /// arn:${Partition}:sqs:${Region}:${Account}:${QueueName}:
+    /// https://docs.aws.amazon.com/service-authorization/latest/reference/list_sqs.html#amazonsqs-resources-for-iam-policies
+    /// QueueName: CreateQueueRequest$QueueName in the cached sqs.json; the
+    /// .fifo suffix counts within 80 characters:
+    /// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queue-message-identifiers.html
+    /// Partition and account components:
+    /// https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html
+    SqsQueueArn => sqs_queue_arn {
+        segments: ["sqs", "Queue"],
+        kind: "Arn",
+        valid_sample: "arn:aws:sqs:ap-northeast-1:123456789012:example-queue",
+        has_validator: false,
+        constructor: |identity| metadata_string(
+            identity,
+            r"^arn:(?:aws|aws-cn|aws-us-gov):sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+            None,
+        ),
+    },
+    /// Closed SQS deduplication scope; aliases retain exact API spellings.
+    /// sqs.json CreateQueueRequest$Attributes; API_CreateQueue.html.
+    /// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+    SqsQueueDeduplicationScope => sqs_queue_deduplication_scope {
+        segments: ["sqs", "Queue"],
+        kind: "DeduplicationScope",
+        valid_sample: "messageGroup",
+        has_validator: false,
+        constructor: |identity| crate::common::enum_with_dsl_aliases(&["messageGroup", "queue"], identity),
+    },
+    /// Closed SQS FIFO throughput limit; aliases retain exact API spellings.
+    /// sqs.json CreateQueueRequest$Attributes; API_CreateQueue.html.
+    /// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+    SqsQueueFifoThroughputLimit => sqs_queue_fifo_throughput_limit {
+        segments: ["sqs", "Queue"],
+        kind: "FifoThroughputLimit",
+        valid_sample: "perQueue",
+        has_validator: false,
+        constructor: |identity| crate::common::enum_with_dsl_aliases(&["perQueue", "perMessageGroupId"], identity),
+    },
+    /// Existing redrive-permission identity, owned by the catalog so struct
+    /// refinements and native constructors retain the same alias metadata.
+    /// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+    SqsQueueRedrivePermission => sqs_redrive_permission {
+        segments: ["sqs", "Queue", "RedriveAllowPolicy"],
+        kind: "RedrivePermission",
+        valid_sample: "allowAll",
+        has_validator: false,
+        constructor: |identity| crate::common::enum_with_dsl_aliases(&["allowAll", "denyAll", "byQueue"], identity),
+    },
     /// Identity Store ID.
     IdentityStoreId => identity_store_id {
         segments: ["identitystore", "Store"],
@@ -1417,6 +1467,10 @@ DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
 Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|true
 Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true
 LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true
+SqsQueueArn|aws|sqs/Queue|Arn|arn:aws:sqs:ap-northeast-1:123456789012:example-queue|false
+SqsQueueDeduplicationScope|aws|sqs/Queue|DeduplicationScope|messageGroup|false
+SqsQueueFifoThroughputLimit|aws|sqs/Queue|FifoThroughputLimit|perQueue|false
+SqsQueueRedrivePermission|aws|sqs/Queue/RedriveAllowPolicy|RedrivePermission|allowAll|false
 IdentityStoreId|aws|identitystore/Store|Id|d-1234567890|false
 SsoPrincipalId|aws|sso/Principal|Id|12345678-1234-1234-1234-123456789abc|false
 SsoInstanceArn|aws|sso/Instance|Arn|arn:aws:sso:::instance/ssoins-1234567890abcdef|false

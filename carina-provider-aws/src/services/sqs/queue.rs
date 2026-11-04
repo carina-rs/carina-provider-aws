@@ -715,9 +715,9 @@ impl AwsProvider {
     pub(crate) async fn create_sqs_queue(
         &self,
         resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
-        _schema: &CompiledResourceSchema,
+        schema: &CompiledResourceSchema,
     ) -> ProviderResult<TypedCreateCompletion> {
-        let input = SqsQueueCreateInput::decode(resource)?;
+        let input = SqsQueueCreateInput::decode(resource, schema)?;
         let sent = input.sent();
         let crate::send_models_generated::SqsQueueCreateParts {
             content_based_deduplication,

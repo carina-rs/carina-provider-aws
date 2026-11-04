@@ -20,7 +20,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         .with_description("")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::required("queue_name", AttributeType::string())
+            AttributeSchema::required("queue_name", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z".to_string()), Some((Some(1), Some(80))), None))
                 .create_only()
                 .identity()
                 .with_description("The name of the new queue. The following limits apply to this name: A queue name can have up to 80 characters. Valid values: alphanumeric characters, ...")
@@ -34,31 +34,31 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("visibility_timeout", AttributeType::int())
+            AttributeSchema::optional("visibility_timeout", AttributeType::refined_int(None, Some((Some(0), Some(43200)))))
                 .with_description("The visibility timeout for the queue, in seconds. Defaults to 30. Range 0–43,200.")
                 .with_provider_name("VisibilityTimeout")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("message_retention_period", AttributeType::int())
+            AttributeSchema::optional("message_retention_period", AttributeType::refined_int(None, Some((Some(60), Some(1209600)))))
                 .with_description("The length of time, in seconds, for which Amazon SQS retains a message. Defaults to 345,600 (4 days). Range 60–1,209,600 (1 minute–14 days).")
                 .with_provider_name("MessageRetentionPeriod")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("delay_seconds", AttributeType::int())
+            AttributeSchema::optional("delay_seconds", AttributeType::refined_int(None, Some((Some(0), Some(900)))))
                 .with_description("The length of time, in seconds, for which the delivery of all messages in the queue is delayed. Defaults to 0. Range 0–900 (15 minutes).")
                 .with_provider_name("DelaySeconds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("maximum_message_size", AttributeType::int())
-                .with_description("The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 262,144 (256 KiB). Range 1,024–262,144 (1–256 KiB).")
+            AttributeSchema::optional("maximum_message_size", AttributeType::refined_int(None, Some((Some(1024), Some(1048576)))))
+                .with_description("The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 1,048,576 (1 MiB). Range 1,024–1,048,576 (1 KiB–1 MiB)...")
                 .with_provider_name("MaximumMessageSize")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("receive_message_wait_time_seconds", AttributeType::int())
+            AttributeSchema::optional("receive_message_wait_time_seconds", AttributeType::refined_int(None, Some((Some(0), Some(20)))))
                 .with_description("The duration, in seconds, for which a ReceiveMessage call waits for a message to arrive (long polling). Defaults to 0. Range 0–20.")
                 .with_provider_name("ReceiveMessageWaitTimeSeconds")
                 .build(),
@@ -89,14 +89,14 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("deduplication_scope", AttributeType::string())
+            AttributeSchema::optional("deduplication_scope", carina_aws_types::sqs_queue_deduplication_scope())
                 .create_only()
                 .with_description("FIFO only, create-only: scope of message deduplication. Valid values: `messageGroup`, `queue`.")
                 .with_provider_name("DeduplicationScope")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("fifo_throughput_limit", AttributeType::string())
+            AttributeSchema::optional("fifo_throughput_limit", carina_aws_types::sqs_queue_fifo_throughput_limit())
                 .create_only()
                 .with_description("FIFO only, create-only: per-queue or per-message-group throughput limit. Valid values: `perQueue`, `perMessageGroupId`.")
                 .with_provider_name("FifoThroughputLimit")
@@ -109,7 +109,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_data_key_reuse_period_seconds", AttributeType::int())
+            AttributeSchema::optional("kms_data_key_reuse_period_seconds", AttributeType::refined_int(None, Some((Some(60), Some(86400)))))
                 .with_description("Length of time, in seconds, that SQS can reuse a data key before invoking KMS again. Defaults to 300 (5 minutes). Range 60–86,400.")
                 .with_provider_name("KmsDataKeyReusePeriodSeconds")
                 .build(),
@@ -121,7 +121,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("queue_arn", super::arn())
+            AttributeSchema::provider_populated("queue_arn", carina_aws_types::sqs_queue_arn())
                 .with_description("The Amazon Resource Name (ARN) of the queue. (read-only)")
                 .with_provider_name("QueueArn")
                 .build(),

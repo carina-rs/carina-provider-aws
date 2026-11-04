@@ -1053,6 +1053,11 @@ impl MockService for SqsTagsDeniedService {
 #[derive(Clone, Copy)]
 enum SqsRoundTripCase {
     FifoDefaults,
+    TypedSettings {
+        scope: &'static str,
+        throughput: &'static str,
+        high: bool,
+    },
     RedriveStringCount,
     KmsAlias,
 }
@@ -1092,6 +1097,34 @@ impl MockService for SqsRoundTripService {
                         );
                         assert!(!attributes.contains_key("DeduplicationScope"));
                         assert!(!attributes.contains_key("FifoThroughputLimit"));
+                        FIFO_QUEUE_URL
+                    }
+                    SqsRoundTripCase::TypedSettings {
+                        scope,
+                        throughput,
+                        high,
+                    } => {
+                        assert_eq!(attributes["DeduplicationScope"], scope);
+                        assert_eq!(attributes["FifoThroughputLimit"], throughput);
+                        for (name, low, high_value) in sqs_numeric_settings() {
+                            assert_eq!(
+                                attributes[name],
+                                (if high { high_value } else { low }).to_string()
+                            );
+                        }
+                        let policy: serde_json::Value =
+                            serde_json::from_str(attributes["RedrivePolicy"].as_str().unwrap())
+                                .unwrap();
+                        assert_eq!(policy["maxReceiveCount"], if high { 1000 } else { 1 });
+                        let allow: serde_json::Value = serde_json::from_str(
+                            attributes["RedriveAllowPolicy"].as_str().unwrap(),
+                        )
+                        .unwrap();
+                        assert_eq!(allow["redrivePermission"], "byQueue");
+                        assert_eq!(
+                            allow["sourceQueueArns"][0],
+                            "arn:aws:sqs:ap-northeast-1:123456789012:source.fifo"
+                        );
                         FIFO_QUEUE_URL
                     }
                     SqsRoundTripCase::RedriveStringCount => {
@@ -1159,6 +1192,34 @@ impl MockService for SqsRoundTripService {
                             "FifoThroughputLimit".to_string(),
                             serde_json::json!("perQueue"),
                         );
+                    }
+                    SqsRoundTripCase::TypedSettings {
+                        scope,
+                        throughput,
+                        high,
+                    } => {
+                        attributes.insert("FifoQueue".into(), serde_json::json!("true"));
+                        attributes.insert("DeduplicationScope".into(), serde_json::json!(scope));
+                        attributes
+                            .insert("FifoThroughputLimit".into(), serde_json::json!(throughput));
+                        attributes
+                            .insert("KmsMasterKeyId".into(), serde_json::json!("alias/aws/sqs"));
+                        for (name, low, high_value) in sqs_numeric_settings() {
+                            attributes.insert(
+                                name.into(),
+                                serde_json::json!(
+                                    (if high { high_value } else { low }).to_string()
+                                ),
+                            );
+                        }
+                        attributes.insert("RedrivePolicy".into(), serde_json::json!(serde_json::json!({
+                            "deadLetterTargetArn": "arn:aws:sqs:ap-northeast-1:123456789012:dead.fifo",
+                            "maxReceiveCount": if high { 1000 } else { 1 },
+                        }).to_string()));
+                        attributes.insert("RedriveAllowPolicy".into(), serde_json::json!(serde_json::json!({
+                            "redrivePermission": "byQueue",
+                            "sourceQueueArns": ["arn:aws:sqs:ap-northeast-1:123456789012:source.fifo"],
+                        }).to_string()));
                     }
                     SqsRoundTripCase::RedriveStringCount => {
                         attributes.insert(
@@ -1928,14 +1989,8 @@ async fn fifo_queue_aws_defaults_round_trip_without_becoming_desired() {
         current.attributes.get("content_based_deduplication"),
         Some(&bool_value(true).to_snapshot())
     );
-    assert_eq!(
-        current.attributes.get("deduplication_scope"),
-        Some(&string("queue").to_snapshot())
-    );
-    assert_eq!(
-        current.attributes.get("fifo_throughput_limit"),
-        Some(&string("perQueue").to_snapshot())
-    );
+    assert_api_text(current.attributes.get("deduplication_scope"), "queue");
+    assert_api_text(current.attributes.get("fifo_throughput_limit"), "perQueue");
     assert_no_diff(desired, current);
 }
 
@@ -1973,6 +2028,126 @@ async fn redrive_numeric_string_count_round_trips_as_an_integer() {
             .as_ref()
     );
     assert_no_diff(desired, current);
+}
+
+fn sqs_numeric_settings() -> [(&'static str, i64, i64); 6] {
+    [
+        ("VisibilityTimeout", 0, 43200),
+        ("MessageRetentionPeriod", 60, 1209600),
+        ("DelaySeconds", 0, 900),
+        ("MaximumMessageSize", 1024, 1048576),
+        ("ReceiveMessageWaitTimeSeconds", 0, 20),
+        ("KmsDataKeyReusePeriodSeconds", 60, 86400),
+    ]
+}
+
+#[tokio::test]
+async fn sqs_typed_settings_preserve_enum_wire_spellings_and_decimal_string_packing() {
+    for (scope_dsl, scope, throughput_dsl, throughput, high) in [
+        (
+            "message_group",
+            "messageGroup",
+            "per_message_group_id",
+            "perMessageGroupId",
+            true,
+        ),
+        ("queue", "queue", "per_queue", "perQueue", false),
+        (
+            "message_group",
+            "messageGroup",
+            "per_queue",
+            "perQueue",
+            true,
+        ),
+    ] {
+        let provider =
+            provider_from_service(SqsRoundTripService(SqsRoundTripCase::TypedSettings {
+                scope,
+                throughput,
+                high,
+            }))
+            .await;
+        let mut desired = Resource::with_provider("aws", "sqs.Queue", "typed", None);
+        desired.set_attr("queue_name", string(FIFO_QUEUE_NAME));
+        desired.set_attr("fifo_queue", bool_value(true));
+        desired.set_attr(
+            "deduplication_scope",
+            Value::Concrete(ConcreteValue::enum_identifier(format!(
+                "aws.sqs.Queue.DeduplicationScope.{scope_dsl}"
+            ))),
+        );
+        desired.set_attr(
+            "fifo_throughput_limit",
+            Value::Concrete(ConcreteValue::enum_identifier(format!(
+                "aws.sqs.Queue.FifoThroughputLimit.{throughput_dsl}"
+            ))),
+        );
+        desired.set_attr("kms_master_key_id", string("alias/aws/sqs"));
+        for (name, low, high_value) in sqs_numeric_settings() {
+            let field = match name {
+                "VisibilityTimeout" => "visibility_timeout",
+                "MessageRetentionPeriod" => "message_retention_period",
+                "DelaySeconds" => "delay_seconds",
+                "MaximumMessageSize" => "maximum_message_size",
+                "ReceiveMessageWaitTimeSeconds" => "receive_message_wait_time_seconds",
+                "KmsDataKeyReusePeriodSeconds" => "kms_data_key_reuse_period_seconds",
+                _ => unreachable!(),
+            };
+            desired.set_attr(
+                field,
+                Value::Concrete(ConcreteValue::Int(if high { high_value } else { low })),
+            );
+        }
+        desired.set_attr(
+            "redrive_policy",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                (
+                    "dead_letter_target_arn".into(),
+                    string("arn:aws:sqs:ap-northeast-1:123456789012:dead.fifo"),
+                ),
+                (
+                    "max_receive_count".into(),
+                    Value::Concrete(ConcreteValue::Int(if high { 1000 } else { 1 })),
+                ),
+            ]))),
+        );
+        desired.set_attr(
+            "redrive_allow_policy",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                (
+                    "redrive_permission".into(),
+                    Value::Concrete(ConcreteValue::enum_identifier(
+                        "aws.sqs.Queue.RedriveAllowPolicy.RedrivePermission.by_queue",
+                    )),
+                ),
+                (
+                    "source_queue_arns".into(),
+                    list(&["arn:aws:sqs:ap-northeast-1:123456789012:source.fifo"]),
+                ),
+            ]))),
+        );
+        desired.set_attr("tags", empty_map());
+        carina_core::value::canonicalize_resources_with_schemas(
+            std::slice::from_mut(&mut desired),
+            &schema_registry(),
+        )
+        .expect("canonicalize authored SQS enum identifiers");
+        let id = desired.id.clone();
+        let request = create_request_for_test(desired.clone()).await;
+        let current = create_state_for_test(&provider, &id, request)
+            .await
+            .expect("create queue with typed settings");
+        for (field, api) in [
+            ("deduplication_scope", scope),
+            ("fifo_throughput_limit", throughput),
+        ] {
+            assert!(
+                matches!(current.attributes.get(field), Some(Value::Concrete(ConcreteValue::CanonicalEnum(value))) if value.api_value() == api),
+                "{field} must read back as a canonical enum"
+            );
+        }
+        assert_no_diff(desired, current);
+    }
 }
 
 #[tokio::test]

@@ -117,6 +117,8 @@ impl TryFrom<Args> for ResolvedArgs {
 /// Resource-scoped value refinements and shared type identities.
 #[derive(Debug, Clone, PartialEq)]
 enum TypeOverride {
+    /// Anonymous Int range; preserves the numeric carrier and wire packing.
+    IntRange { min: i64, max: i64 },
     /// Anonymous String refinement; does not introduce an identifier identity.
     RefinedString {
         pattern: &'static str,
@@ -134,6 +136,7 @@ enum TypeOverride {
 struct ValueTypeOverride {
     type_code: String,
     display: MarkdownType,
+    attribute_type: AttributeType,
 }
 
 fn pattern_display(prefix: impl Into<String>, pattern: &str) -> MarkdownType {
@@ -147,7 +150,14 @@ fn pattern_display(prefix: impl Into<String>, pattern: &str) -> MarkdownType {
 /// Rust and documentation use the same exact resource/path lookup. Enum
 /// identities retain their separate Smithy-shape lookup in enum_identity_override.
 fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
-    let (type_code, display) = match resource_type_overrides().get(&(resource, property_path))? {
+    let (type_code, display, attribute_type) = match resource_type_overrides()
+        .get(&(resource, property_path))?
+    {
+        TypeOverride::IntRange { min, max } => (
+            format!("AttributeType::refined_int(None, Some((Some({min}), Some({max}))))"),
+            MarkdownType::text(format!("Int({min}..={max})")),
+            AttributeType::refined_int(None, Some((Some(*min), Some(*max)))),
+        ),
         TypeOverride::RefinedString {
             pattern,
             min_length,
@@ -159,6 +169,12 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             pattern_display(
                 format!("String(length: {min_length}..={max_length}, pattern: "),
                 pattern,
+            ),
+            AttributeType::refined_string(
+                None,
+                Some(pattern.to_string()),
+                Some((Some(*min_length), Some(*max_length))),
+                None,
             ),
         ),
         TypeOverride::AnonymousStringConstructor(constructor) => {
@@ -180,6 +196,7 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                     format!("String(length: {minimum}..={maximum}, pattern: "),
                     pattern,
                 ),
+                attr.clone(),
             )
         }
         TypeOverride::SharedType(row) => {
@@ -207,11 +224,37 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             } else {
                 MarkdownType::text(type_code_to_display(row.constructor_path()))
             };
-            (row.constructor_path().to_string(), display)
+            (row.constructor_path().to_string(), display, attr)
         }
         TypeOverride::EnumIdentity(_) => return None,
     };
-    Some(ValueTypeOverride { type_code, display })
+    Some(ValueTypeOverride {
+        type_code,
+        display,
+        attribute_type,
+    })
+}
+
+impl ValueTypeOverride {
+    fn markdown(
+        self,
+        heading_path: &[String],
+        namespace: &str,
+        enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
+        structs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
+    ) -> Result<MarkdownType> {
+        if matches!(self.attribute_type.raw_shape(), RawShape::Enum { .. }) {
+            discover_markdown_attribute_type(
+                &self.attribute_type,
+                heading_path,
+                namespace,
+                enums,
+                structs,
+            )
+        } else {
+            Ok(self.display)
+        }
+    }
 }
 
 /// Information about a detected enum type
@@ -5918,7 +5961,12 @@ fn generate_markdown_resource(
         let attr_type = if let Some(code) = reference_type_code(res.name, &snake_name) {
             type_code_to_markdown(code)
         } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
-            override_type.display
+            override_type.markdown(
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
         } else if let Some(&override_type) = type_overrides.get(extra.name) {
             discover_markdown_override(
                 override_type,
@@ -6717,7 +6765,7 @@ fn discover_markdown_type(
         );
     }
     if let Some(override_type) = resource_value_override(resource_name, property_path) {
-        return Ok(override_type.display);
+        return override_type.markdown(heading_path, enum_namespace, all_enums, struct_defs);
     }
     // Per-(parent_struct, member) override wins over per-member and Smithy
     // default. Distinguishes a member name shared across structs (aws#302).
@@ -7052,6 +7100,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("iam_oidc_provider_arn") => "IamOidcProviderArn".to_string(),
         s if s.contains("iam_policy_document") => "PolicyDocument".to_string(),
         s if s.contains("cloudfront_hosted_zone_id") => "CloudFrontHostedZoneId".to_string(),
+        "carina_aws_types::sqs_queue_arn()" => "SqsQueueArn".to_string(),
         s if s.contains("route53_hosted_zone_id") => "Route53HostedZoneId".to_string(),
         "super::kms_key_arn()" | "super::super::kms::key::arn()" => "KmsKeyArn".to_string(),
         "carina_aws_types::kms_key_reference()" | "carina_aws_types::kms_key_arn_reference()" => {
@@ -7311,6 +7360,74 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Share AWSCC's established RetentionInDays identity and
                     // validated Int shape through the common catalog.
                     TypeOverride::SharedType(AwsType::LogsLogGroupRetentionInDays),
+                ),
+                (
+                    ("sqs.Queue", "queue_name"),
+                    // Cached sqs.json CreateQueueRequest$QueueName has no
+                    // pattern/length traits; its documentation supplies these
+                    // limits. The FIFO suffix counts within the total 80:
+                    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+                    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queue-message-identifiers.html
+                    // carina 6c5c0c54 / protocol 21 exposes field-presence groups
+                    // and TagsKeyValueCheck, but no value-dependent resource
+                    // rule. Leave the fifo_queue <-> .fifo condition to AWS;
+                    // do not add a provider-local runtime validator.
+                    TypeOverride::RefinedString {
+                        pattern: r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+                        min_length: 1,
+                        max_length: 80,
+                    },
+                ),
+                // QueueAttributeMap values are wire Strings. The model's
+                // CreateQueueRequest$Attributes prose documents these Int
+                // ranges; retain the hand-written decimal-string packing.
+                // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+                (
+                    ("sqs.Queue", "visibility_timeout"),
+                    TypeOverride::IntRange { min: 0, max: 43200 },
+                ),
+                (
+                    ("sqs.Queue", "message_retention_period"),
+                    TypeOverride::IntRange {
+                        min: 60,
+                        max: 1209600,
+                    },
+                ),
+                (
+                    ("sqs.Queue", "delay_seconds"),
+                    TypeOverride::IntRange { min: 0, max: 900 },
+                ),
+                (
+                    ("sqs.Queue", "maximum_message_size"),
+                    TypeOverride::IntRange {
+                        min: 1024,
+                        max: 1048576,
+                    },
+                ),
+                (
+                    ("sqs.Queue", "receive_message_wait_time_seconds"),
+                    TypeOverride::IntRange { min: 0, max: 20 },
+                ),
+                (
+                    ("sqs.Queue", "kms_data_key_reuse_period_seconds"),
+                    TypeOverride::IntRange {
+                        min: 60,
+                        max: 86400,
+                    },
+                ),
+                // Same model member and API source: closed values, with the
+                // catalog owning their identities and API <-> DSL aliases.
+                (
+                    ("sqs.Queue", "deduplication_scope"),
+                    TypeOverride::SharedType(AwsType::SqsQueueDeduplicationScope),
+                ),
+                (
+                    ("sqs.Queue", "fifo_throughput_limit"),
+                    TypeOverride::SharedType(AwsType::SqsQueueFifoThroughputLimit),
+                ),
+                (
+                    ("sqs.Queue", "queue_arn"),
+                    TypeOverride::SharedType(AwsType::SqsQueueArn),
                 ),
                 (
                     ("route53.RecordSet", "Type"),
