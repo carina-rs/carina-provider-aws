@@ -125,6 +125,8 @@ enum TypeOverride {
         min_length: u64,
         max_length: u64,
     },
+    /// Anonymous whole-string pattern with no documented numeric length cap.
+    StringPattern(&'static str),
     /// Share an anonymous String constructor and derive documentation from it.
     AnonymousStringConstructor(&'static str),
     /// Use the identity, validation, and allowed-value metadata of a shared row.
@@ -176,6 +178,13 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                 Some((Some(*min_length), Some(*max_length))),
                 None,
             ),
+        ),
+        TypeOverride::StringPattern(pattern) => (
+            format!(
+                "AttributeType::refined_string(None, Some({pattern:?}.to_string()), None, None)"
+            ),
+            pattern_display("String(pattern: ", pattern),
+            AttributeType::refined_string(None, Some(pattern.to_string()), None, None),
         ),
         TypeOverride::AnonymousStringConstructor(constructor) => {
             let attr = attribute_type_from_code(constructor)
@@ -245,6 +254,20 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             } else {
                 MarkdownType::text(type_code_to_display(row.constructor_path()))
             };
+            let display = if matches!(
+                row,
+                AwsType::AcmCertificateDomainName | AwsType::AcmCertificateSubjectAlternativeName
+            ) {
+                MarkdownType::sequence([
+                    display,
+                    MarkdownType::text(format!(
+                        "; {}",
+                        carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE
+                    )),
+                ])
+            } else {
+                display
+            };
             (row.constructor_path().to_string(), display, attr)
         }
         TypeOverride::EnumIdentity(_) => return None,
@@ -276,6 +299,23 @@ impl ValueTypeOverride {
             Ok(self.display)
         }
     }
+}
+
+/// Preserve a hand-written unordered list while refining its exact element path.
+fn unordered_string_list_value_override(
+    resource: &str,
+    property_path: &str,
+    constructor: &str,
+) -> Option<ValueTypeOverride> {
+    if constructor != "AttributeType::unordered_list(AttributeType::string())" {
+        return None;
+    }
+    let element = resource_value_override(resource, &format!("{property_path}[]"))?;
+    Some(ValueTypeOverride {
+        type_code: format!("AttributeType::unordered_list({})", element.type_code),
+        display: MarkdownType::list(element.display),
+        attribute_type: AttributeType::unordered_list(element.attribute_type),
+    })
 }
 
 /// Information about a detected enum type
@@ -651,6 +691,7 @@ fn emit_replacement_builder(
             {
                 Some(
                     TypeOverride::RefinedString { .. }
+                    | TypeOverride::StringPattern(_)
                     | TypeOverride::AnonymousStringConstructor(_),
                 ) => true,
                 Some(TypeOverride::SharedType(row)) => {
@@ -2835,6 +2876,13 @@ fn resolve_type(
     }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
+        if let Some(list) = unordered_string_list_value_override(
+            ctx.resource_name,
+            &ctx.property_path,
+            override_type,
+        ) {
+            return Ok((list.type_code, None));
+        }
         return Ok((override_type.to_string(), None));
     }
 
@@ -6806,6 +6854,11 @@ fn discover_markdown_type(
     }
     // Check type overrides
     if let Some(&override_type) = type_overrides.get(field_name) {
+        if let Some(list) =
+            unordered_string_list_value_override(resource_name, property_path, override_type)
+        {
+            return Ok(list.display);
+        }
         return discover_markdown_override(
             override_type,
             heading_path,
@@ -7325,10 +7378,161 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 /// markers. EnumIdentity entries use their existing Smithy shape/member keys.
 /// Use this when a property needs resource-specific type treatment that differs
 /// from global overrides or pattern-based inference.
+// acm.json DomainNameString: remove (?!-) by requiring each label to start
+// with an alphanumeric. Interior labels are 1..63, the final label is 2..63.
+// Unlike core's wildcard_domain_name(), ACM's pattern excludes a terminal dot.
+const ACM_DOMAIN_NAME_PATTERN: &str = carina_aws_types::ACM_CERTIFICATE_DOMAIN_NAME_PATTERN;
+
+// ResourceRecord.{Name,Value} are DNS names, not hostnames. ACM publishes
+// _token labels, with terminal dots in its DNS-validation examples. Accept
+// both absolute and unqualified spellings; impose no undocumented total cap.
+// https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
+// https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
+const ACM_VALIDATION_RECORD_PATTERN: &str = r"^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.?\z";
+
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
             HashMap::from([
+                (
+                    ("acm.Certificate", "domain_name"),
+                    // RequestCertificateRequest$DomainName -> DomainNameString.
+                    // The member's Common Name prose narrows the shape's 253
+                    // limit to 64 octets; the ASCII pattern makes bytes = chars.
+                    // https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html
+                    // Request-only Punycode: positions 3–4 of a label may be
+                    // -- only for xn--; that A-label must pass IDNA validation.
+                    // https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
+                    TypeOverride::SharedType(AwsType::AcmCertificateDomainName),
+                ),
+                (
+                    ("acm.Certificate", "subject_alternative_names[]"),
+                    // RequestCertificateRequest$SubjectAlternativeNames ->
+                    // DomainList$member -> DomainNameString, 1..253 octets.
+                    // The same RequestCertificate docs cap each label at 63.
+                    // Apply the same request-only IDNA validator to each SAN:
+                    // https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
+                    TypeOverride::SharedType(AwsType::AcmCertificateSubjectAlternativeName),
+                ),
+                (
+                    ("acm.Certificate", "domain_validation_options[].domain_name"),
+                    // DomainValidation$DomainName -> DomainNameString. Read
+                    // domains retain the full 253 cap, without the request cap.
+                    // https://docs.aws.amazon.com/acm/latest/APIReference/API_DomainValidation.html
+                    TypeOverride::RefinedString {
+                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        min_length: 1,
+                        max_length: 253,
+                    },
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "domain_validation_options[].validation_domain",
+                    ),
+                    // DomainValidation$ValidationDomain -> DomainNameString.
+                    TypeOverride::RefinedString {
+                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        min_length: 1,
+                        max_length: 253,
+                    },
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].domain_name",
+                    ),
+                    // RenewalSummary reuses the same DomainValidation shape.
+                    TypeOverride::RefinedString {
+                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        min_length: 1,
+                        max_length: 253,
+                    },
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].validation_domain",
+                    ),
+                    TypeOverride::RefinedString {
+                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        min_length: 1,
+                        max_length: 253,
+                    },
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "domain_validation_options[].resource_record.name",
+                    ),
+                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "domain_validation_options[].resource_record.value",
+                    ),
+                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].resource_record.name",
+                    ),
+                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].resource_record.value",
+                    ),
+                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "domain_validation_options[].http_redirect.redirect_from",
+                    ),
+                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "domain_validation_options[].http_redirect.redirect_to",
+                    ),
+                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].http_redirect.redirect_from",
+                    ),
+                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                ),
+                (
+                    (
+                        "acm.Certificate",
+                        "renewal_summary.domain_validation_options[].http_redirect.redirect_to",
+                    ),
+                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                ),
+                (
+                    ("acm.Certificate", "certificate_arn"),
+                    TypeOverride::SharedType(AwsType::AcmCertificateArn),
+                ),
+                (
+                    ("acm.Certificate", "key_algorithm"),
+                    // RequestCertificate's KeyAlgorithm prose excludes the
+                    // other four Smithy enum values: imported certificates
+                    // only. resource_defs::acm_resources requests certificates;
+                    // ACM reads canonicalize known hyphenated spellings back
+                    // to these underscore wire values, preserving future ones.
+                    // https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html
+                    TypeOverride::SharedType(AwsType::AcmCertificateKeyAlgorithm),
+                ),
+                // RenewalSummary$UpdatedAt -> TStamp stays String: its SDK
+                // DateTime.to_string() spelling is not S3LifecycleDate's fixed
+                // UTC seconds-only grammar. Do not narrow an output by guess.
                 (
                     ("iam.Role", "role_name"),
                     // carina-provider-aws/tests/fixtures/smithy/iam.json:
@@ -11296,6 +11500,10 @@ mod tests {
                 "com.amazonaws.acm#DomainValidation": {
                   "type": "structure",
                   "members": {
+                    "HttpRedirect": {
+                      "target": "com.amazonaws.acm#HttpRedirect",
+                      "traits": {}
+                    },
                     "ResourceRecord": {
                       "target": "com.amazonaws.acm#ResourceRecord",
                       "traits": {}
@@ -11304,6 +11512,14 @@ mod tests {
                       "target": "com.amazonaws.acm#ValidationMethod",
                       "traits": {}
                     }
+                  },
+                  "traits": {}
+                },
+                "com.amazonaws.acm#HttpRedirect": {
+                  "type": "structure",
+                  "members": {
+                    "RedirectFrom": { "target": "smithy.api#String", "traits": {} },
+                    "RedirectTo": { "target": "smithy.api#String", "traits": {} }
                   },
                   "traits": {}
                 },
@@ -11329,6 +11545,10 @@ mod tests {
                 "com.amazonaws.acm#RenewalSummary": {
                   "type": "structure",
                   "members": {
+                    "UpdatedAt": {
+                      "target": "com.amazonaws.acm#TStamp",
+                      "traits": { "smithy.api#required": {} }
+                    },
                     "DomainValidationOptions": {
                       "target": "com.amazonaws.acm#DomainValidationList",
                       "traits": {}
@@ -11336,6 +11556,7 @@ mod tests {
                   },
                   "traits": {}
                 },
+                "com.amazonaws.acm#TStamp": { "type": "timestamp" },
                 "com.amazonaws.acm#ValidationMethod": {
                   "type": "enum",
                   "members": {
@@ -11464,6 +11685,83 @@ mod tests {
         );
         assert!(!markdown.contains("### CertificateOptions"), "{markdown}");
         assert!(!markdown.contains("### DomainValidation\n"), "{markdown}");
+    }
+
+    #[test]
+    fn acm_codegen_refinements_preserve_send_types_and_unordered_sans() {
+        let resource = resource_defs::acm_resources().remove(0);
+        let model = markdown_read_shape_override_model();
+        let attrs = collect_resource_attributes(&resource, &model)
+            .unwrap()
+            .attrs;
+        for (name, expected) in [
+            ("domain_name", SendFieldType::String),
+            ("key_algorithm", SendFieldType::Enum),
+        ] {
+            assert_eq!(
+                attrs
+                    .iter()
+                    .find(|attr| attr.snake_name == name)
+                    .unwrap()
+                    .send_type,
+                expected
+            );
+        }
+        let sans = attrs
+            .iter()
+            .find(|attr| attr.snake_name == "subject_alternative_names")
+            .unwrap();
+        assert_eq!(
+            sans.type_code,
+            "AttributeType::unordered_list(carina_aws_types::acm_certificate_subject_alternative_name())"
+        );
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert!(
+            generated.contains("StructField::required(\"updated_at\", AttributeType::string())"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("carina_aws_types::acm_certificate_arn()"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("carina_aws_types::acm_certificate_key_algorithm()"),
+            "{generated}"
+        );
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        for expected in [
+            "length: 1..=64",
+            "length: 1..=253",
+            carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE,
+            "aws.acm.Certificate.KeyAlgorithm.rsa_2048",
+            "aws.acm.Certificate.KeyAlgorithm.ec_prime256v1",
+            "aws.acm.Certificate.KeyAlgorithm.ec_secp384r1",
+        ] {
+            assert!(
+                markdown.contains(expected),
+                "missing {expected}: {markdown}"
+            );
+        }
+        assert!(!markdown.contains("aws.acm.Certificate.KeyAlgorithm.rsa_4096"));
+    }
+
+    #[test]
+    fn acm_codegen_emits_all_four_nested_validation_url_constructors() {
+        let resource = resource_defs::acm_resources().remove(0);
+        let generated =
+            generate_resource(&resource, &markdown_read_shape_override_model()).unwrap();
+        assert_eq!(
+            generated
+                .matches("carina_aws_types::acm_certificate_validation_url()")
+                .count(),
+            4,
+            "{generated}"
+        );
     }
 
     #[test]

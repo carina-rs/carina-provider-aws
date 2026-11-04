@@ -1189,7 +1189,16 @@ mod tests {
 
     fn probe_texts(scalar: CallbackScalar) -> &'static [&'static str] {
         match scalar {
-            CallbackScalar::String => &["", "__carina_sdk_bridge_probe__", "not-an-arn", "0"],
+            CallbackScalar::String => &[
+                "",
+                "__carina_sdk_bridge_probe__",
+                "not-an-arn",
+                "0",
+                "xn--carina588.carina-rs.dev",
+                "ab--carina588.carina-rs.dev",
+                "carina588-ok.carina-rs.dev",
+                "a--b.example.com",
+            ],
             CallbackScalar::Int => &["0", "-1", "1", "9223372036854775807"],
             CallbackScalar::Float => &["0", "-1", "1", "1.5"],
         }

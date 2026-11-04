@@ -379,6 +379,26 @@ fn certificate_detail_read_fields(
     let string_value =
         |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
     let enum_value = |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+    // carina-test-004, ap-northeast-1, 2026-11-04: DescribeCertificate returns
+    // hyphenated algorithms although RequestCertificate/Smithy use underscores.
+    // Normalize known members at the read boundary; preserve future spellings.
+    let extracted = extracted.map_key_algorithm(|algorithm| {
+        algorithm.map(|value| match value {
+            Value::Concrete(ConcreteValue::String(algorithm)) => {
+                string_value(match algorithm.expose_plaintext() {
+                    "RSA-1024" => "RSA_1024",
+                    "RSA-2048" => "RSA_2048",
+                    "RSA-3072" => "RSA_3072",
+                    "RSA-4096" => "RSA_4096",
+                    "EC-prime256v1" => "EC_prime256v1",
+                    "EC-secp384r1" => "EC_secp384r1",
+                    "EC-secp521r1" => "EC_secp521r1",
+                    other => other,
+                })
+            }
+            other => other,
+        })
+    });
     let options = cert.options().and_then(|options| {
         let mut fields = IndexMap::new();
         #[allow(deprecated)]
@@ -923,6 +943,38 @@ mod tests {
             b = b.domain_validation_options(dv);
         }
         b.build()
+    }
+
+    #[test]
+    fn acm_read_projection_canonicalizes_the_probed_key_algorithm_spelling() {
+        for (read, expected) in [
+            ("RSA-1024", "RSA_1024"),
+            ("RSA-2048", "RSA_2048"),
+            ("RSA-3072", "RSA_3072"),
+            ("RSA-4096", "RSA_4096"),
+            ("EC-prime256v1", "EC_prime256v1"),
+            ("EC-secp384r1", "EC_secp384r1"),
+            ("EC-secp521r1", "EC_secp521r1"),
+            ("RSA_2048", "RSA_2048"),
+            ("EC_prime256v1", "EC_prime256v1"),
+            ("POST-QUANTUM-2048", "POST-QUANTUM-2048"),
+            ("RSA-8192", "RSA-8192"),
+            ("EC-new-curve", "EC-new-curve"),
+        ] {
+            // Check before state canonicalization, which could otherwise hide
+            // missing read mappings for the three requestable algorithms.
+            let cert = CertificateDetail::builder()
+                .domain_name("example.com")
+                .key_algorithm(KeyAlgorithm::from(read))
+                .build();
+            assert_eq!(cert.key_algorithm().unwrap().as_str(), read);
+            let fields = certificate_detail_read_fields(&cert);
+            assert_eq!(
+                fields.extracted.key_algorithm(),
+                Some(&Value::Concrete(ConcreteValue::String(expected.into()),)),
+                "read spelling {read}"
+            );
+        }
     }
 
     #[test]
