@@ -312,47 +312,97 @@ pub(crate) fn validate_sqs_queue_inputs(inputs: &DesiredInputs<'_>) -> ProviderR
         return Ok(());
     }
 
-    validate_sqs_queue_attributes(inputs.id(), |name| {
-        Ok(inputs.attribute(name).map(QueueValidationValue::from))
+    validate_sqs_queue_attributes(inputs.id(), |name, check| {
+        Ok(check(queue_validation_attribute(inputs, name)))
     })
 }
 
 /// The distinctions cross-field validation needs, without owning input values.
-enum QueueValidationValue {
+enum QueueValidationValue<'a> {
     Bool(bool),
+    String(&'a str),
+    ListLen(usize),
     Scalar,
     Other,
 }
 
-impl From<&DesiredValue> for QueueValidationValue {
-    fn from(value: &DesiredValue) -> Self {
+impl<'a> From<&'a DesiredValue> for QueueValidationValue<'a> {
+    fn from(value: &'a DesiredValue) -> Self {
         match value {
             DesiredValue::Known(DesiredScalar::Bool(value)) => Self::Bool(*value),
+            DesiredValue::Known(DesiredScalar::String(value)) => {
+                Self::String(value.expose_plaintext())
+            }
             DesiredValue::Known(_) => Self::Scalar,
+            DesiredValue::List(values) => Self::ListLen(values.iter().count()),
             _ => Self::Other,
         }
     }
 }
 
+fn queue_validation_attribute<'a>(
+    inputs: &'a DesiredInputs<'_>,
+    path: &str,
+) -> Option<QueueValidationValue<'a>> {
+    let mut parts = path.split('.');
+    let mut value = inputs.attribute(parts.next()?);
+    for part in parts {
+        value = match value {
+            Some(DesiredValue::Map(fields)) => fields.get(part),
+            // A deferred parent does not make its children definitively absent.
+            Some(_) => return Some(QueueValidationValue::Other),
+            None => return None,
+        };
+    }
+    value.map(QueueValidationValue::from)
+}
+
+// Evaluate each predicate while its borrowed projection is alive. In particular,
+// update validation must not retain strings from a temporary normalization view.
+type QueueValidationCheck = fn(Option<QueueValidationValue<'_>>) -> bool;
+
 fn validate_sqs_queue_update_inputs(to: &crate::helpers::UpdateResource) -> ProviderResult<()> {
-    validate_sqs_queue_attributes(&to.id, |name| {
+    validate_sqs_queue_attributes(&to.id, |path, check| {
+        let name = path
+            .split('.')
+            .next()
+            .expect("validation paths have a root");
         let mut resource = to.materialize(&[name])?;
         let desired = NativeDesiredNormalization::from_core(&mut resource)?;
-        Ok(desired
-            .inputs()
-            .attribute(name)
-            .map(QueueValidationValue::from))
+        Ok(check(queue_validation_attribute(&desired.inputs(), path)))
     })
+}
+
+fn defer_unavailable_queue_check(result: ProviderResult<bool>) -> ProviderResult<bool> {
+    match result {
+        // New create-only checks may need an untouched historical secret whose
+        // plaintext is unavailable. Leave its hash historical and the check
+        // undecided; these inputs are not sent by SetQueueAttributes.
+        Err(error)
+            if error.detail().cause().is_some_and(|cause| {
+                cause.is::<carina_core::resource::UnavailableSecretError>()
+            }) =>
+        {
+            Ok(false)
+        }
+        result => result,
+    }
 }
 
 fn validate_sqs_queue_attributes(
     id: &ResourceId,
-    mut attribute: impl FnMut(&str) -> ProviderResult<Option<QueueValidationValue>>,
+    mut attribute: impl FnMut(&str, QueueValidationCheck) -> ProviderResult<bool>,
 ) -> ProviderResult<()> {
-    if matches!(
-        attribute("kms_data_key_reuse_period_seconds")?,
-        Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
-    ) && attribute("kms_master_key_id")?.is_none()
+    if attribute("kms_data_key_reuse_period_seconds", |value| {
+        matches!(
+            value,
+            Some(
+                QueueValidationValue::Bool(_)
+                    | QueueValidationValue::String(_)
+                    | QueueValidationValue::Scalar
+            )
+        )
+    })? && attribute("kms_master_key_id", |value| value.is_none())?
     {
         return Err(ProviderError::invalid_input(
             "sqs.Queue attribute kms_data_key_reuse_period_seconds requires kms_master_key_id",
@@ -360,26 +410,36 @@ fn validate_sqs_queue_attributes(
         .for_resource(id.clone()));
     }
 
-    let fifo_is_definitively_standard = matches!(
-        attribute("fifo_queue")?,
-        None | Some(QueueValidationValue::Bool(false))
-    );
+    let fifo_is_definitively_standard = attribute("fifo_queue", |value| {
+        matches!(value, None | Some(QueueValidationValue::Bool(false)))
+    })?;
     if fifo_is_definitively_standard {
-        let content_dedup_enabled = matches!(
-            attribute("content_based_deduplication")?,
-            Some(QueueValidationValue::Bool(true))
-        );
+        let content_dedup_enabled = attribute("content_based_deduplication", |value| {
+            matches!(value, Some(QueueValidationValue::Bool(true)))
+        })?;
         let unsupported = if content_dedup_enabled {
             Some("content_based_deduplication")
-        } else if matches!(
-            attribute("deduplication_scope")?,
-            Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
-        ) {
+        } else if attribute("deduplication_scope", |value| {
+            matches!(
+                value,
+                Some(
+                    QueueValidationValue::Bool(_)
+                        | QueueValidationValue::String(_)
+                        | QueueValidationValue::Scalar
+                )
+            )
+        })? {
             Some("deduplication_scope")
-        } else if matches!(
-            attribute("fifo_throughput_limit")?,
-            Some(QueueValidationValue::Bool(_) | QueueValidationValue::Scalar)
-        ) {
+        } else if attribute("fifo_throughput_limit", |value| {
+            matches!(
+                value,
+                Some(
+                    QueueValidationValue::Bool(_)
+                        | QueueValidationValue::String(_)
+                        | QueueValidationValue::Scalar
+                )
+            )
+        })? {
             Some("fifo_throughput_limit")
         } else {
             None
@@ -390,6 +450,85 @@ fn validate_sqs_queue_attributes(
             ))
             .for_resource(id.clone()));
         }
+    }
+
+    // FIFO names require the suffix, and standard names cannot use it:
+    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
+    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queue-message-identifiers.html
+    if fifo_is_definitively_standard {
+        if defer_unavailable_queue_check(attribute("queue_name", |value| {
+            matches!(
+                value, Some(QueueValidationValue::String(name)) if name.ends_with(".fifo")
+            )
+        }))? {
+            return Err(ProviderError::invalid_input(
+                "sqs.Queue attribute queue_name must not end with .fifo when fifo_queue is false or absent",
+            ).for_resource(id.clone()));
+        }
+    } else if attribute("fifo_queue", |value| {
+        matches!(value, Some(QueueValidationValue::Bool(true)))
+    })? && defer_unavailable_queue_check(attribute("queue_name", |value| {
+        matches!(
+            value, Some(QueueValidationValue::String(name)) if !name.ends_with(".fifo")
+        )
+    }))? {
+        return Err(ProviderError::invalid_input(
+            "sqs.Queue attribute queue_name must end with .fifo when fifo_queue = true",
+        )
+        .for_resource(id.clone()));
+    }
+
+    // CreateQueue permits perMessageGroupId only with messageGroup scope.
+    if defer_unavailable_queue_check(attribute("fifo_throughput_limit", |value| {
+        matches!(
+            value,
+            Some(QueueValidationValue::String("perMessageGroupId"))
+        )
+    }))? && defer_unavailable_queue_check(attribute(
+        "deduplication_scope",
+        |value| match value {
+            None => true,
+            Some(QueueValidationValue::String(scope)) => scope != "messageGroup",
+            _ => false,
+        },
+    ))? {
+        return Err(ProviderError::invalid_input(
+            "sqs.Queue attribute fifo_throughput_limit requires deduplication_scope = messageGroup when set to perMessageGroupId",
+        ).for_resource(id.clone()));
+    }
+
+    // CreateQueue limits sourceQueueArns to byQueue and at most ten entries.
+    // Real AWS SetQueueAttributes also rejects an empty list for byQueue;
+    // require a non-empty list while leaving deferred lists undecided.
+    // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-configure-queue-parameters.html
+    let by_queue = attribute("redrive_allow_policy.redrive_permission", |value| {
+        matches!(value, Some(QueueValidationValue::String("byQueue")))
+    })?;
+    if by_queue {
+        if attribute("redrive_allow_policy.source_queue_arns", |value| {
+            matches!(value, None | Some(QueueValidationValue::ListLen(0)))
+        })? {
+            return Err(ProviderError::invalid_input(
+                "sqs.Queue attribute redrive_allow_policy.redrive_permission requires redrive_allow_policy.source_queue_arns to be non-empty when set to byQueue",
+            ).for_resource(id.clone()));
+        }
+        if attribute("redrive_allow_policy.source_queue_arns", |value| {
+            matches!(
+                value, Some(QueueValidationValue::ListLen(count)) if count > 10
+            )
+        })? {
+            return Err(ProviderError::invalid_input(
+                "sqs.Queue attribute redrive_allow_policy.source_queue_arns must contain at most 10 items",
+            ).for_resource(id.clone()));
+        }
+    } else if attribute("redrive_allow_policy.redrive_permission", |value| {
+        matches!(value, None | Some(QueueValidationValue::String(_)))
+    })? && attribute("redrive_allow_policy.source_queue_arns", |value| {
+        matches!(value, Some(QueueValidationValue::ListLen(_)))
+    })? {
+        return Err(ProviderError::invalid_input(
+            "sqs.Queue attribute redrive_allow_policy.source_queue_arns may only be set when redrive_allow_policy.redrive_permission = byQueue",
+        ).for_resource(id.clone()));
     }
 
     Ok(())
@@ -1100,6 +1239,354 @@ mod tests {
             Box::new(Value::Concrete(ConcreteValue::String("historical".into()))),
         )))
         .expect("secret fixture should redact")
+    }
+
+    fn string(value: &str) -> Value {
+        Value::Concrete(ConcreteValue::String(value.into()))
+    }
+
+    fn map(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+        Value::Concrete(ConcreteValue::Map(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key.into(), value))
+                .collect(),
+        ))
+    }
+
+    fn source_queue_arns(count: usize) -> Value {
+        Value::Concrete(ConcreteValue::List(
+            (0..count)
+                .map(|i| string(&format!("arn:aws:sqs:us-east-1:123456789012:source-{i}")))
+                .collect(),
+        ))
+    }
+
+    fn invalid_cross_field_inputs() -> Vec<(Vec<(&'static str, Value)>, &'static str)> {
+        vec![
+            (
+                vec![
+                    ("queue_name", string("private-name")),
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                ],
+                "queue_name must end with .fifo",
+            ),
+            (
+                vec![
+                    ("queue_name", string("private-name.fifo")),
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(false))),
+                ],
+                "queue_name must not end with .fifo",
+            ),
+            (
+                vec![("queue_name", string("private-name.fifo"))],
+                "queue_name must not end with .fifo",
+            ),
+            (
+                vec![
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                    ("fifo_throughput_limit", string("perMessageGroupId")),
+                    ("deduplication_scope", string("queue")),
+                ],
+                "fifo_throughput_limit requires deduplication_scope = messageGroup",
+            ),
+            (
+                vec![
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                    ("fifo_throughput_limit", string("perMessageGroupId")),
+                ],
+                "fifo_throughput_limit requires deduplication_scope = messageGroup",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([
+                        ("redrive_permission", string("allowAll")),
+                        ("source_queue_arns", source_queue_arns(1)),
+                    ]),
+                )],
+                "redrive_allow_policy.source_queue_arns may only be set",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([
+                        ("redrive_permission", string("denyAll")),
+                        ("source_queue_arns", source_queue_arns(0)),
+                    ]),
+                )],
+                "redrive_allow_policy.source_queue_arns may only be set",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([("source_queue_arns", source_queue_arns(1))]),
+                )],
+                "redrive_allow_policy.source_queue_arns may only be set",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([
+                        ("redrive_permission", string("byQueue")),
+                        ("source_queue_arns", source_queue_arns(0)),
+                    ]),
+                )],
+                "redrive_allow_policy.redrive_permission requires redrive_allow_policy.source_queue_arns",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([("redrive_permission", string("byQueue"))]),
+                )],
+                "redrive_allow_policy.redrive_permission requires redrive_allow_policy.source_queue_arns",
+            ),
+            (
+                vec![(
+                    "redrive_allow_policy",
+                    map([
+                        ("redrive_permission", string("byQueue")),
+                        ("source_queue_arns", source_queue_arns(11)),
+                    ]),
+                )],
+                "redrive_allow_policy.source_queue_arns must contain at most 10 items",
+            ),
+        ]
+    }
+
+    #[test]
+    fn sqs_cross_field_validation_rejects_known_conflicts() {
+        for (attributes, message) in invalid_cross_field_inputs() {
+            let mut resource = queue_resource();
+            for (name, value) in attributes {
+                resource.set_attr(name, value);
+            }
+            let desired = NativeDesiredNormalization::from_core(&mut resource).unwrap();
+            let error = validate_sqs_queue_inputs(&desired.inputs())
+                .expect_err("known SQS conflicts must fail before send");
+            assert!(matches!(error, ProviderError::InvalidInput(_)));
+            assert!(error.to_string().contains(message), "{error:?}");
+            assert!(!error.to_string().contains("private-name"));
+            assert!(!error.to_string().contains("arn:aws:sqs"));
+        }
+    }
+
+    #[test]
+    fn sqs_cross_field_update_validation_rejects_reconstructed_conflicts() {
+        use carina_core::provider::PatchOp;
+
+        for (mut attributes, message) in invalid_cross_field_inputs() {
+            let (name, value) = attributes.pop().unwrap();
+            let from = crate::test_existing_state(
+                queue_resource().id,
+                attributes
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value))
+                    .collect(),
+            )
+            .to_snapshot();
+            let patch = UpdatePatch {
+                ops: vec![PatchOp::Add {
+                    key: name.into(),
+                    value,
+                }],
+            };
+            let to = crate::helpers::UpdateResource::new(&from, &patch);
+            let error = validate_sqs_queue_update_inputs(&to)
+                .expect_err("updates must validate both historical and patched SQS inputs");
+            assert!(matches!(error, ProviderError::InvalidInput(_)));
+            assert!(error.to_string().contains(message), "{error:?}");
+            assert!(to.materialized_attributes().contains_key(name));
+        }
+    }
+
+    fn assert_valid_cross_field_inputs(attributes: Vec<(&str, Value)>) {
+        let mut resource = queue_resource();
+        for (name, value) in attributes {
+            resource.set_attr(name, value);
+        }
+        let original = resource.attributes.clone();
+        let mut desired = NativeDesiredNormalization::from_core(&mut resource).unwrap();
+        crate::AwsNormalizer
+            .normalize_desired_view(&mut desired.view())
+            .expect("valid and undecidable combinations must pass plan-time normalization");
+        desired
+            .finish()
+            .expect("validation must preserve opaque leaves");
+        assert_eq!(resource.attributes, original);
+        let from = crate::test_existing_state(resource.id, HashMap::new()).to_snapshot();
+        let patch = UpdatePatch {
+            ops: resource
+                .attributes
+                .into_iter()
+                .map(|(key, value)| carina_core::provider::PatchOp::Add { key, value })
+                .collect(),
+        };
+        let to = crate::helpers::UpdateResource::new(&from, &patch);
+        validate_sqs_queue_update_inputs(&to).expect("valid update inputs must pass");
+    }
+
+    #[test]
+    fn sqs_cross_field_validation_accepts_valid_combinations() {
+        for (name, fifo) in [
+            ("valid", None),
+            ("valid", Some(false)),
+            ("valid.fifo", Some(true)),
+        ] {
+            let mut attributes = vec![("queue_name", string(name))];
+            if let Some(fifo) = fifo {
+                attributes.push(("fifo_queue", Value::Concrete(ConcreteValue::Bool(fifo))));
+            }
+            assert_valid_cross_field_inputs(attributes);
+        }
+        for fifo in [false, true] {
+            assert_valid_cross_field_inputs(vec![(
+                "fifo_queue",
+                Value::Concrete(ConcreteValue::Bool(fifo)),
+            )]);
+        }
+        for (limit, scope) in [
+            ("perQueue", None),
+            ("perQueue", Some("queue")),
+            ("perQueue", Some("messageGroup")),
+            ("perMessageGroupId", Some("messageGroup")),
+        ] {
+            let mut attributes = vec![
+                ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                ("fifo_throughput_limit", string(limit)),
+            ];
+            if let Some(scope) = scope {
+                attributes.push(("deduplication_scope", string(scope)));
+            }
+            assert_valid_cross_field_inputs(attributes);
+        }
+        for permission in ["allowAll", "denyAll"] {
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([("redrive_permission", string(permission))]),
+            )]);
+        }
+        for count in [1, 10] {
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([
+                    ("redrive_permission", string("byQueue")),
+                    ("source_queue_arns", source_queue_arns(count)),
+                ]),
+            )]);
+        }
+    }
+
+    #[test]
+    fn sqs_cross_field_validation_accepts_unknown_and_deferred_values() {
+        let unknown = plan_time_unknown();
+        let deferred = Value::Deferred(DeferredValue::Secret(Box::new(string("opaque"))));
+        for opaque in [unknown, deferred] {
+            for fifo in [false, true] {
+                assert_valid_cross_field_inputs(vec![
+                    ("queue_name", opaque.clone()),
+                    ("fifo_queue", Value::Concrete(ConcreteValue::Bool(fifo))),
+                ]);
+            }
+            for name in ["valid", "valid.fifo"] {
+                assert_valid_cross_field_inputs(vec![
+                    ("queue_name", string(name)),
+                    ("fifo_queue", opaque.clone()),
+                ]);
+            }
+            assert_valid_cross_field_inputs(vec![
+                ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                ("fifo_throughput_limit", string("perMessageGroupId")),
+                ("deduplication_scope", opaque.clone()),
+            ]);
+            assert_valid_cross_field_inputs(vec![
+                ("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+                ("fifo_throughput_limit", opaque.clone()),
+                ("deduplication_scope", string("queue")),
+            ]);
+            assert_valid_cross_field_inputs(vec![("redrive_allow_policy", opaque.clone())]);
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([
+                    ("redrive_permission", opaque.clone()),
+                    ("source_queue_arns", source_queue_arns(11)),
+                ]),
+            )]);
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([
+                    ("redrive_permission", opaque.clone()),
+                    ("source_queue_arns", source_queue_arns(0)),
+                ]),
+            )]);
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([("redrive_permission", opaque.clone())]),
+            )]);
+            for permission in ["byQueue", "allowAll", "denyAll"] {
+                assert_valid_cross_field_inputs(vec![(
+                    "redrive_allow_policy",
+                    map([
+                        ("redrive_permission", string(permission)),
+                        ("source_queue_arns", opaque.clone()),
+                    ]),
+                )]);
+            }
+            assert_valid_cross_field_inputs(vec![(
+                "redrive_allow_policy",
+                map([
+                    ("redrive_permission", string("byQueue")),
+                    (
+                        "source_queue_arns",
+                        Value::Concrete(ConcreteValue::List(vec![opaque])),
+                    ),
+                ]),
+            )]);
+        }
+        assert_valid_cross_field_inputs(vec![(
+            "redrive_allow_policy",
+            map([
+                ("redrive_permission", string("byQueue")),
+                (
+                    "source_queue_arns",
+                    Value::Deferred(DeferredValue::Secret(Box::new(source_queue_arns(0)))),
+                ),
+            ]),
+        )]);
+    }
+
+    #[test]
+    fn sqs_cross_field_validation_reads_canonical_enum_api_values() {
+        for (scope, valid) in [("queue", false), ("messageGroup", true)] {
+            let scope =
+                crate::test_rootless_type(carina_aws_types::sqs_queue_deduplication_scope())
+                    .canonicalize_state(string(scope))
+                    .into_present()
+                    .unwrap();
+            let throughput =
+                crate::test_rootless_type(carina_aws_types::sqs_queue_fifo_throughput_limit())
+                    .canonicalize_state(string("perMessageGroupId"))
+                    .into_present()
+                    .unwrap();
+            let mut resource = queue_resource()
+                .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(true)))
+                .with_attribute("deduplication_scope", scope)
+                .with_attribute("fifo_throughput_limit", throughput);
+            let desired = NativeDesiredNormalization::from_core(&mut resource).unwrap();
+            assert_eq!(validate_sqs_queue_inputs(&desired.inputs()).is_ok(), valid);
+        }
+        for (permission, valid) in [("allowAll", false), ("denyAll", false), ("byQueue", true)] {
+            let policy = crate::test_rootless_type(carina_aws_types::sqs_redrive_allow_policy())
+                .canonicalize_state(map([
+                    ("redrive_permission", string(permission)),
+                    ("source_queue_arns", source_queue_arns(1)),
+                ]))
+                .into_present()
+                .unwrap();
+            let mut resource = queue_resource().with_attribute("redrive_allow_policy", policy);
+            let desired = NativeDesiredNormalization::from_core(&mut resource).unwrap();
+            assert_eq!(validate_sqs_queue_inputs(&desired.inputs()).is_ok(), valid);
+        }
     }
 
     #[test]

@@ -66,6 +66,51 @@ mod guest {
     #[test]
     fn guest_create_runs_sqs_and_nat_cross_field_validators_before_send() {
         let (provider, service) = validation_fixture();
+        let queue = |name: &str, fifo| {
+            BTreeMap::from([
+                ("queue_name".into(), proto::Value::String(name.into())),
+                ("fifo_queue".into(), proto::Value::Bool(fifo)),
+            ])
+        };
+        let redrive = |permission: &str, count: usize| {
+            let fields = BTreeMap::from([
+                (
+                    "redrive_permission".into(),
+                    proto::Value::String(permission.into()),
+                ),
+                (
+                    "source_queue_arns".into(),
+                    proto::Value::List(
+                        (0..count)
+                            .map(|i| {
+                                proto::Value::String(format!(
+                                    "arn:aws:sqs:us-east-1:123456789012:source-{i}"
+                                ))
+                            })
+                            .collect(),
+                    ),
+                ),
+            ]);
+            BTreeMap::from([
+                (
+                    "queue_name".into(),
+                    proto::Value::String("standard-queue".into()),
+                ),
+                ("redrive_allow_policy".into(), proto::Value::Map(fields)),
+            ])
+        };
+        let throughput = |scope: &str| {
+            let mut attributes = queue("valid.fifo", true);
+            attributes.insert(
+                "fifo_throughput_limit".into(),
+                proto::Value::String("perMessageGroupId".into()),
+            );
+            attributes.insert(
+                "deduplication_scope".into(),
+                proto::Value::String(scope.into()),
+            );
+            attributes
+        };
         for (resource_type, attributes, message) in [
             (
                 "sqs.Queue",
@@ -81,6 +126,31 @@ mod guest {
                     ),
                 ]),
                 "content_based_deduplication requires fifo_queue = true",
+            ),
+            (
+                "sqs.Queue",
+                queue("private-name", true),
+                "queue_name must end with .fifo",
+            ),
+            (
+                "sqs.Queue",
+                throughput("queue"),
+                "fifo_throughput_limit requires deduplication_scope = messageGroup",
+            ),
+            (
+                "sqs.Queue",
+                redrive("allowAll", 1),
+                "redrive_allow_policy.source_queue_arns may only be set",
+            ),
+            (
+                "sqs.Queue",
+                redrive("byQueue", 0),
+                "redrive_allow_policy.redrive_permission requires redrive_allow_policy.source_queue_arns",
+            ),
+            (
+                "sqs.Queue",
+                redrive("byQueue", 11),
+                "redrive_allow_policy.source_queue_arns must contain at most 10 items",
             ),
             (
                 "ec2.NatGateway",
@@ -99,7 +169,7 @@ mod guest {
             let request = proto::CreateRequest {
                 resource: proto::Resource {
                     id: id.clone(),
-                    attributes,
+                    attributes: attributes.clone(),
                     directives: Default::default(),
                 },
             };
@@ -112,7 +182,60 @@ mod guest {
             assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
             assert_eq!(error.resource_id.as_ref(), Some(&id));
             assert!(error.message.contains(message), "{error:?}");
+            assert!(!error.message.contains("private-name"));
+            assert!(!error.message.contains("arn:aws:sqs"));
+            if resource_type == "sqs.Queue" {
+                let identifier = proto::AppliedIdentifier::new(
+                    "https://sqs.us-east-1.amazonaws.com/123456789012/validation-queue",
+                )
+                .unwrap();
+                let request = proto::UpdateRequest {
+                    from: proto::PersistedState {
+                        id: id.clone(),
+                        identifier: Some(identifier.as_str().into()),
+                        exists: true,
+                        attributes: attributes
+                            .into_iter()
+                            .map(|(key, value)| (key, value.into()))
+                            .collect(),
+                    },
+                    patch: proto::UpdatePatch {
+                        ops: vec![proto::PatchOp::Add {
+                            key: "delay_seconds".into(),
+                            value: proto::Value::Int(1),
+                        }],
+                    },
+                };
+                let error = provider.update(&id, &identifier, request).expect_err(
+                    "guest update must validate unchanged historical cross-field inputs",
+                );
+                assert_eq!(service.requests.load(Ordering::Relaxed), 0);
+                assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+                assert_eq!(error.resource_id.as_ref(), Some(&id));
+                assert!(error.message.contains(message), "{error:?}");
+            }
         }
+
+        let mut attributes = redrive("byQueue", 1);
+        attributes.extend(throughput("messageGroup"));
+        let id = proto::ResourceId {
+            provider: "aws".into(),
+            resource_type: "sqs.Queue".into(),
+            identity: "valid-create".into(),
+        };
+        let request = proto::CreateRequest {
+            resource: proto::Resource {
+                id: id.clone(),
+                attributes,
+                directives: Default::default(),
+            },
+        };
+        let before = service.requests.load(Ordering::Relaxed);
+        let verdict = dispatch_create(&provider, &id, request);
+        assert!(
+            service.requests.load(Ordering::Relaxed) > before,
+            "valid combinations must pass validation and reach the mock AWS service: {verdict:?}"
+        );
     }
 
     #[test]

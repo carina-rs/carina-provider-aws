@@ -1087,6 +1087,53 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
         &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
     );
     let bindings = carina_core::binding_index::ResolvedBindings::default();
+    let sqs = || Resource::with_provider("aws", "sqs.Queue", "invalid-create", None);
+    let canonicalize_sqs = |mut resource: Resource| {
+        for (name, field_type) in [
+            (
+                "deduplication_scope",
+                carina_aws_types::sqs_queue_deduplication_scope(),
+            ),
+            (
+                "fifo_throughput_limit",
+                carina_aws_types::sqs_queue_fifo_throughput_limit(),
+            ),
+            (
+                "redrive_allow_policy",
+                carina_aws_types::sqs_redrive_allow_policy(),
+            ),
+        ] {
+            if let Some(value) = resource.get_attr(name).cloned() {
+                resource.set_attr(
+                    name,
+                    crate::test_rootless_type(field_type)
+                        .canonicalize_state(value)
+                        .into_present()
+                        .expect("SQS enum fixture remains present"),
+                );
+            }
+        }
+        resource
+    };
+    let sources = |count| {
+        Value::Concrete(ConcreteValue::List(
+            (0..count)
+                .map(|i| string(format!("arn:aws:sqs:us-east-1:123456789012:source-{i}")))
+                .collect(),
+        ))
+    };
+    let redrive = |permission: &str, count| {
+        let fields = IndexMap::from([
+            ("redrive_permission".into(), string(permission)),
+            ("source_queue_arns".into(), sources(count)),
+        ]);
+        sqs()
+            .with_attribute("queue_name", string("standard-queue"))
+            .with_attribute(
+                "redrive_allow_policy",
+                Value::Concrete(ConcreteValue::Map(fields)),
+            )
+    };
     for (resource, message) in [
         (
             Resource::with_provider("aws", "sqs.Queue", "invalid-create", None)
@@ -1099,11 +1146,43 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
             "content_based_deduplication requires fifo_queue = true",
         ),
         (
+            sqs()
+                .with_attribute("queue_name", string("private-name"))
+                .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(true))),
+            "queue_name must end with .fifo",
+        ),
+        (
+            sqs()
+                .with_attribute("queue_name", string("valid.fifo"))
+                .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(true)))
+                .with_attribute("fifo_throughput_limit", string("perMessageGroupId"))
+                .with_attribute("deduplication_scope", string("queue")),
+            "fifo_throughput_limit requires deduplication_scope = messageGroup",
+        ),
+        (
+            redrive("allowAll", 1),
+            "redrive_allow_policy.source_queue_arns may only be set",
+        ),
+        (
+            redrive("byQueue", 0),
+            "redrive_allow_policy.redrive_permission requires redrive_allow_policy.source_queue_arns",
+        ),
+        (
+            redrive("byQueue", 11),
+            "redrive_allow_policy.source_queue_arns must contain at most 10 items",
+        ),
+        (
             Resource::with_provider("aws", "ec2.NatGateway", "invalid-create", None),
             "subnet_id is required when availability_mode = zonal",
         ),
     ] {
+        let resource = canonicalize_sqs(resource);
         let id = resource.id.clone();
+        let from = crate::test_existing_state(
+            id.clone(),
+            resource.attributes.clone().into_iter().collect(),
+        )
+        .to_snapshot();
         let error = match prepare_create_for_capture(resource, &bindings).await {
             Err(carina_core::executor::ProviderPreparationError::Provider(error)) => error,
             Err(error) => {
@@ -1125,7 +1204,39 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
             "{error:?}"
         );
         assert!(error.to_string().contains(message), "{error:?}");
+        assert!(!error.to_string().contains("private-name"));
+        assert!(!error.to_string().contains("arn:aws:sqs"));
+        if id.resource_type == "sqs.Queue" {
+            let identifier = AppliedIdentifier::new(capture_identifier("sqs.Queue")).unwrap();
+            let patch = UpdatePatch {
+                ops: vec![PatchOp::Add {
+                    key: "delay_seconds".into(),
+                    value: Value::Concrete(ConcreteValue::Int(1)),
+                }],
+            };
+            let error = provider
+                .update_step(&id, &identifier, &from, &patch)
+                .await
+                .expect_err(
+                    "native update must materialize and validate unchanged cross-field inputs",
+                );
+            assert!(matches!(error, ProviderError::InvalidInput(_)));
+            assert!(error.to_string().contains(message), "{error:?}");
+            assert!(
+                service.snapshot().is_empty(),
+                "invalid update must not send any AWS request"
+            );
+        }
     }
+
+    let resource = redrive("byQueue", 1)
+        .with_attribute("queue_name", string("valid.fifo"))
+        .with_attribute("fifo_queue", Value::Concrete(ConcreteValue::Bool(true)))
+        .with_attribute("fifo_throughput_limit", string("perMessageGroupId"))
+        .with_attribute("deduplication_scope", string("messageGroup"));
+    prepare_create_for_capture(canonicalize_sqs(resource), &bindings)
+        .await
+        .expect("valid SQS combinations must pass native create preparation");
 }
 
 #[tokio::test]
