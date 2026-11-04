@@ -11,3 +11,11 @@ aws.sqs.Queue {
     Environment = 'example'
   }
 }
+
+aws.sqs.Queue {
+  queue_name                  = 'carina-example-queue.fifo'
+  fifo_queue                  = true
+  content_based_deduplication = true
+  deduplication_scope         = aws.sqs.Queue.DeduplicationScope.message_group
+  fifo_throughput_limit       = aws.sqs.Queue.FifoThroughputLimit.per_message_group_id
+}

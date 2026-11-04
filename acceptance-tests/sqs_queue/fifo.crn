@@ -12,11 +12,11 @@ aws.sqs.Queue {
   queue_name                  = 'carina-acc-test-aws-sqs-queue-fifo-v1.fifo'
   fifo_queue                  = true
   content_based_deduplication = true
-  deduplication_scope         = 'messageGroup'
-  fifo_throughput_limit       = 'perMessageGroupId'
+  deduplication_scope         = aws.sqs.Queue.DeduplicationScope.message_group
+  fifo_throughput_limit       = aws.sqs.Queue.FifoThroughputLimit.per_message_group_id
   visibility_timeout          = 30
 
-  tags = {
-    Environment = 'acceptance-test'
+  tags                        = {
+  Environment                 = 'acceptance-test'
   }
 }

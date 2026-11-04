@@ -4332,21 +4332,23 @@ pub(crate) struct SqsQueueCreateParts {
 impl SqsQueueCreateInput {
     pub(crate) fn decode(
         _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,
+        _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
-        let _schema = &crate::schemas::generated::sqs::queue::sqs_queue_config().schema;
         Ok(Self {
             content_based_deduplication: crate::send_model::optional_bool(
                 _resource,
                 "content_based_deduplication",
             )?,
-            deduplication_scope: crate::send_model::optional_string(
+            deduplication_scope: crate::send_model::optional_enum(
                 _resource,
+                _schema,
                 "deduplication_scope",
             )?,
             delay_seconds: crate::send_model::optional_int(_resource, "delay_seconds")?,
             fifo_queue: crate::send_model::optional_bool(_resource, "fifo_queue")?,
-            fifo_throughput_limit: crate::send_model::optional_string(
+            fifo_throughput_limit: crate::send_model::optional_enum(
                 _resource,
+                _schema,
                 "fifo_throughput_limit",
             )?,
             kms_data_key_reuse_period_seconds: crate::send_model::optional_int(

@@ -3678,7 +3678,7 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
                 name: "MaximumMessageSize",
                 read_source: None,
                 description: Some(
-                    "The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 262,144 (256 KiB). Range 1,024–262,144 (1–256 KiB).",
+                    "The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 1,048,576 (1 MiB). Range 1,024–1,048,576 (1 KiB–1 MiB).",
                 ),
             },
             ExtraField {
