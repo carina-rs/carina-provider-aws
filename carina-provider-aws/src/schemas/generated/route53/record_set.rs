@@ -26,7 +26,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
             AttributeSchema::optional("alias_target", AttributeType::struct_(
                     "AliasTarget".to_string(),
                     vec![
-                    StructField::required("dns_name", AttributeType::refined_string(None, Some("^(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63}(?:\\.(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63})*\\.?\\z".to_string()), Some((Some(1), Some(1024))), None)).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
+                    StructField::required("dns_name", carina_aws_types::route53_dns_name()).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
                     StructField::required("evaluate_target_health", AttributeType::bool()).with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth").build(),
                     StructField::required("hosted_zone_id", AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])).with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId").build()
                     ],
@@ -36,7 +36,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("name", AttributeType::refined_string(None, Some("^(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63}(?:\\.(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63})*\\.?\\z".to_string()), Some((Some(1), Some(1024))), None))
+            AttributeSchema::required("name", carina_aws_types::route53_dns_name())
                 .create_only()
                 .identity()
                 .with_description("For ChangeResourceRecordSets requests, the name of the record that you want to create, update, or delete. For ListResourceRecordSets responses, the na...")

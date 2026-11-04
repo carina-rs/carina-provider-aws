@@ -551,6 +551,182 @@ fn validate_source(source: &str, registry: SchemaRegistry) {
 }
 
 #[test]
+fn route53_acm_dns_references_validate_indexed_and_expanded_for_loop_shapes() {
+    use carina_core::binding_index::{BindingIndex, BindingValueSource, ResolvedBindings};
+    use carina_core::config_loader::load_configuration_with_config;
+    use carina_core::module_resolver::{
+        load_resolved_module_signatures, resolve_modules_with_config,
+    };
+    use carina_core::paths::ResolvedPath;
+    use carina_core::validation::{
+        deferred_types::TypeCheckSession, validate_resource_ref_types, validate_resources,
+    };
+
+    let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
+        Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
+        SchemaRegistry::new(),
+        carina_core::EnvironmentSnapshot::empty(),
+    );
+    let context = snapshot.provider_context();
+    let schemas = snapshot.schema_registry();
+    let temp = tempfile::tempdir().unwrap();
+    let root = ResolvedPath::new(temp.path()).unwrap();
+    let mut diagnostics = Vec::new();
+    for (shape, source) in [
+        (
+            "indexed example",
+            r#"
+            let validation_record = aws.route53.RecordSet {
+                hosted_zone_id = 'Z123EXAMPLE'
+                name = cert.domain_validation_options[0].resource_record.name
+                type = aws.route53.RecordSet.Type.cname
+                ttl = 60
+                resource_records = [cert.domain_validation_options[0].resource_record.value]
+            }
+            "#,
+        ),
+        (
+            "infra for loop",
+            r#"
+            let validation_records = for opt in cert.domain_validation_options {
+                aws.route53.RecordSet {
+                    hosted_zone_id = 'Z123EXAMPLE'
+                    name = opt.resource_record.name
+                    type = aws.route53.RecordSet.Type.cname
+                    ttl = 300
+                    resource_records = [opt.resource_record.value]
+                }
+            }
+            "#,
+        ),
+    ] {
+        let source = format!(
+            "provider aws {{ region = aws.Region.us_east_1 }}\n\
+             let cert = aws.acm.Certificate {{ domain_name = 'registry.example.com' validation_method = dns }}\n\
+             {source}"
+        );
+        std::fs::write(temp.path().join("main.crn"), source).unwrap();
+        let loaded = load_configuration_with_config(&root, context, schemas).unwrap();
+        let mut deferred = Vec::new();
+        TypeCheckSession::run(context, |session| {
+            // Match CLI validation: expand first, then infer references with
+            // the loaded provider catalog in the active type-check session.
+            let expanded =
+                resolve_modules_with_config(loaded.parsed, &root, session, schemas).unwrap();
+            validate_resources(&expanded, schemas, &HashSet::from(["aws".into()]), context)
+                .unwrap();
+            let signatures = load_resolved_module_signatures(&expanded, &root, context);
+            let bindings =
+                BindingIndex::from_parsed_with_upstream_exports_and_module_signatures_in_session(
+                    &expanded,
+                    schemas,
+                    None,
+                    &signatures,
+                    session,
+                );
+            if let Err(error) =
+                validate_resource_ref_types(&expanded, schemas, &HashSet::new(), &bindings)
+            {
+                diagnostics.push(format!("{shape}: {error}"));
+            }
+            if shape == "infra for loop" {
+                assert_eq!(expanded.deferred_for_expressions().len(), 1);
+                let mut expanded = expanded.into_expanded(schemas, context).unwrap();
+                let mut read_values = ResolvedBindings::default();
+                read_values.set(
+                    "cert",
+                    std::collections::HashMap::from([(
+                        "domain_validation_options".into(),
+                        Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                            ConcreteValue::Map(IndexMap::from([(
+                                "resource_record".into(),
+                                Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                                    ("name".into(), string("_token.registry.example.com.")),
+                                    ("value".into(), string("_token.acm-validations.aws.")),
+                                ]))),
+                            )])),
+                        )])),
+                    )]),
+                    BindingValueSource::Local,
+                );
+                expanded
+                    .expand_deferred_for_expressions(
+                        &read_values.project_iterable_bindings(),
+                        session,
+                    )
+                    .unwrap();
+                assert!(expanded.deferred_for_expressions().is_empty());
+                assert_eq!(
+                    expanded.resources.len(),
+                    2,
+                    "certificate and validation record"
+                );
+            }
+        })
+        .publish(&mut deferred);
+        assert!(deferred.is_empty(), "{shape}: {deferred:?}");
+    }
+    assert!(diagnostics.is_empty(), "{}", diagnostics.join("\n"));
+}
+
+#[test]
+fn route53_acm_dns_output_types_assign_to_all_dns_and_record_value_sinks() {
+    use carina_core::schema::SchemaKind;
+
+    let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
+        Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
+        SchemaRegistry::new(),
+        carina_core::EnvironmentSnapshot::empty(),
+    );
+    let registry = snapshot.schema_registry();
+    let acm = registry
+        .get("aws", "acm.Certificate", SchemaKind::Resource)
+        .unwrap();
+    let route53 = registry
+        .get("aws", "route53.RecordSet", SchemaKind::Resource)
+        .unwrap();
+    let sinks = [
+        ("name", field(route53.schema(), "name")),
+        (
+            "alias_target.dns_name",
+            field(route53.schema(), "alias_target.dns_name"),
+        ),
+        (
+            "resource_records[]",
+            field(route53.schema(), "resource_records")
+                .list_element()
+                .unwrap(),
+        ),
+    ];
+    for prefix in [
+        "domain_validation_options",
+        "renewal_summary.domain_validation_options",
+    ] {
+        for leaf in ["name", "value"] {
+            let path = format!("{prefix}.resource_record.{leaf}");
+            let path_names = path.split('.').map(str::to_string).collect::<Vec<_>>();
+            let source = acm
+                .schema()
+                .effective_node_at_path(&path_names)
+                .unwrap()
+                .value_type();
+            for (sink_path, sink) in &sinks {
+                assert_eq!(
+                    acm.as_schema()
+                        .type_in_schema(source.as_type())
+                        .assignment_to(route53.assignment_sink(
+                            sink.as_type(),
+                            &snapshot.provider_context().custom_types
+                        )),
+                    TypeAssignability::Assignable,
+                    "{path} -> {sink_path}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn route53_infra_acm_for_loop_preserves_underscore_names_and_record_values() {
     validate_source(
         r#"

@@ -127,8 +127,6 @@ enum TypeOverride {
     },
     /// Anonymous String carrier with documented character bounds only.
     StringBounds { min: u64, max: u64 },
-    /// Anonymous whole-string pattern with no documented numeric length cap.
-    StringPattern(&'static str),
     /// Share an anonymous String constructor and derive documentation from it.
     AnonymousStringConstructor(&'static str),
     /// Use the identity, validation, and allowed-value metadata of a shared row.
@@ -187,13 +185,6 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                 Some((Some(*min_length), Some(*max_length))),
                 None,
             ),
-        ),
-        TypeOverride::StringPattern(pattern) => (
-            format!(
-                "AttributeType::refined_string(None, Some({pattern:?}.to_string()), None, None)"
-            ),
-            pattern_display("String(pattern: ", pattern),
-            AttributeType::refined_string(None, Some(pattern.to_string()), None, None),
         ),
         TypeOverride::AnonymousStringConstructor(constructor) => {
             let attr = attribute_type_from_code(constructor)
@@ -732,7 +723,6 @@ fn emit_replacement_builder(
             {
                 Some(
                     TypeOverride::RefinedString { .. }
-                    | TypeOverride::StringPattern(_)
                     | TypeOverride::AnonymousStringConstructor(_),
                 ) => true,
                 Some(TypeOverride::SharedType(row)) => {
@@ -2822,6 +2812,7 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         };
     }
     let constructors = constructors![
+        route53_dns_name,
         iam_path,
         iam_path_prefix,
         iam_policy_document,
@@ -7426,22 +7417,6 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 // Unlike core's wildcard_domain_name(), ACM's pattern excludes a terminal dot.
 const ACM_DOMAIN_NAME_PATTERN: &str = carina_aws_types::ACM_CERTIFICATE_DOMAIN_NAME_PATTERN;
 
-// ResourceRecord.{Name,Value} are DNS names, not hostnames. ACM publishes
-// _token labels, with terminal dots in its DNS-validation examples. Accept
-// both absolute and unqualified spellings; impose no undocumented total cap.
-// https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
-// https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
-const ACM_VALIDATION_RECORD_PATTERN: &str = r"^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.?\z";
-
-// Route 53 DNS labels are not hostnames: all printable ASCII except spaces
-// is allowed, with octal escapes for other octets and for literal label dots.
-// Count each escape as one label byte. The total decoded 255-byte limit and
-// wildcard semantics run in the provider's desired validator and before send.
-// Keep the refinement anonymous: nominal sinks would break String module
-// arguments and ACM/CloudFront/ALB outputs without a shared DNS identity.
-// https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/DomainNameFormat.html
-const ROUTE53_DNS_NAME_PATTERN: &str = r"^(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63}(?:\.(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63})*\.?\z";
-
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
@@ -7450,23 +7425,19 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     ("route53.RecordSet", "name"),
                     // ResourceRecordSet$Name -> DNSName (0..1024); the guide
                     // requires nonempty labels, decoded byte limits, and the
-                    // record-specific wildcard rules. See the pattern above.
-                    TypeOverride::RefinedString {
-                        pattern: ROUTE53_DNS_NAME_PATTERN,
-                        min_length: 1,
-                        max_length: 1024,
-                    },
+                    // record-specific wildcard rules. Share ACM's DNS carrier.
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     ("route53.RecordSet", "alias_target.dns_name"),
                     // AliasTarget$DNSName -> DNSName. CloudFront, ALB (also
                     // dualstack), S3 websites and another record's DNS name:
                     // https://docs.aws.amazon.com/Route53/latest/APIReference/API_AliasTarget.html
-                    TypeOverride::RefinedString {
-                        pattern: ROUTE53_DNS_NAME_PATTERN,
-                        min_length: 1,
-                        max_length: 1024,
-                    },
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     ("route53.RecordSet", "resource_records[]"),
@@ -7554,28 +7525,38 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                         "acm.Certificate",
                         "domain_validation_options[].resource_record.name",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    // ACM supplies the DNS name and CNAME target to publish:
+                    // https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.name",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
@@ -8216,6 +8197,48 @@ mod tests {
     }
 
     #[test]
+    fn acm_and_route53_dns_overrides_share_one_bounded_constructor() {
+        for (resource, path) in [
+            ("route53.RecordSet", "name"),
+            ("route53.RecordSet", "alias_target.dns_name"),
+            (
+                "acm.Certificate",
+                "domain_validation_options[].resource_record.name",
+            ),
+            (
+                "acm.Certificate",
+                "domain_validation_options[].resource_record.value",
+            ),
+            (
+                "acm.Certificate",
+                "renewal_summary.domain_validation_options[].resource_record.name",
+            ),
+            (
+                "acm.Certificate",
+                "renewal_summary.domain_validation_options[].resource_record.value",
+            ),
+        ] {
+            let value = resource_value_override(resource, path).unwrap();
+            assert_eq!(
+                value.type_code, "carina_aws_types::route53_dns_name()",
+                "{resource}.{path}"
+            );
+            let RawShape::String {
+                identity,
+                pattern,
+                length,
+                ..
+            } = value.attribute_type.raw_shape()
+            else {
+                panic!("{resource}.{path}: DNS String");
+            };
+            assert!(identity.is_none());
+            assert!(pattern.is_some());
+            assert_eq!(length, Some((Some(1), Some(1024))));
+        }
+    }
+
+    #[test]
     fn route53_codegen_refines_only_exact_paths_and_preserves_send_carriers() {
         let (resource, model) = route53_value_fixture();
         let attrs = collect_resource_attributes(&resource, &model)
@@ -8234,8 +8257,14 @@ mod tests {
         assert!(generated.contains("carina_aws_types::route53_hosted_zone_id()"));
         assert!(generated.contains("Some(4000)"), "{generated}");
         assert!(
-            generated
-                .contains("StructField::required(\"dns_name\", AttributeType::refined_string(")
+            generated.contains(
+                "StructField::required(\"dns_name\", carina_aws_types::route53_dns_name())"
+            )
+        );
+        assert!(
+            generated.contains(
+                "AttributeSchema::required(\"name\", carina_aws_types::route53_dns_name())"
+            )
         );
         for path in [
             "name",
