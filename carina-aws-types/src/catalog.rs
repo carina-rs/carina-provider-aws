@@ -672,7 +672,7 @@ define_aws_type_catalog! {
             Some((None, Some(32))),
         ),
     },
-    /// DNS record type shared by Route 53 and ACM.
+    /// Route 53 DNS record type.
     ///
     /// The identity intentionally keeps the Route 53 name
     /// `aws.route53.RecordSet.Type`: carina-core has no identity aliases, so
@@ -683,6 +683,15 @@ define_aws_type_catalog! {
         valid_sample: "CNAME",
         has_validator: false,
         constructor: dns_record_type_type,
+    },
+    /// ACM's com.amazonaws.acm#RecordType enum in acm.json contains only CNAME.
+    /// Keep its identity separate from Route 53's broader DNS record type enum.
+    AcmCertificateResourceRecordType => acm_certificate_resource_record_type {
+        segments: ["acm", "Certificate"],
+        kind: "ResourceRecordType",
+        valid_sample: "CNAME",
+        has_validator: false,
+        constructor: |identity| crate::common::enum_with_dsl_aliases(&["CNAME"], identity),
     },
     /// ELBv2 HTTP matcher codes, independent of load-balancer protocol constraints.
     /// https://docs.aws.amazon.com/elasticloadbalancing/latest/APIReference/API_Matcher.html
@@ -1419,6 +1428,28 @@ mod tests {
     }
 
     #[test]
+    fn acm_resource_record_type_catalog_identity_values_and_aliases() {
+        let attribute_type = acm_certificate_resource_record_type();
+        let RawShape::Enum {
+            identity,
+            values: Some(values),
+            dsl_aliases,
+            ..
+        } = attribute_type.raw_shape()
+        else {
+            panic!("ACM resource record type must be a closed enum");
+        };
+
+        assert_eq!(
+            identity.to_string(),
+            "aws.acm.Certificate.ResourceRecordType"
+        );
+        assert_ne!(identity, &AwsType::DnsRecordType.identity());
+        assert_eq!(values, &["CNAME".to_string()]);
+        assert_eq!(dsl_aliases, &[("CNAME".to_string(), "cname".to_string())]);
+    }
+
+    #[test]
     fn s3_lifecycle_date_accepts_only_canonical_utc_rfc3339() {
         let attribute_type = AwsType::S3LifecycleDate.attribute_type();
         let validator = attribute_type_validator(&attribute_type)
@@ -1607,6 +1638,7 @@ KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
+AcmCertificateResourceRecordType|aws|acm/Certificate|ResourceRecordType|CNAME|false
 Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|true
 Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true
 LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true

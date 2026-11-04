@@ -76,6 +76,90 @@ mod tests {
         )
     }
 
+    fn validate_named_record_type_annotation(declaration: &str) -> Result<(), String> {
+        let source = format!(
+            "{declaration}\n\
+             aws.route53.RecordSet {{\n\
+               hosted_zone_id = 'Z1234567890'\n\
+               name = 'validation.example.com'\n\
+               type = record_type\n\
+               ttl = 300\n\
+               resource_records = ['target.example.com']\n\
+             }}"
+        );
+        let snapshot = loaded_aws();
+        let context = snapshot.provider_context();
+        let parsed = carina_core::parser::parse_file(
+            &source,
+            std::path::Path::new("named-record-type.crn"),
+            context,
+        )
+        .map_err(|error| error.to_string())?;
+        carina_core::validation::validate_resources(
+            &parsed,
+            snapshot.schema_registry(),
+            &std::collections::HashSet::from(["aws".to_string()]),
+            context,
+        )
+    }
+
+    #[test]
+    fn route53_record_type_function_annotation_rejects_string_literals() {
+        let error = validate_named_record_type_annotation(
+            "fn f(t: aws.route53.RecordSet.Type) { t }\nlet record_type = f('CNAME')",
+        )
+        .expect_err("named enum parameters require an enum identifier");
+        assert!(error.contains("expects an enum identifier"), "{error}");
+    }
+
+    #[test]
+    fn route53_record_type_function_annotation_accepts_cname_identifier() {
+        validate_named_record_type_annotation(
+            "fn f(t: aws.route53.RecordSet.Type) { t }\n\
+             let record_type = f(aws.route53.RecordSet.Type.cname)",
+        )
+        .expect("a Route 53 named enum parameter must accept its CNAME identifier");
+    }
+
+    #[test]
+    fn loaded_catalog_has_one_enum_definition_per_identity() {
+        let snapshot = loaded_aws();
+        let context = snapshot.provider_context();
+        let mut enum_count = 0;
+        let mut conflicts = Vec::new();
+        for owned in context.known_custom_types() {
+            match context.enum_declaration(owned) {
+                Ok(Some(_)) => enum_count += 1,
+                Ok(None) => {}
+                Err(error) => conflicts.push(error),
+            }
+        }
+        assert!(enum_count > 0, "the loaded AWS catalog must contain enums");
+        assert!(
+            conflicts.is_empty(),
+            "each identity must have one enum definition across all loaded AWS schemas: {conflicts:#?}"
+        );
+    }
+
+    #[test]
+    fn acm_certificate_dns_example_validates_with_distinct_record_type_identities() {
+        let snapshot = loaded_aws();
+        let context = snapshot.provider_context();
+        let parsed = carina_core::parser::parse_file(
+            include_str!("../../../examples/acm_certificate/main.crn"),
+            std::path::Path::new("examples/acm_certificate/main.crn"),
+            context,
+        )
+        .expect("parse ACM DNS validation example");
+        carina_core::validation::validate_resources(
+            &parsed,
+            snapshot.schema_registry(),
+            &std::collections::HashSet::from(["aws".to_string()]),
+            context,
+        )
+        .expect("ACM DNS validation example must validate with distinct enum identities");
+    }
+
     #[test]
     fn assignability_edges_loaded_catalog_rejects_unrelated_named_identities() {
         use carina_core::schema::TypeAssignability;
@@ -652,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn acm_certificate_nested_string_enum_identities_are_unique_except_shared_dns_record_type() {
+    fn acm_certificate_nested_string_enum_identities_only_repeat_the_acm_resource_record_type() {
         let config = super::generated::acm::certificate::acm_certificate_config();
         let mut identities = Vec::new();
         for (name, attr) in config.schema.attributes() {
@@ -677,13 +761,13 @@ mod tests {
         assert_eq!(
             duplicates,
             vec![(
-                "aws.route53.RecordSet.Type",
+                "aws.acm.Certificate.ResourceRecordType",
                 vec![
                     "domain_validation_options[].resource_record.type",
                     "renewal_summary.domain_validation_options[].resource_record.type",
                 ],
             )],
-            "only the two ACM projections of the shared Smithy ResourceRecord.Type shape may share an enum identity"
+            "only the two ACM projections of Smithy's CNAME-only ResourceRecord.Type shape may share an enum identity"
         );
 
         let by_path: HashMap<_, _> = identities.into_iter().collect();
@@ -704,7 +788,7 @@ mod tests {
         );
         assert_eq!(
             by_path.get("domain_validation_options[].resource_record.type"),
-            Some(&"aws.route53.RecordSet.Type".to_string())
+            Some(&"aws.acm.Certificate.ResourceRecordType".to_string())
         );
         assert_eq!(
             by_path.get("domain_validation_options[].validation_method"),
@@ -712,7 +796,7 @@ mod tests {
         );
         assert_eq!(
             by_path.get("renewal_summary.domain_validation_options[].resource_record.type"),
-            Some(&"aws.route53.RecordSet.Type".to_string())
+            Some(&"aws.acm.Certificate.ResourceRecordType".to_string())
         );
         assert_eq!(
             by_path.get("renewal_summary.domain_validation_options[].validation_method"),
@@ -759,7 +843,7 @@ mod tests {
     }
 
     #[test]
-    fn acm_resource_record_type_is_assignable_to_route53_record_set_type() {
+    fn acm_resource_record_type_is_distinct_from_route53_record_set_type() {
         let snapshot = loaded_aws();
         let registry = snapshot.schema_registry();
         let acm = registry
@@ -794,15 +878,21 @@ mod tests {
             panic!("Route 53 RecordSet.Type must be an enum");
         };
 
-        assert_eq!(acm_identity, route53_identity);
+        assert_eq!(
+            acm_identity.to_string(),
+            "aws.acm.Certificate.ResourceRecordType"
+        );
+        assert_ne!(acm_identity, route53_identity);
+        // The CNAME-only ACM enum and full Route 53 enum are nominally distinct.
+        // Enum identities cannot be endpoints of provider assignability edges.
         assert!(
-            acm.as_schema()
+            !acm.as_schema()
                 .type_in_schema(acm_record_type)
                 .is_assignable_to(route53.assignment_sink(
                     route53_record_type,
                     &snapshot.provider_context().custom_types,
                 )),
-            "ACM's computed ResourceRecord.Type must feed Route 53 RecordSet.Type"
+            "distinct ACM and Route 53 enum references must not assign implicitly"
         );
     }
 
