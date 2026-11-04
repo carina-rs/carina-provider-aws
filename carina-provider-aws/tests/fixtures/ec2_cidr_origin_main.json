@@ -1,0 +1,68 @@
+{
+  "revision": "cee78ef984897dfdfcee09f409245bff94e2d73c",
+  "attributes": [
+    {
+      "resource": "ec2.Route",
+      "path": "destination_cidr_block",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/route.rs",
+      "line": 21
+    },
+    {
+      "resource": "ec2.SecurityGroupEgress",
+      "path": "cidr_ip",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/security_group_egress.rs",
+      "line": 23
+    },
+    {
+      "resource": "ec2.SecurityGroupEgress",
+      "path": "cidr_ipv6",
+      "kind": "Ipv6Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/security_group_egress.rs",
+      "line": 30
+    },
+    {
+      "resource": "ec2.SecurityGroupIngress",
+      "path": "cidr_ip",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/security_group_ingress.rs",
+      "line": 23
+    },
+    {
+      "resource": "ec2.SecurityGroupIngress",
+      "path": "cidr_ipv6",
+      "kind": "Ipv6Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/security_group_ingress.rs",
+      "line": 30
+    },
+    {
+      "resource": "ec2.Subnet",
+      "path": "cidr_block",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/subnet.rs",
+      "line": 43
+    },
+    {
+      "resource": "ec2.Subnet",
+      "path": "ipv6_cidr_block",
+      "kind": "Ipv6Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/subnet.rs",
+      "line": 81
+    },
+    {
+      "resource": "ec2.TransitGateway",
+      "path": "options.transit_gateway_cidr_blocks[]",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/transit_gateway.rs",
+      "line": 75
+    },
+    {
+      "resource": "ec2.Vpc",
+      "path": "cidr_block",
+      "kind": "Ipv4Cidr",
+      "schema": "carina-provider-aws/src/schemas/generated/ec2/vpc.rs",
+      "line": 25
+    }
+  ]
+}

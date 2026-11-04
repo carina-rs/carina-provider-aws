@@ -129,6 +129,10 @@ enum TypeOverride {
     StringPattern(&'static str),
     /// Share an anonymous String constructor and derive documentation from it.
     AnonymousStringConstructor(&'static str),
+    /// An established core scalar, including its existing validation identity.
+    CoreType(&'static str),
+    /// Refine a list without replacing its recursively resolved element type.
+    ListLength { min: u64, max: u64 },
     /// Use the identity, validation, and allowed-value metadata of a shared row.
     SharedType(AwsType),
     /// Override only the enum identity, retaining Smithy values and DSL aliases.
@@ -208,6 +212,12 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                 attr.clone(),
             )
         }
+        TypeOverride::CoreType(constructor) => (
+            constructor.to_string(),
+            type_code_to_markdown(constructor),
+            attribute_type_from_code(constructor).expect("registered core type"),
+        ),
+        TypeOverride::ListLength { .. } => return None,
         TypeOverride::SharedType(row) => {
             let attr = row.attribute_type();
             let display = if let Some(values) = row.allowed_int_values() {
@@ -254,7 +264,25 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             } else {
                 MarkdownType::text(type_code_to_display(row.constructor_path()))
             };
-            let display = if matches!(
+            let ec2_rule = match row {
+                AwsType::Ec2AmazonSideAsn => Some("Int; 64512..=65534 or 4200000000..=4294967294"),
+                AwsType::Ec2VpnGatewayAmazonSideAsn => Some(
+                    "Int; 64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs: 7224, 9059, 10124, 17493",
+                ),
+                AwsType::Ec2VpcCidrBlock => {
+                    Some("IPv4 /16..=/28; excludes 0/8, 127/8, 169.254/16, 224/4")
+                }
+                AwsType::Ec2SubnetIpv4CidrBlock => Some("IPv4 /16..=/28"),
+                AwsType::Ec2SubnetIpv6CidrBlock => Some("IPv6 prefixes: 44, 48, 52, 56, 60, 64"),
+                AwsType::Ec2TransitGatewayCidrBlock => {
+                    Some("IPv4 /0..=/24 or IPv6 /0..=/64; excludes overlap with 169.254/16")
+                }
+                AwsType::Ec2SecurityGroupName => Some("must not start with sg-"),
+                _ => None,
+            };
+            let display = if let Some(rule) = ec2_rule {
+                MarkdownType::sequence([display, MarkdownType::text(format!("; {rule}"))])
+            } else if matches!(
                 row,
                 AwsType::AcmCertificateDomainName | AwsType::AcmCertificateSubjectAlternativeName
             ) {
@@ -3012,7 +3040,15 @@ fn resolve_type_shape(
                     .as_ref()
                     .map(|info| enum_type_code(ctx, field_name, info))
                     .unwrap_or(item_type);
-                (format!("AttributeType::list({item_type})"), None)
+                let code = match resource_type_overrides()
+                    .get(&(ctx.resource_name, ctx.property_path.as_str()))
+                {
+                    Some(TypeOverride::ListLength { min, max }) => format!(
+                        "AttributeType::refined_list({item_type}, true, Some((Some({min}), Some({max}))), carina_core::schema::ListElements::AllowDuplicates)"
+                    ),
+                    _ => format!("AttributeType::list({item_type})"),
+                };
+                (code, None)
             } else {
                 (
                     format!("AttributeType::list({PLAIN_STRING_TYPE_CODE})"),
@@ -6953,7 +6989,14 @@ fn discover_markdown_type(
                     struct_defs,
                     discovering_structs,
                 )?;
-                MarkdownType::list(item)
+                let list = MarkdownType::list(item);
+                match resource_type_overrides().get(&(resource_name, property_path)) {
+                    Some(TypeOverride::ListLength { min, max }) => MarkdownType::sequence([
+                        list,
+                        MarkdownType::text(format!(" (length: {min}..={max})")),
+                    ]),
+                    _ => list,
+                }
             } else {
                 MarkdownType::list(MarkdownType::text("String"))
             }
@@ -7394,6 +7437,152 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
             HashMap::from([
+                (
+                    ("ec2.Eip", "address"),
+                    // ec2.json AllocateAddressRequest$Address -> PublicIpAddress.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_AllocateAddress.html
+                    TypeOverride::CoreType("types::ipv4_address()"),
+                ),
+                (
+                    ("ec2.FlowLog", "log_format"),
+                    // CreateFlowLogsRequest$LogFormat: at least one ${field-id},
+                    // separated by spaces. Keep the catalog open to new fields
+                    // and preserve the exact order and string sent to AWS.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/flow-log-records.html
+                    // https://docs.aws.amazon.com/vpc/latest/tgw/tgw-flow-logs.html
+                    TypeOverride::StringPattern(
+                        r"^\$\{[a-z0-9]+(?:-[a-z0-9]+)*\}(?: +\$\{[a-z0-9]+(?:-[a-z0-9]+)*\})*\z",
+                    ),
+                ),
+                (
+                    ("ec2.FlowLog", "max_aggregation_interval"),
+                    // CreateFlowLogsRequest$MaxAggregationInterval: {60,600}.
+                    // The transit-only 60 rule lives in normalizer.rs.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
+                    TypeOverride::SharedType(AwsType::Ec2FlowLogMaxAggregationInterval),
+                ),
+                (
+                    ("ec2.FlowLog", "log_group_name"),
+                    // CreateFlowLogsRequest$LogGroupName can select an existing
+                    // group. Apply cloudwatchlogs.json LogGroupName's grammar,
+                    // without imposing CreateLogGroup's create-only aws/ rule.
+                    // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html
+                    TypeOverride::RefinedString {
+                        pattern: r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                        min_length: 1,
+                        max_length: 512,
+                    },
+                ),
+                (
+                    ("ec2.FlowLog", "tag_field_specifications"),
+                    // ec2.json TagFieldSpecificationListRequest, length 1..3.
+                    TypeOverride::ListLength { min: 1, max: 3 },
+                ),
+                (
+                    ("ec2.FlowLog", "tag_field_specifications[].tag_keys"),
+                    // TagFieldSpecificationRequest$TagKeys -> TagKeyList.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TagFieldSpecificationRequest.html
+                    TypeOverride::ListLength { min: 1, max: 2 },
+                ),
+                (
+                    ("ec2.FlowLog", "tag_field_specifications[].tag_keys[]"),
+                    // TagKeyList$member -> TagKey: length 1..128, no pattern.
+                    // (?s) preserves the entire Smithy string alphabet.
+                    TypeOverride::RefinedString {
+                        pattern: r"(?s)^.{1,128}\z",
+                        min_length: 1,
+                        max_length: 128,
+                    },
+                ),
+                (
+                    ("ec2.SecurityGroup", "group_name"),
+                    // CreateSecurityGroupRequest$GroupName (no Smithy traits).
+                    // The callback enforces the reserved sg- prefix as well as
+                    // the documented alphabet and length through the SDK seam.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateSecurityGroup.html
+                    TypeOverride::SharedType(AwsType::Ec2SecurityGroupName),
+                ),
+                (
+                    ("ec2.Subnet", "cidr_block"),
+                    // CreateSubnetRequest$CidrBlock. Keep the CIDR parser and
+                    // host-bit acceptance; only this resource gets /16..=/28.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv4CidrBlock),
+                ),
+                (
+                    ("ec2.Subnet", "ipv6_cidr_block"),
+                    // CreateSubnetRequest$Ipv6CidrBlock: /44..=/64, step four.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv6CidrBlock),
+                ),
+                (
+                    ("ec2.Subnet", "ipv6_netmask_length"),
+                    // CreateSubnetRequest$Ipv6NetmaskLength uses the same set.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv6NetmaskLength),
+                ),
+                (
+                    ("ec2.Subnet", "ipv4_netmask_length"),
+                    // CreateSubnetRequest$Ipv4NetmaskLength -> NetmaskLength.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+                    TypeOverride::IntRange { min: 16, max: 28 },
+                ),
+                (
+                    ("ec2.Subnet", "enable_lni_at_device_index"),
+                    // ModifySubnetAttributeRequest$EnableLniAtDeviceIndex:
+                    // eth0 cannot be local; the Smithy Integer carrier is i32.
+                    // No instance-dependent maximum is inferred.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ModifySubnetAttribute.html
+                    TypeOverride::IntRange {
+                        min: 1,
+                        max: i32::MAX as i64,
+                    },
+                ),
+                (
+                    ("ec2.TransitGateway", "options.amazon_side_asn"),
+                    // TransitGatewayRequestOptions$AmazonSideAsn: two private
+                    // ASN ranges, not their bounding interval.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
+                    // https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
+                    TypeOverride::SharedType(AwsType::Ec2AmazonSideAsn),
+                ),
+                (
+                    (
+                        "ec2.TransitGateway",
+                        "options.transit_gateway_cidr_blocks[]",
+                    ),
+                    // TransitGatewayRequestOptions$TransitGatewayCidrBlocks:
+                    // fix the existing IPv4-only inference while bounding both
+                    // prefixes. /23 is larger than /24, as the guide explains.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
+                    // https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
+                    TypeOverride::SharedType(AwsType::Ec2TransitGatewayCidrBlock),
+                ),
+                (
+                    ("ec2.Vpc", "cidr_block"),
+                    // CreateVpcRequest$CidrBlock, with the documented excluded
+                    // ranges. Public IPv4 CIDRs and noncanonical host bits work.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html
+                    TypeOverride::SharedType(AwsType::Ec2VpcCidrBlock),
+                ),
+                (
+                    ("ec2.Vpc", "ipv4_netmask_length"),
+                    // CreateVpcRequest$Ipv4NetmaskLength -> NetmaskLength.
+                    // https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html
+                    TypeOverride::IntRange { min: 16, max: 28 },
+                ),
+                (
+                    ("ec2.VpnGateway", "amazon_side_asn"),
+                    // Smithy/CreateVpnGateway prose describes private ranges,
+                    // but the VPN FAQ also documents legacy Amazon ASNs:
+                    // 9059 Dublin, 17493 Singapore, 10124 Tokyo, 7224 elsewhere.
+                    // Accept the complete set for input/read compatibility;
+                    // a scalar cannot decide the region-specific pairing.
+                    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateVpnGateway.html
+                    // https://aws.amazon.com/vpn/faqs/
+                    TypeOverride::SharedType(AwsType::Ec2VpnGatewayAmazonSideAsn),
+                ),
                 (
                     ("acm.Certificate", "domain_name"),
                     // RequestCertificateRequest$DomainName -> DomainNameString.
@@ -8202,11 +8391,57 @@ mod tests {
             "a nested name with the same Smithy target must stay unchanged: {generated}"
         );
 
-        let model = string_fixture_model(&[("logGroupName", true)], &[("logGroupName", true)]);
-        let resource = provider_fixture_resource("ec2.FlowLog", "", &["logGroupName"], vec![]);
-        let collected = collect_resource_attributes_unvalidated(&resource, &model, &[])
-            .expect("collect unrelated resource");
-        assert_eq!(collected.attrs[0].type_code, PLAIN_STRING_TYPE_CODE);
+        // Use a real resource definition and its actual Smithy member names.
+        // SecurityGroup.Description is still an unrefined String after EC2's
+        // GroupName override; this control also runs complete schema generation.
+        let resource = resource_defs::ec2_resources()
+            .into_iter()
+            .find(|resource| resource.name == "ec2.SecurityGroup")
+            .expect("SecurityGroup resource");
+        let model = carina_smithy::parse(
+            r#"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.ec2#CreateSecurityGroup": {
+                  "type": "operation",
+                  "input": {"target": "com.amazonaws.ec2#CreateSecurityGroupRequest"}
+                },
+                "com.amazonaws.ec2#CreateSecurityGroupRequest": {
+                  "type": "structure",
+                  "members": {
+                    "Description": {"target": "com.amazonaws.ec2#String", "traits": {"smithy.api#required": {}}},
+                    "GroupName": {"target": "com.amazonaws.ec2#String", "traits": {"smithy.api#required": {}}},
+                    "VpcId": {"target": "com.amazonaws.ec2#VpcId"}
+                  }
+                },
+                "com.amazonaws.ec2#SecurityGroup": {
+                  "type": "structure",
+                  "members": {
+                    "Description": {"target": "com.amazonaws.ec2#String"},
+                    "GroupName": {"target": "com.amazonaws.ec2#String"},
+                    "GroupId": {"target": "com.amazonaws.ec2#String"},
+                    "VpcId": {"target": "com.amazonaws.ec2#String"}
+                  }
+                },
+                "com.amazonaws.ec2#String": {"type": "string"},
+                "com.amazonaws.ec2#VpcId": {"type": "string"}
+              }
+            }"#,
+        )
+        .expect("parse SecurityGroup control");
+        let collected =
+            collect_resource_attributes(&resource, &model).expect("collect unrelated resource");
+        let description = collected
+            .attrs
+            .iter()
+            .find(|attribute| attribute.snake_name == "description")
+            .expect("SecurityGroup description");
+        assert_eq!(description.type_code, PLAIN_STRING_TYPE_CODE);
+        let control = generate_resource(&resource, &model).expect("generate SecurityGroup control");
+        assert!(
+            control.contains("AttributeSchema::required(\"description\", AttributeType::string())"),
+            "{control}"
+        );
     }
 
     #[test]

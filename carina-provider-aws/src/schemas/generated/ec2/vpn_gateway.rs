@@ -22,7 +22,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes a virtual private gateway.")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::optional("amazon_side_asn", AttributeType::int())
+            AttributeSchema::optional("amazon_side_asn", carina_aws_types::ec2_vpn_gateway_amazon_side_asn())
                 .create_only()
                 .with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. If you're using a 16-bit ASN, it must be in the 64512 to 65534 range. I...")
                 .with_provider_name("AmazonSideAsn")

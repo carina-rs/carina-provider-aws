@@ -94,9 +94,10 @@ fn test_egress(
         .expect("test consent matches guest")
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires the built wasm32-wasip2 AWS guest; run explicitly after cargo build"]
-async fn wasm_guest_normalizes_mixed_leaves_restores_deferred_values_and_maps_errors() {
+async fn guest_normalizer() -> (
+    Box<dyn carina_core::provider::ProviderNormalizer>,
+    tempfile::TempDir,
+) {
     let path = std::env::var_os("CARINA_AWS_WASM")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -151,6 +152,88 @@ async fn wasm_guest_normalizes_mixed_leaves_restores_deferred_values_and_maps_er
         .create_normalizer(None, &config)
         .await
         .expect("initialize the real AWS guest normalizer without AWS calls");
+    (normalizer, cache)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the built wasm32-wasip2 AWS guest; run explicitly after cargo build"]
+async fn wasm_guest_enforces_ec2_rules_and_preserves_deferred_leaves() {
+    let (normalizer, _cache) = guest_normalizer().await;
+    let mut invalid: Vec<ProviderResource> = vec![
+        Resource::with_provider("aws", "ec2.FlowLog", "transit-interval", None)
+            .with_attribute("resource_type", string("TransitGateway"))
+            .with_attribute(
+                "max_aggregation_interval",
+                Value::Concrete(ConcreteValue::Int(600)),
+            )
+            .with_attribute("log_destination_type", string("s3"))
+            .into(),
+    ];
+    let error = normalizer
+        .normalize_desired(&mut invalid)
+        .await
+        .expect_err("transit gateway intervals must be checked by the guest");
+    assert!(
+        error.to_string().contains("max_aggregation_interval"),
+        "{error}"
+    );
+    let mut invalid: Vec<ProviderResource> = vec![
+        Resource::with_provider("aws", "ec2.Subnet", "ipv6-hostname", None)
+            .with_attribute("ipv6_native", Value::Concrete(ConcreteValue::Bool(true)))
+            .with_attribute(
+                "private_dns_name_options_on_launch",
+                map([("hostname_type", string("ip-name"))]),
+            )
+            .into(),
+    ];
+    let error = normalizer
+        .normalize_desired(&mut invalid)
+        .await
+        .expect_err("IPv6-only hostnames must be checked by the guest");
+    assert!(error.to_string().contains("hostname_type"), "{error}");
+    let mut invalid: Vec<ProviderResource> = vec![
+        Resource::with_provider("aws", "ec2.Vpc", "host-tenancy", None)
+            .with_attribute("instance_tenancy", string("host"))
+            .into(),
+    ];
+    let error = normalizer
+        .normalize_desired(&mut invalid)
+        .await
+        .expect_err("request-only tenancy restrictions must be checked by the guest");
+    assert!(error.to_string().contains("instance_tenancy"), "{error}");
+
+    let interval = secret(Value::Concrete(ConcreteValue::Int(600)));
+    let traffic = reference("traffic_type");
+    let mut resources: Vec<ProviderResource> = vec![
+        Resource::with_provider("aws", "ec2.FlowLog", "unknown", None)
+            .with_attribute("resource_type", string("TransitGateway"))
+            .with_attribute("log_destination_type", string("s3"))
+            .with_attribute("max_aggregation_interval", interval.clone())
+            .with_attribute("traffic_type", traffic.clone())
+            .into(),
+        Resource::with_provider("awscc", "ec2.Vpc", "other-provider", None)
+            .with_attribute("instance_tenancy", string("host"))
+            .into(),
+    ];
+    normalizer
+        .normalize_desired(&mut resources)
+        .await
+        .expect("deferred values and the other provider must pass unchanged");
+    assert_eq!(
+        resources[0].get_attr("max_aggregation_interval"),
+        Some(&interval)
+    );
+    assert_eq!(resources[0].get_attr("traffic_type"), Some(&traffic));
+    assert_eq!(
+        resources[1].get_attr("instance_tenancy"),
+        Some(&string("host"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the built wasm32-wasip2 AWS guest; run explicitly after cargo build"]
+async fn wasm_guest_normalizes_mixed_leaves_restores_deferred_values_and_maps_errors() {
+    let (normalizer, _cache) = guest_normalizer().await;
 
     let private_san = secret(string("PRIVATE.EXAMPLE.COM."));
     let san_ref = reference("domain_name");

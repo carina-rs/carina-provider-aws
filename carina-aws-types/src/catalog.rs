@@ -146,6 +146,150 @@ pub fn validated_int_enum(identity: TypeIdentity, valid_values: &'static [i64]) 
     )
 }
 
+fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> AttributeType {
+    AttributeType::refined_int_with_validator(
+        identity,
+        Some((values.first().copied(), values.last().copied())),
+        legacy_validator(move |value| match value {
+            Value::Concrete(ConcreteValue::Int(value)) if values.contains(value) => Ok(()),
+            _ => Err(format!("expected one of the integer values {values:?}")),
+        }),
+    )
+}
+
+fn is_private_amazon_side_asn(value: i64) -> bool {
+    (64512..=65534).contains(&value) || (4200000000..=4294967294).contains(&value)
+}
+
+fn ec2_amazon_side_asn_type(identity: TypeIdentity) -> AttributeType {
+    AttributeType::refined_int_with_validator(
+        identity,
+        Some((Some(64512), Some(4294967294))),
+        legacy_validator(|value| match value {
+            Value::Concrete(ConcreteValue::Int(value)) if is_private_amazon_side_asn(*value) => {
+                Ok(())
+            }
+            _ => Err("expected a private ASN in 64512..=65534 or 4200000000..=4294967294".into()),
+        }),
+    )
+}
+
+// https://aws.amazon.com/vpn/faqs/ — Virtual private gateway legacy ASNs:
+// 9059 (Dublin), 17493 (Singapore), 10124 (Tokyo), 7224 (other regions).
+const VPN_GATEWAY_LEGACY_AMAZON_ASNS: &[i64] = &[7224, 9059, 10124, 17493];
+
+fn ec2_vpn_gateway_amazon_side_asn_type(identity: TypeIdentity) -> AttributeType {
+    AttributeType::refined_int_with_validator(
+        identity,
+        Some((Some(VPN_GATEWAY_LEGACY_AMAZON_ASNS[0]), Some(4294967294))),
+        legacy_validator(|value| {
+            match value {
+            Value::Concrete(ConcreteValue::Int(value))
+                if is_private_amazon_side_asn(*value)
+                    || VPN_GATEWAY_LEGACY_AMAZON_ASNS.contains(value) => Ok(()),
+            _ => Err("expected a private ASN in 64512..=65534 or 4200000000..=4294967294, or legacy Amazon ASN 7224, 9059, 10124, or 17493".into()),
+        }
+        }),
+    )
+}
+
+fn ec2_cidr_type(
+    identity: TypeIdentity,
+    validate: fn(&str) -> Result<(), String>,
+) -> AttributeType {
+    AttributeType::refined_string_with_validator(
+        identity,
+        None,
+        None,
+        legacy_validator(move |value| match value {
+            Value::Concrete(ConcreteValue::String(value)) => validate(value.expose_plaintext()),
+            _ => Err("expected a CIDR string".into()),
+        }),
+        None,
+    )
+}
+
+fn ipv4_cidr_parts(value: &str) -> Result<([u8; 4], u8), String> {
+    // Preserve the established parser's accepted spellings and host bits.
+    // These validators never rewrite an authored or stored CIDR.
+    carina_core::schema::validate_ipv4_cidr(value)?;
+    let (address, prefix) = value.split_once('/').expect("validated CIDR");
+    let mut octets = address
+        .split('.')
+        .map(|part| part.parse::<u8>().expect("validated IPv4 octet"));
+    Ok((
+        std::array::from_fn(|_| octets.next().expect("four IPv4 octets")),
+        prefix.parse().expect("validated prefix"),
+    ))
+}
+
+fn validate_ec2_subnet_ipv4_cidr(value: &str) -> Result<(), String> {
+    let (_, prefix) = ipv4_cidr_parts(value)?;
+    if (16..=28).contains(&prefix) {
+        Ok(())
+    } else {
+        Err("IPv4 subnet CIDR prefix must be 16..=28".into())
+    }
+}
+
+fn validate_ec2_vpc_cidr(value: &str) -> Result<(), String> {
+    validate_ec2_subnet_ipv4_cidr(value)?;
+    let (octets, _) = ipv4_cidr_parts(value)?;
+    if matches!(octets, [0 | 127, ..] | [169, 254, ..] | [224..=239, ..]) {
+        Err("VPC CIDR must not use 0/8, 127/8, 169.254/16, or 224/4".into())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_ec2_subnet_ipv6_cidr(value: &str) -> Result<(), String> {
+    carina_core::schema::validate_ipv6_cidr(value)?;
+    let (_, prefix) = value.split_once('/').expect("validated IPv6 CIDR");
+    if [44, 48, 52, 56, 60, 64].contains(&prefix.parse::<u8>().expect("validated prefix")) {
+        Ok(())
+    } else {
+        Err("IPv6 subnet CIDR prefix must be 44, 48, 52, 56, 60, or 64".into())
+    }
+}
+
+fn validate_ec2_transit_gateway_cidr(value: &str) -> Result<(), String> {
+    if value.contains(':') {
+        carina_core::schema::validate_ipv6_cidr(value)?;
+        let (_, prefix) = value.split_once('/').expect("validated IPv6 CIDR");
+        if prefix.parse::<u8>().expect("validated prefix") <= 64 {
+            return Ok(());
+        }
+    } else {
+        let (octets, prefix) = ipv4_cidr_parts(value)?;
+        if prefix <= 24 {
+            // Reject CIDRs intersecting the documented link-local exclusion,
+            // including supernets of 169.254/16. Host bits remain accepted.
+            let mask = u32::MAX
+                .checked_shl(u32::from(32 - prefix.min(16)))
+                .unwrap_or(0);
+            if (u32::from_be_bytes(octets) & mask) != (u32::from_be_bytes([169, 254, 0, 0]) & mask)
+            {
+                return Ok(());
+            }
+            return Err("transit gateway CIDR must not overlap 169.254.0.0/16".into());
+        }
+    }
+    Err("transit gateway CIDR must be IPv4 /24 or larger, or IPv6 /64 or larger".into())
+}
+
+const EC2_SECURITY_GROUP_NAME_PATTERN: &str = r"^[A-Za-z0-9 ._:/()#,@\[\]+=\&;{}!$*\-]+\z";
+
+fn validate_ec2_security_group_name(value: &str) -> Result<(), String> {
+    static PATTERN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(EC2_SECURITY_GROUP_NAME_PATTERN).expect("EC2 security group name pattern")
+    });
+    if value.len() <= 255 && PATTERN.is_match(value) && !value.starts_with("sg-") {
+        Ok(())
+    } else {
+        Err("security group name must be 1..=255 permitted ASCII characters and must not start with sg-".into())
+    }
+}
+
 fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> AttributeType {
     let pattern = format!("^{prefix}-[0-9a-f]{{8,}}$");
     AttributeType::refined_string_with_validator(
@@ -1051,6 +1195,101 @@ define_aws_type_catalog! {
             None,
         ),
     },
+    /// TGW private ASN: ec2.json TransitGatewayRequestOptions$AmazonSideAsn.
+    /// Its API and creation guide specify private ranges, with no legacy set.
+    /// AWSCC owns its own types.
+    /// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
+    /// https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
+    Ec2AmazonSideAsn => ec2_amazon_side_asn {
+        segments: ["ec2"],
+        kind: "AmazonSideAsn",
+        valid_sample: "64512",
+        has_validator: true,
+        constructor: ec2_amazon_side_asn_type,
+    },
+    /// VGW private and legacy Amazon ASNs, including existing read-back values.
+    /// The provider-wide identity is wider than the EC2 private-only identity:
+    /// its empty segments preserve TGW -> VGW assignment through core widening.
+    /// The reverse assignment lacks containment because VGWs can return legacy ASNs.
+    /// https://aws.amazon.com/vpn/faqs/
+    Ec2VpnGatewayAmazonSideAsn => ec2_vpn_gateway_amazon_side_asn {
+        segments: [],
+        kind: "AmazonSideAsn",
+        valid_sample: "64512",
+        has_validator: true,
+        constructor: ec2_vpn_gateway_amazon_side_asn_type,
+    },
+    /// CreateFlowLogsRequest$MaxAggregationInterval -> Integer (prose).
+    /// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
+    Ec2FlowLogMaxAggregationInterval => ec2_flow_log_max_aggregation_interval {
+        segments: ["ec2", "FlowLog"],
+        kind: "MaxAggregationInterval",
+        valid_sample: "60",
+        values: [60, 600],
+        has_validator: true,
+        constructor: ec2_int_enum,
+    },
+    /// CreateSubnetRequest$Ipv6NetmaskLength -> NetmaskLength (prose).
+    /// https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+    Ec2SubnetIpv6NetmaskLength => ec2_subnet_ipv6_netmask_length {
+        segments: ["ec2", "Subnet"],
+        kind: "Ipv6NetmaskLength",
+        valid_sample: "64",
+        values: [44, 48, 52, 56, 60, 64],
+        has_validator: true,
+        constructor: ec2_int_enum,
+    },
+    /// CreateSecurityGroupRequest$GroupName: ASCII alphabet and reserved prefix.
+    /// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateSecurityGroup.html
+    Ec2SecurityGroupName => ec2_security_group_name {
+        segments: ["ec2", "SecurityGroup"],
+        kind: "Name",
+        valid_sample: "carina-security-group",
+        has_validator: true,
+        constructor: |identity| validated_string(
+            identity, EC2_SECURITY_GROUP_NAME_PATTERN, Some((Some(1), Some(255))),
+            validate_ec2_security_group_name,
+        ),
+    },
+    /// CreateVpcRequest$CidrBlock; retain the parser, constrain prefix/ranges.
+    /// Keep core's Ipv4Cidr kind so resource values widen to generic sinks.
+    /// https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html
+    Ec2VpcCidrBlock => ec2_vpc_cidr_block {
+        segments: ["ec2", "Vpc"],
+        kind: "Ipv4Cidr",
+        valid_sample: "10.0.0.0/16",
+        has_validator: true,
+        constructor: |identity| ec2_cidr_type(identity, validate_ec2_vpc_cidr),
+    },
+    /// CreateSubnetRequest$CidrBlock, preserving noncanonical input spellings.
+    /// https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+    Ec2SubnetIpv4CidrBlock => ec2_subnet_ipv4_cidr_block {
+        segments: ["ec2", "Subnet"],
+        kind: "Ipv4Cidr",
+        valid_sample: "10.0.0.0/24",
+        has_validator: true,
+        constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv4_cidr),
+    },
+    /// CreateSubnetRequest$Ipv6CidrBlock: /44..=/64 in increments of four.
+    /// https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
+    Ec2SubnetIpv6CidrBlock => ec2_subnet_ipv6_cidr_block {
+        segments: ["ec2", "Subnet"],
+        kind: "Ipv6Cidr",
+        valid_sample: "2001:db8::/64",
+        has_validator: true,
+        constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv6_cidr),
+    },
+    /// TransitGatewayRequestOptions$TransitGatewayCidrBlocks accepts both families.
+    /// This mixed domain cannot honestly widen to core's IPv4-only Ipv4Cidr.
+    /// https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
+    /// https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
+    Ec2TransitGatewayCidrBlock => ec2_transit_gateway_cidr_block {
+        segments: ["ec2", "TransitGateway"],
+        kind: "CidrBlock",
+        valid_sample: "10.0.0.0/24",
+        has_validator: true,
+        constructor: |identity| ec2_cidr_type(identity, validate_ec2_transit_gateway_cidr),
+    },
     /// EC2 VPC ID.
     VpcId => vpc_id {
         segments: ["ec2", "Vpc"],
@@ -1513,6 +1752,15 @@ mod tests {
             AwsType::KmsKeyId,
             AwsType::KmsKeyArn,
             AwsType::IpamPoolId,
+            AwsType::Ec2AmazonSideAsn,
+            AwsType::Ec2VpnGatewayAmazonSideAsn,
+            AwsType::Ec2FlowLogMaxAggregationInterval,
+            AwsType::Ec2SubnetIpv6NetmaskLength,
+            AwsType::Ec2SecurityGroupName,
+            AwsType::Ec2VpcCidrBlock,
+            AwsType::Ec2SubnetIpv4CidrBlock,
+            AwsType::Ec2SubnetIpv6CidrBlock,
+            AwsType::Ec2TransitGatewayCidrBlock,
             AwsType::VpcId,
             AwsType::SubnetId,
             AwsType::SecurityGroupId,
@@ -1541,7 +1789,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            47,
+            56,
             "the shared catalog validator contract changed"
         );
 
@@ -1853,6 +2101,15 @@ StsCallerIdentityArn|aws|sts/CallerIdentity|Arn|arn:aws:sts::123456789012:assume
 OrganizationsAccountEmail|aws|organizations/Account|Email|user@example.com|true
 OrganizationsAccountArn|aws|organizations/Account|Arn|arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012|false
 OrganizationsOrganizationArn|aws|organizations/Organization|Arn|arn:aws:organizations::123456789012:organization/o-exampleorgid|false
+Ec2AmazonSideAsn|aws|ec2|AmazonSideAsn|64512|true
+Ec2VpnGatewayAmazonSideAsn|aws||AmazonSideAsn|64512|true
+Ec2FlowLogMaxAggregationInterval|aws|ec2/FlowLog|MaxAggregationInterval|60|true
+Ec2SubnetIpv6NetmaskLength|aws|ec2/Subnet|Ipv6NetmaskLength|64|true
+Ec2SecurityGroupName|aws|ec2/SecurityGroup|Name|carina-security-group|true
+Ec2VpcCidrBlock|aws|ec2/Vpc|Ipv4Cidr|10.0.0.0/16|true
+Ec2SubnetIpv4CidrBlock|aws|ec2/Subnet|Ipv4Cidr|10.0.0.0/24|true
+Ec2SubnetIpv6CidrBlock|aws|ec2/Subnet|Ipv6Cidr|2001:db8::/64|true
+Ec2TransitGatewayCidrBlock|aws|ec2/TransitGateway|CidrBlock|10.0.0.0/24|true
 VpcId|aws|ec2/Vpc|Id|vpc-12345678|true
 SubnetId|aws|ec2/Subnet|Id|subnet-12345678|true
 SecurityGroupId|aws|ec2/SecurityGroup|Id|sg-12345678|true
