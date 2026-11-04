@@ -60,21 +60,21 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_format", AttributeType::string())
+            AttributeSchema::optional("log_format", AttributeType::refined_string(None, Some("^\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\}(?: +\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\})*\\z".to_string()), None, None))
                 .create_only()
                 .with_description("The fields to include in the flow log record. List the fields in the order in which they should appear. If you omit this parameter, the flow log is cr...")
                 .with_provider_name("LogFormat")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_group_name", AttributeType::string())
+            AttributeSchema::optional("log_group_name", AttributeType::refined_string(None, Some("^[.\\-_/#A-Za-z0-9]{1,512}\\z".to_string()), Some((Some(1), Some(512))), None))
                 .create_only()
                 .with_description("The name of a new or existing CloudWatch Logs log group where Amazon EC2 publishes your flow logs. This parameter is valid only if the destination typ...")
                 .with_provider_name("LogGroupName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("max_aggregation_interval", AttributeType::int())
+            AttributeSchema::optional("max_aggregation_interval", carina_aws_types::ec2_flow_log_max_aggregation_interval())
                 .create_only()
                 .with_description("The maximum interval of time during which a flow of packets is captured and aggregated into a flow log record. The possible values are 60 seconds (1 m...")
                 .with_provider_name("MaxAggregationInterval")
@@ -101,7 +101,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tag_field_specifications", AttributeType::list(AttributeType::struct_(
+            AttributeSchema::optional("tag_field_specifications", AttributeType::refined_list(AttributeType::struct_(
                     "TagFieldSpecificationRequest".to_string(),
                     vec![
                     StructField::optional("resource_type", AttributeType::enum_(
@@ -111,9 +111,9 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
     None,
     None,
 )).with_description("The resource type for the tag keys associated with the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("ResourceType").build(),
-                    StructField::optional("tag_keys", AttributeType::list(AttributeType::string())).with_description("The tag keys on your tagged resources to be displayed by the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("TagKeys").build()
+                    StructField::optional("tag_keys", AttributeType::refined_list(AttributeType::refined_string(None, Some("(?s)^.{1,128}\\z".to_string()), Some((Some(1), Some(128))), None), true, Some((Some(1), Some(2))), carina_core::schema::ListElements::AllowDuplicates)).with_description("The tag keys on your tagged resources to be displayed by the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("TagKeys").build()
                     ],
-                )))
+                ), true, Some((Some(1), Some(3))), carina_core::schema::ListElements::AllowDuplicates))
                 .create_only()
                 .with_description("The tag configuration associated with the Flow Logs Amazon EC2 Tags feature fields in your custom log format.")
                 .with_provider_name("TagFieldSpecifications")

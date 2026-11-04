@@ -6,7 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.Subnet (Smithy: com.amazonaws.ec2)
@@ -40,7 +40,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("cidr_block", types::ipv4_cidr())
+            AttributeSchema::optional("cidr_block", carina_aws_types::ec2_subnet_ipv4_cidr_block())
                 .create_only()
                 .with_description("The IPv4 network range for the subnet, in CIDR notation. For example, 10.0.0.0/24. We modify the specified CIDR block to its canonical form; for examp...")
                 .with_provider_name("CidrBlock")
@@ -53,7 +53,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("enable_lni_at_device_index", AttributeType::int())
+            AttributeSchema::optional("enable_lni_at_device_index", AttributeType::refined_int(None, Some((Some(1), Some(2147483647)))))
                 .with_description("Indicates the device position for local network interfaces in this subnet. For example, 1 indicates local network interfaces in this subnet are the se...")
                 .with_provider_name("EnableLniAtDeviceIndex")
                 .build(),
@@ -68,17 +68,14 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(
-                None,
-                Some((Some(0), Some(32))),
-            ))
+            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(None, Some((Some(16), Some(28)))))
                 .create_only()
                 .with_description("An IPv4 netmask length for the subnet.")
                 .with_provider_name("Ipv4NetmaskLength")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv6_cidr_block", types::ipv6_cidr())
+            AttributeSchema::optional("ipv6_cidr_block", carina_aws_types::ec2_subnet_ipv6_cidr_block())
                 .create_only()
                 .with_description("The IPv6 network range for the subnet, in CIDR notation. This parameter is required for an IPv6 only subnet.")
                 .with_provider_name("Ipv6CidrBlock")
@@ -101,10 +98,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv6_netmask_length", AttributeType::refined_int(
-                None,
-                Some((Some(0), Some(128))),
-            ))
+            AttributeSchema::optional("ipv6_netmask_length", carina_aws_types::ec2_subnet_ipv6_netmask_length())
                 .create_only()
                 .with_description("An IPv6 netmask length for the subnet.")
                 .with_provider_name("Ipv6NetmaskLength")

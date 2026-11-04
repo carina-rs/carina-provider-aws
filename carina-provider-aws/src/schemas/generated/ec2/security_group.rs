@@ -27,7 +27,7 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("group_name", AttributeType::string())
+            AttributeSchema::required("group_name", carina_aws_types::ec2_security_group_name())
                 .create_only()
                 .with_description("The name of the security group. Names are case-insensitive and must be unique within the VPC. Constraints: Up to 255 characters in length. Can't start...")
                 .with_provider_name("GroupName")

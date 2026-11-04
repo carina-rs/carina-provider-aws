@@ -1053,11 +1053,53 @@ mod tests {
     use carina_plugin_sdk::{ProviderSchemaCache, dispatch_custom_type_validation};
 
     #[test]
+    fn vpn_gateway_legacy_asn_validation_dispatches_through_sdk_bridge() {
+        let cache = ProviderSchemaCache::from_provider(&AwsProcessProvider::new())
+            .expect("AWS schemas must build a dispatch table");
+        let vgw = cache
+            .schemas()
+            .iter()
+            .find(|schema| schema.parts().resource_type == "ec2.VpnGateway")
+            .unwrap();
+        let RawShape::Int {
+            identity: Some(identity),
+            ..
+        } = vgw.parts().attributes["amazon_side_asn"]
+            .attr_type()
+            .raw_shape()
+        else {
+            panic!("VGW ASN must remain an identified Int")
+        };
+        let vgw_identity = wire_identity(identity);
+        let tgw_identity = wire_identity(&CoreTypeIdentity::new(
+            Some("aws"),
+            ["ec2"],
+            "AmazonSideAsn",
+        ));
+        for asn in [7224, 9059, 10124, 17493] {
+            let text = asn.to_string();
+            dispatch_custom_type_validation(&cache, &vgw_identity, &text)
+                .unwrap_or_else(|error| panic!("VGW legacy ASN {asn}: {error}"));
+            assert!(dispatch_custom_type_validation(&cache, &tgw_identity, &text).is_err());
+        }
+        for asn in [64511, 65535] {
+            assert!(
+                dispatch_custom_type_validation(&cache, &vgw_identity, &asn.to_string()).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn native_and_wasm_guest_assignability_edges_match() {
         let native = carina_provider_aws::AwsProviderFactory.schema_witness();
         let guest = AwsProcessProvider::new();
         assert_eq!(native.assignability_edges(), guest.assignability_edges());
-        assert!(native.assignability_edges().is_empty());
+        let expected = [carina_core::schema::AssignabilityEdge::new(
+            CoreTypeIdentity::new(Some("aws"), ["ec2", "Vpc"], "Ipv4Cidr"),
+            CoreTypeIdentity::new(Some("aws"), ["ec2", "Subnet"], "Ipv4Cidr"),
+        )
+        .expect("distinct VPC and Subnet CIDR identities")];
+        assert_eq!(native.assignability_edges(), expected.as_slice());
 
         // export_provider!'s schemas export uses this same cache and serializer.
         let cache = ProviderSchemaCache::from_provider(&guest).expect("guest schema cache");

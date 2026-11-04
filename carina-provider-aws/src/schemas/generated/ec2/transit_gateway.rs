@@ -6,7 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.TransitGateway (Smithy: com.amazonaws.ec2)
@@ -29,7 +29,7 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
             AttributeSchema::optional("options", AttributeType::struct_(
                     "TransitGatewayRequestOptions".to_string(),
                     vec![
-                    StructField::optional("amazon_side_asn", AttributeType::int()).with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. The range is 64512 to 65534 for 16-bit ASNs and 4200000000 to 429496729...").with_provider_name("AmazonSideAsn").build(),
+                    StructField::optional("amazon_side_asn", carina_aws_types::ec2_amazon_side_asn()).with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. The range is 64512 to 65534 for 16-bit ASNs and 4200000000 to 429496729...").with_provider_name("AmazonSideAsn").build(),
                     StructField::optional("auto_accept_shared_attachments", AttributeType::enum_(
     carina_core::schema::enum_identity("AutoAcceptSharedAttachments", Some("aws.ec2.TransitGateway.TransitGatewayRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),
@@ -72,7 +72,7 @@ pub fn ec2_transit_gateway_config() -> AwsSchemaConfig {
     None,
     None,
 )).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is disabled by ...").with_provider_name("SecurityGroupReferencingSupport").build(),
-                    StructField::optional("transit_gateway_cidr_blocks", AttributeType::list(types::ipv4_cidr())).with_description("One or more IPv4 or IPv6 CIDR blocks for the transit gateway. Must be a size /24 CIDR block or larger for IPv4, or a size /64 CIDR block or larger for...").with_provider_name("TransitGatewayCidrBlocks").build(),
+                    StructField::optional("transit_gateway_cidr_blocks", AttributeType::list(carina_aws_types::ec2_transit_gateway_cidr_block())).with_description("One or more IPv4 or IPv6 CIDR blocks for the transit gateway. Must be a size /24 CIDR block or larger for IPv4, or a size /64 CIDR block or larger for...").with_provider_name("TransitGatewayCidrBlocks").build(),
                     StructField::optional("vpn_ecmp_support", AttributeType::enum_(
     carina_core::schema::enum_identity("VpnEcmpSupport", Some("aws.ec2.TransitGateway.TransitGatewayRequestOptions")),
     Some(vec!["disable".to_string(), "enable".to_string()]),

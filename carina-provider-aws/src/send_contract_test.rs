@@ -503,6 +503,7 @@ fn sample_typed_string(
     let sample = std::iter::once(preferred.as_str())
         .chain(row.map(|row| row.valid_sample()))
         .chain(carina_aws_types::AwsType::ALL.iter().map(|row| row.valid_sample()))
+        .chain(std::iter::once("${version}"))
         .find(accepts)
         .unwrap_or_else(|| {
             panic!(
@@ -693,6 +694,35 @@ fn samples_follow_acm_leaf_types_without_attribute_name_hints() {
     }
 }
 
+#[test]
+fn ec2_samples_satisfy_new_scalar_refinements() {
+    for (resource, path) in [
+        ("ec2.FlowLog", "log_format"),
+        ("ec2.FlowLog", "max_aggregation_interval"),
+        ("ec2.Subnet", "ipv6_netmask_length"),
+        ("ec2.TransitGateway", "options.amazon_side_asn"),
+        ("ec2.TransitGateway", "options.transit_gateway_cidr_blocks"),
+    ] {
+        let schema = crate::schemas::all_schemas()
+            .into_iter()
+            .find(|schema| schema.as_schema().resource_type() == resource)
+            .unwrap();
+        let names = path.split('.').map(str::to_string).collect::<Vec<_>>();
+        let ty = schema.effective_node_at_path(&names).unwrap().value_type();
+        let sample = sample_value(
+            "fixture.Sample",
+            schema.as_schema(),
+            ty.as_type(),
+            &mut vec!["opaque".into()],
+            &mut ShapeWalkBudget::new(64),
+        );
+        assert!(
+            ty.validate(&sample).is_ok(),
+            "{resource}.{path}: {sample:?}"
+        );
+    }
+}
+
 fn set_sample(resource: &mut Resource, schema: &ValidatedResourceSchema, name: &str) {
     let attribute = schema.effective_attribute(name).unwrap_or_else(|| {
         panic!(
@@ -757,6 +787,15 @@ fn focused_resource(
     set_sample(&mut resource, schema, target.name);
 
     match contract.resource_type {
+        "ec2.FlowLog" => {
+            // Keep capture requests valid under CreateFlowLogs' conditional
+            // requirements. Each target's sent value is still checked below.
+            set_sample(&mut resource, schema, "traffic_type");
+            set_sample(&mut resource, schema, "deliver_logs_permission_arn");
+            if target.name != "log_destination" {
+                set_sample(&mut resource, schema, "log_group_name");
+            }
+        }
         "ec2.Vpc" => {
             if matches!(target.name, "ipv4_ipam_pool_id" | "ipv4_netmask_length") {
                 resource.attributes.shift_remove("cidr_block");
