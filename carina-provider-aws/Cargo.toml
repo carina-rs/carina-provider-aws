@@ -57,6 +57,7 @@ carina-codegen-aws = { path = "../carina-codegen-aws" }
 carina-provider-aws = { path = ".", features = ["test-utils"] }
 carina-aws-types = { path = "../carina-aws-types", default-features = false, features = ["test-utils"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
+tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }
 winterbaume-core = "0.2"
 winterbaume-s3 = "0.2"

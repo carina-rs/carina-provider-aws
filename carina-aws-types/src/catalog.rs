@@ -20,6 +20,78 @@ use crate::{
 // Spell out ASCII \w and require the match to consume the entire input.
 const IAM_NAME_PATTERN: &str = r"^[A-Za-z0-9_+=,.@-]+\z";
 
+/// ACM DomainNameString, translated without Smithy's unsupported lookahead.
+/// Shared by request refinements and the broader read-side domain refinements.
+pub const ACM_CERTIFICATE_DOMAIN_NAME_PATTERN: &str = r"^(?:\*\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\z";
+
+/// Additional public-certificate request rules, included in generated docs.
+pub const ACM_CERTIFICATE_REQUEST_DOMAIN_RULE: &str = "Labels with -- in positions 3–4 must start with xn--; xn-- labels must decode as valid IDNA labels.";
+
+fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> AttributeType {
+    AttributeType::refined_string_with_validator(
+        identity,
+        Some(ACM_CERTIFICATE_DOMAIN_NAME_PATTERN.to_string()),
+        Some((Some(1), Some(maximum as u64))),
+        legacy_validator(move |value| {
+            let Value::Concrete(ConcreteValue::String(domain)) = value else {
+                return Err("Expected string".into());
+            };
+            let domain = domain.expose_plaintext();
+            static PATTERN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+                regex::Regex::new(ACM_CERTIFICATE_DOMAIN_NAME_PATTERN).expect("ACM domain pattern")
+            });
+            if domain.len() > maximum || !PATTERN.is_match(domain) {
+                return Err(format!(
+                    "expected an ACM wildcard FQDN of 1..={maximum} octets"
+                ));
+            }
+            for label in domain.strip_prefix("*.").unwrap_or(domain).split('.') {
+                if label.as_bytes().get(2..4) == Some(b"--") {
+                    if !label[..2].eq_ignore_ascii_case("xn") {
+                        return Err(ACM_CERTIFICATE_REQUEST_DOMAIN_RULE.into());
+                    }
+                    // idna 1.1.0 ToASCII validates the decoded A-label; merely
+                    // decoding Punycode would also accept invalid IDNA labels.
+                    idna::domain_to_ascii_strict(label)
+                        .map_err(|_| ACM_CERTIFICATE_REQUEST_DOMAIN_RULE.to_string())?;
+                }
+            }
+            Ok(())
+        }),
+        None,
+    )
+}
+
+// HttpRedirect URLs include a domain/authority for HTTP GET validation, but
+// specify neither a scheme restriction nor a numeric length cap.
+// https://docs.aws.amazon.com/acm/latest/APIReference/API_HttpRedirect.html
+const ACM_VALIDATION_URL_PATTERN: &str =
+    r"^[A-Za-z][A-Za-z0-9+.-]*://[^\s\x00-\x1F\x7F/?#]+(?:[/?#][^\s\x00-\x1F\x7F]*)?\z";
+
+fn validate_acm_validation_url(value: &str) -> Result<(), String> {
+    if value.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("validation URL must not contain whitespace or control characters".into());
+    }
+    let (_, rest) = value
+        .split_once("://")
+        .ok_or("expected an absolute URL with an authority")?;
+    if rest.starts_with(['/', '?', '#']) {
+        return Err("validation URL must have a nonempty authority".into());
+    }
+    let violation = std::cell::Cell::new(None);
+    let parsed = url::Url::options()
+        .syntax_violation_callback(Some(&|reason| violation.set(Some(reason))))
+        .parse(value)
+        .map_err(|error| format!("invalid absolute URL: {error}"))?;
+    if let Some(reason) = violation.get() {
+        return Err(format!("invalid URL syntax: {reason}"));
+    }
+    if !parsed.has_host() {
+        return Err("validation URL must have a host".into());
+    }
+    Ok(())
+}
+
 fn validated_string(
     identity: TypeIdentity,
     pattern: &'static str,
@@ -683,6 +755,72 @@ define_aws_type_catalog! {
         valid_sample: "CNAME",
         has_validator: false,
         constructor: dns_record_type_type,
+    },
+    /// Public RequestCertificate Common Name: DomainNameString plus the
+    /// request's 64-octet cap and IDNA rules. Never use on read-side domains.
+    /// https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html
+    /// https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
+    AcmCertificateDomainName => acm_certificate_domain_name {
+        segments: ["acm", "Certificate"],
+        kind: "DomainName",
+        valid_sample: "xn--r8jz45g.carina-rs.dev",
+        has_validator: true,
+        constructor: |identity| acm_request_domain_type(identity, 64),
+    },
+    /// Additional public certificate request domain: same IDNA rules, 253 cap.
+    /// https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html
+    /// https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
+    AcmCertificateSubjectAlternativeName => acm_certificate_subject_alternative_name {
+        segments: ["acm", "Certificate"],
+        kind: "SubjectAlternativeName",
+        valid_sample: "xn--r8jz45g.carina-rs.dev",
+        has_validator: true,
+        constructor: |identity| acm_request_domain_type(identity, 253),
+    },
+    /// ACM certificate resource ARN:
+    /// arn:${Partition}:acm:${Region}:${Account}:certificate/${CertificateId}.
+    /// https://docs.aws.amazon.com/service-authorization/latest/reference/list_acm.html#awscertificatemanager-resources-for-iam-policies
+    /// Arn in cached acm.json supplies the 20..2048 bound and ID character set;
+    /// the resource grammar excludes other ACM resources and extra path parts.
+    /// The authorization reference does not require a UUID-shaped CertificateId.
+    /// Use the repo-wide partitions and 12-digit accounts, as for SQS (#638):
+    /// https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html
+    AcmCertificateArn => acm_certificate_arn {
+        segments: ["acm", "Certificate"],
+        kind: "Arn",
+        valid_sample: "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef",
+        has_validator: false,
+        constructor: |identity| metadata_string(
+            identity,
+            r"^arn:(?:aws|aws-cn|aws-us-gov):acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z",
+            Some((Some(20), Some(2048))),
+        ),
+    },
+    /// RequestCertificate supports only these three algorithms. The other
+    /// KeyAlgorithm enum members in acm.json are imported-certificate-only.
+    /// Keep the existing AWS identity and aliases; AWSCC has its own catalog.
+    /// https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html#ACM-RequestCertificate-request-KeyAlgorithm
+    AcmCertificateKeyAlgorithm => acm_certificate_key_algorithm {
+        segments: ["acm", "Certificate"],
+        kind: "KeyAlgorithm",
+        valid_sample: "RSA_2048",
+        has_validator: false,
+        constructor: |identity| crate::common::enum_with_dsl_aliases(
+            &["EC_prime256v1", "EC_secp384r1", "RSA_2048"], identity,
+        ),
+    },
+    /// Absolute URLs returned by HttpRedirect.{RedirectFrom,RedirectTo}.
+    /// Reject every parser syntax violation without forcing HTTPS or capping
+    /// the total URL length.
+    /// https://docs.aws.amazon.com/acm/latest/APIReference/API_HttpRedirect.html
+    AcmCertificateValidationUrl => acm_certificate_validation_url {
+        segments: ["acm", "Certificate"],
+        kind: "ValidationUrl",
+        valid_sample: "http://example.com/.well-known/pki-validation/token.txt",
+        has_validator: true,
+        constructor: |identity| validated_string(
+            identity, ACM_VALIDATION_URL_PATTERN, None, validate_acm_validation_url,
+        ),
     },
     /// ACM's com.amazonaws.acm#RecordType enum in acm.json contains only CNAME.
     /// Keep its identity separate from Route 53's broader DNS record type enum.
@@ -1360,6 +1498,9 @@ mod tests {
             AwsType::AvailabilityZone,
             AwsType::AvailabilityZoneId,
             AwsType::S3LifecycleDate,
+            AwsType::AcmCertificateDomainName,
+            AwsType::AcmCertificateSubjectAlternativeName,
+            AwsType::AcmCertificateValidationUrl,
             AwsType::Elbv2TargetGroupHttpCode,
             AwsType::Elbv2TargetGroupGrpcCode,
             AwsType::LogsLogGroupRetentionInDays,
@@ -1400,7 +1541,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            44,
+            47,
             "the shared catalog validator contract changed"
         );
 
@@ -1688,6 +1829,11 @@ KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
+AcmCertificateDomainName|aws|acm/Certificate|DomainName|xn--r8jz45g.carina-rs.dev|true
+AcmCertificateSubjectAlternativeName|aws|acm/Certificate|SubjectAlternativeName|xn--r8jz45g.carina-rs.dev|true
+AcmCertificateArn|aws|acm/Certificate|Arn|arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef|false
+AcmCertificateKeyAlgorithm|aws|acm/Certificate|KeyAlgorithm|RSA_2048|false
+AcmCertificateValidationUrl|aws|acm/Certificate|ValidationUrl|http://example.com/.well-known/pki-validation/token.txt|true
 AcmCertificateResourceRecordType|aws|acm/Certificate|ResourceRecordType|CNAME|false
 Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|true
 Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true

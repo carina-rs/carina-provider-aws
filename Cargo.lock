@@ -1261,10 +1261,12 @@ dependencies = [
  "carina-provider-protocol",
  "futures",
  "heck",
+ "idna",
  "indexmap 2.14.0",
  "regex",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "url",
  "wasi 0.14.7+wasi-0.2.4",
 ]
 
@@ -1436,6 +1438,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "urlencoding",

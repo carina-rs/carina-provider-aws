@@ -437,7 +437,9 @@ impl MockService for LogGroupTagsDeniedService {
     }
 }
 
-struct AcmService;
+struct AcmService {
+    key_algorithm: &'static str,
+}
 
 impl MockService for AcmService {
     fn service_name(&self) -> &str {
@@ -465,7 +467,8 @@ impl MockService for AcmService {
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"POST_QUANTUM_2048","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"{key_algorithm}","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#,
+                    key_algorithm = self.key_algorithm,
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
@@ -1335,7 +1338,10 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 
 #[tokio::test]
 async fn certificate_options_validation_method_create_read_diff_round_trip() {
-    let provider = provider_from_service(AcmService).await;
+    let provider = provider_from_service(AcmService {
+        key_algorithm: "POST_QUANTUM_2048",
+    })
+    .await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
     desired.set_attr("domain_name", string("example.com"));
     desired.set_attr("subject_alternative_names", list(&["www.example.com"]));
@@ -1374,6 +1380,71 @@ async fn certificate_options_validation_method_create_read_diff_round_trip() {
         Some(&empty_map().to_snapshot())
     );
     assert_no_diff_with_nested_write_only(desired, current, &["options"]).await;
+}
+
+// carina-test-004, ap-northeast-1, 2026-11-04: DescribeCertificate uses
+// RSA-2048 / EC-prime256v1 although RequestCertificate uses underscores.
+#[tokio::test]
+async fn acm_hyphenated_key_algorithm_read_round_trip_has_no_diff() {
+    for (read, canonical, alias) in [
+        ("RSA-2048", "RSA_2048", "rsa_2048"),
+        ("EC-prime256v1", "EC_prime256v1", "ec_prime256v1"),
+        ("EC-secp384r1", "EC_secp384r1", "ec_secp384r1"),
+        ("RSA_2048", "RSA_2048", "rsa_2048"),
+        ("EC_prime256v1", "EC_prime256v1", "ec_prime256v1"),
+        ("EC_secp384r1", "EC_secp384r1", "ec_secp384r1"),
+    ] {
+        let provider = provider_from_service(AcmService {
+            key_algorithm: read,
+        })
+        .await;
+        let mut desired = Resource::with_provider("aws", "acm.Certificate", "algorithm", None);
+        desired.set_attr("domain_name", string("example.com"));
+        desired.set_attr("subject_alternative_names", list(&["www.example.com"]));
+        desired.set_attr(
+            "key_algorithm",
+            Value::Concrete(ConcreteValue::enum_identifier(format!(
+                "aws.acm.Certificate.KeyAlgorithm.{alias}"
+            ))),
+        );
+        desired.set_attr(
+            "options",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                (
+                    "certificate_transparency_logging_preference".into(),
+                    string("ENABLED"),
+                ),
+                ("export".into(), string("DISABLED")),
+            ]))),
+        );
+        desired.set_attr("tags", empty_map());
+        carina_core::value::canonicalize_resources_with_schemas(
+            std::slice::from_mut(&mut desired),
+            &schema_registry(),
+        )
+        .expect("canonicalize authored key algorithm");
+        let current = provider
+            .read(
+                &desired.id,
+                &applied_identifier(CERTIFICATE_ARN),
+                ReadRequest,
+            )
+            .await
+            .expect("describe certificate")
+            .into_state();
+
+        // Guard the create-only field against replacement or phantom diffs.
+        assert_no_diff(desired.clone(), current.clone());
+        assert_eq!(
+            current.attributes.get("key_algorithm"),
+            desired
+                .get_attr("key_algorithm")
+                .map(Value::to_snapshot)
+                .as_ref(),
+            "read spelling {read}"
+        );
+        assert_api_text(current.attributes.get("key_algorithm"), canonical);
+    }
 }
 
 #[tokio::test(start_paused = true)]
