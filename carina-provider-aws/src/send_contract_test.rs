@@ -1747,6 +1747,89 @@ async fn route53_update_uses_identifier_type_and_sends_mutable_attributes() {
     }
 }
 
+// Detailed per-type rejections live in tests/route53_record_set.rs. These two
+// cases prove the prepared-create and update hooks both stop before sending.
+const INVALID_ROUTE53_RDATA: &[(&str, &[&str])] = &[
+    ("A", &["999.1.2.3"]),
+    ("CNAME", &["one.example.com", "two.example.com"]),
+];
+
+#[tokio::test]
+async fn route53_update_rejects_resolved_invalid_rdata_before_send() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let schema = crate::test_resource_schema("route53.RecordSet");
+    for &(record_type, values) in INVALID_ROUTE53_RDATA {
+        service.clear();
+        // Create-only type/name in desired state must never replace the
+        // applied identity's values when selecting the outgoing grammar.
+        let desired = Resource::with_provider("aws", "route53.RecordSet", "invalid-update", None)
+            .with_attribute("type", string("CAA"))
+            .with_attribute("name", string("unused.example.com"))
+            .with_attribute("ttl", Value::Concrete(ConcreteValue::Int(300)))
+            .with_attribute(
+                "resource_records",
+                Value::Concrete(ConcreteValue::List(
+                    values.iter().map(|value| string(*value)).collect(),
+                )),
+            );
+        let identifier =
+            AppliedIdentifier::new(format!("Z123EXAMPLE|record.example.com|{record_type}"))
+                .unwrap();
+        let from = crate::test_existing_state(desired.id.clone(), desired.resolved_attributes())
+            .to_snapshot();
+        let update = crate::UpdateResource::new(&from, &UpdatePatch { ops: vec![] });
+        let error = provider
+            .update_route53_record_set(desired.id.clone(), &identifier, &update, schema)
+            .await
+            .expect_err("invalid RData must stop before the mutation");
+        assert!(matches!(error, ProviderError::InvalidInput(_)), "{error:?}");
+        assert!(error.to_string().contains("resource_records"), "{error}");
+        assert!(!error.to_string().contains(values[0]), "{error}");
+        assert!(
+            service.snapshot().is_empty(),
+            "{record_type} must not send invalid RData"
+        );
+    }
+}
+
+#[tokio::test]
+async fn route53_create_preparation_rejects_bad_rdata_before_send() {
+    let schema = crate::schemas::generated::route53::record_set::route53_record_set_config()
+        .schema
+        .validate()
+        .unwrap();
+    for &(record_type, values) in INVALID_ROUTE53_RDATA {
+        let mut resource =
+            Resource::with_provider("aws", "route53.RecordSet", "invalid-create", None)
+                .with_attribute("hosted_zone_id", string("Z123EXAMPLE"))
+                .with_attribute("name", string("carina-rs.dev"))
+                .with_attribute("ttl", Value::Concrete(ConcreteValue::Int(300)))
+                .with_attribute(
+                    "resource_records",
+                    Value::Concrete(ConcreteValue::List(
+                        values.iter().map(|value| string(*value)).collect(),
+                    )),
+                );
+        set_canonical_value(&mut resource, &schema, "type", string(record_type));
+        let error = prepare_create_for_capture(
+            resource,
+            &carina_core::binding_index::ResolvedBindings::default(),
+        )
+        .await
+        .expect_err("plan/create preparation must reject invalid Route 53 records");
+        assert!(format!("{error:?}").contains("resource_records"));
+    }
+}
+
 #[tokio::test]
 async fn every_sent_attribute_reaches_captured_create_and_update_mutations() {
     // Keep Tokio time live so accidental real sleeps fail within 10s, including

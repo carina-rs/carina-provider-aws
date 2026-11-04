@@ -3,7 +3,10 @@
 //! Uses ChangeResourceRecordSets (UPSERT/DELETE) and ListResourceRecordSets
 //! for CRUD operations. Cloud Control does not support Route 53 records.
 
+use std::sync::LazyLock;
+
 use indexmap::IndexMap;
+use regex::Regex;
 
 use carina_aws_types::sdk::route53::types::{
     AliasTarget, Change, ChangeAction, ChangeBatch, ResourceRecord, ResourceRecordSet, RrType,
@@ -15,7 +18,7 @@ use carina_core::resource::{
     AbsoluteBindingAddress, ConcreteValue, NoPlaceholder, Resource, ResourceId, Value,
 };
 use carina_core::schema::CompiledResourceSchema;
-use carina_plugin_sdk::{DesiredScalar, DesiredValueMut, DesiredView};
+use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue, DesiredValueMut, DesiredView};
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
@@ -48,9 +51,50 @@ fn normalize_dns_name(name: &str) -> String {
     }
 }
 
-/// Strip the trailing dot for display/comparison with user input.
-fn strip_trailing_dot(name: &str) -> String {
-    name.strip_suffix('.').unwrap_or(name).to_string()
+/// Main's dot-less stored spelling, shared by desired inputs and read state.
+///
+/// Route 53 returns a root dot, lowercase letters, and octal escapes for
+/// punctuation (including `\052` for `*`). Keep escaped label dots and
+/// backslashes escaped so normalization cannot change label boundaries or
+/// reinterpret an escaped backslash on a later pass.
+/// https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/DomainNameFormat.html
+// AWS: T4.Carina-588-Probe2.Example reads as t4.carina-588-probe2.example.; strip the dot for main's stored form.
+fn canonical_dns_name(name: &str) -> String {
+    let bytes = name.strip_suffix('.').unwrap_or(name).as_bytes();
+    let mut canonical = String::with_capacity(bytes.len());
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes[offset] == b'.' {
+            canonical.push('.');
+            offset += 1;
+            continue;
+        }
+        let byte = if bytes[offset] == b'\\' {
+            let Some(byte) = octal_byte(&bytes[offset + 1..]) else {
+                // Invalid escapes belong to validation; never reinterpret
+                // their following characters as an encoded octet.
+                canonical.push('\\');
+                offset += 1;
+                continue;
+            };
+            offset += 4;
+            byte
+        } else {
+            let byte = bytes[offset];
+            offset += 1;
+            byte
+        }
+        .to_ascii_lowercase();
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') {
+            canonical.push(char::from(byte));
+        } else {
+            canonical.push('\\');
+            canonical.push(char::from(b'0' + byte / 64));
+            canonical.push(char::from(b'0' + (byte / 8) % 8));
+            canonical.push(char::from(b'0' + byte % 8));
+        }
+    }
+    canonical
 }
 
 /// Outcome of scanning one `ListResourceRecordSets` page for an exact
@@ -93,8 +137,9 @@ fn scan_page_for_record<'a>(
     target_name: &str,
     target_type: &str,
 ) -> PageScan<'a> {
+    let target_name = canonical_dns_name(target_name);
     for rrs in records {
-        if rrs.name() != target_name {
+        if canonical_dns_name(rrs.name()) != target_name {
             return PageScan::StopNotFound;
         }
         if rrs.r#type().as_str() == target_type {
@@ -170,6 +215,28 @@ fn build_record_set(
     ttl: Option<i64>,
     record_type: &str,
 ) -> ProviderResult<ResourceRecordSet> {
+    // Update's create-only name/type come from the applied identifier. Recheck
+    // the outgoing values after deferred inputs have resolved.
+    validate_dns_name(name).map_err(|reason| record_input_error(id, "name", reason))?;
+    if record_type == "NS" && dns_name_is_wildcard(name) {
+        return Err(record_input_error(
+            id,
+            "name",
+            "NS records cannot use a wildcard",
+        ));
+    }
+    if let Some(records) = resource_records {
+        validate_record_count(id, Some(record_type), records.len())?;
+        for (index, value) in records.iter().enumerate() {
+            validate_record_value(id, Some(record_type), index, value)?;
+        }
+    }
+    if let Some(Value::Concrete(ConcreteValue::Map(alias))) = alias_target
+        && let Some(dns_name) = alias.get("dns_name").and_then(extract_string)
+    {
+        validate_dns_name(dns_name)
+            .map_err(|reason| record_input_error(id, "alias_target.dns_name", reason))?;
+    }
     let mut builder = ResourceRecordSet::builder()
         .name(normalize_dns_name(name))
         .r#type(RrType::from(record_type));
@@ -190,6 +257,197 @@ fn build_record_set(
         ProviderError::api_error(sdk_error_message("Failed to build ResourceRecordSet", &e))
             .for_resource(id.clone())
     })
+}
+
+fn record_input_error(id: &ResourceId, path: &str, reason: &str) -> ProviderError {
+    // Values can contain sensitive DNS data. Report the path and violated rule.
+    ProviderError::invalid_input(format!("route53.RecordSet attribute {path}: {reason}"))
+        .for_resource(id.clone())
+}
+
+fn octal_byte(digits: &[u8]) -> Option<u8> {
+    match digits {
+        [a @ b'0'..=b'3', b @ b'0'..=b'7', c @ b'0'..=b'7', ..] => {
+            Some((a - b'0') * 64 + (b - b'0') * 8 + (c - b'0'))
+        }
+        _ => None,
+    }
+}
+
+fn dns_name_is_wildcard(value: &str) -> bool {
+    value == "*" || value.starts_with("*.") || value == r"\052" || value.starts_with(r"\052.")
+}
+
+// DNSName's 1024-character Smithy carrier is deliberately wider than the DNS
+// wire name: one length octet per label plus the final zero root octet.
+// Real AWS (carina-test-004, 2026-11-05) accepts 253 decoded characters without
+// a trailing dot / 254 including that dot, and rejects a 254-character name
+// without the dot. Escaped dots remain label data, not label delimiters.
+// https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/DomainNameFormat.html
+// https://www.rfc-editor.org/rfc/rfc1035.html#section-2.3.4
+fn validate_dns_name(value: &str) -> Result<(), &'static str> {
+    if value.is_empty() || value.len() > 1024 {
+        return Err("DNS name must contain 1..1024 characters");
+    }
+    let bytes = value.as_bytes();
+    let mut offset = 0;
+    let mut wire_length = 1; // The terminating root octet is always present.
+    let mut label_length = 0;
+    let mut first_label = true;
+    let mut first_has_star = false;
+    while offset < bytes.len() {
+        if bytes[offset] == b'.' {
+            if label_length == 0 {
+                return Err("DNS labels must be nonempty");
+            }
+            if first_label && first_has_star && label_length != 1 {
+                return Err("a wildcard must replace the entire leftmost label");
+            }
+            first_label = false;
+            label_length = 0;
+            offset += 1;
+        } else {
+            let byte = if bytes[offset] == b'\\' {
+                let byte = octal_byte(&bytes[offset + 1..])
+                    .ok_or("DNS escapes must be three octal digits in 000..377")?;
+                offset += 4;
+                byte
+            } else {
+                let byte = bytes[offset];
+                if !(b'!'..=b'~').contains(&byte) {
+                    return Err("DNS names require printable ASCII or octal escapes");
+                }
+                offset += 1;
+                byte
+            };
+            first_has_star |= first_label && byte == b'*';
+            if label_length == 0 {
+                wire_length += 1; // This label's length octet.
+            }
+            label_length += 1;
+            wire_length += 1;
+            if label_length > 63 {
+                return Err("DNS labels must not exceed 63 decoded bytes");
+            }
+        }
+        if wire_length > 255 {
+            return Err(
+                "DNS name must not exceed 255 wire bytes, including label lengths and root",
+            );
+        }
+    }
+    if first_label && first_has_star && label_length != 1 {
+        return Err("a wildcard must replace the entire leftmost label");
+    }
+    Ok(())
+}
+
+// Each repetition consumes one decoded ASCII character or a complete escape,
+// so {0,255} bounds decoded chunk length. AWS preserves adjacent chunks and
+// whitespace verbatim (carina-test-004); at least one quoted chunk is required.
+// https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html#TXTFormat
+fn validate_txt_record(value: &str) -> Result<(), &'static str> {
+    static TXT_RECORD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"\A[\t\n\x0C\r ]*(?:"(?:[\x20-\x21\x23-\x5B\x5D-\x7E]|\\(?:["\\]|[0-3][0-7]{2})){0,255}"[\t\n\x0C\r ]*)+\z"#)
+            .expect("valid TXT record regex")
+    });
+    TXT_RECORD.is_match(value).then_some(()).ok_or(
+        "TXT requires quoted chunks of at most 255 decoded ASCII characters or valid escapes",
+    )
+}
+
+fn validate_record_count(
+    id: &ResourceId,
+    record_type: Option<&str>,
+    length: usize,
+) -> ProviderResult<()> {
+    // ResourceRecords min 1 is in route53.json; the single-value rule is in
+    // https://docs.aws.amazon.com/Route53/latest/APIReference/API_ResourceRecord.html
+    if length == 0 {
+        return Err(record_input_error(
+            id,
+            "resource_records",
+            "must contain at least one value",
+        ));
+    }
+    if matches!(record_type, Some("CNAME" | "SOA")) && length != 1 {
+        return Err(record_input_error(
+            id,
+            "resource_records",
+            "CNAME and SOA require exactly one value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_record_value(
+    id: &ResourceId,
+    record_type: Option<&str>,
+    index: usize,
+    value: &str,
+) -> ProviderResult<()> {
+    let path = format!("resource_records[{index}]");
+    if value.chars().count() > 4000 {
+        return Err(record_input_error(
+            id,
+            &path,
+            "must not exceed 4000 characters",
+        ));
+    }
+    // Complex MX/SRV/CAA/DS/HTTPS/NAPTR/SOA/SPF/SSHFP/SVCB/TLSA grammars
+    // retain their bounded carrier. Only documented, inexpensive checks:
+    // https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/ResourceRecordTypes.html
+    let result = match record_type {
+        Some("A") => value
+            .parse::<std::net::Ipv4Addr>()
+            .map(|_| ())
+            .map_err(|_| "A requires an IPv4 address"),
+        Some("AAAA") => value
+            .parse::<std::net::Ipv6Addr>()
+            .map(|_| ())
+            .map_err(|_| "AAAA requires an IPv6 address"),
+        Some("CNAME" | "NS" | "PTR") => validate_dns_name(value),
+        Some("TXT") => validate_txt_record(value),
+        _ => Ok(()),
+    };
+    result.map_err(|reason| record_input_error(id, &path, reason))
+}
+
+fn known_string(value: Option<&DesiredValue>) -> Option<&str> {
+    match value {
+        Some(DesiredValue::Known(scalar)) => scalar.as_str(),
+        _ => None,
+    }
+}
+
+pub(crate) fn validate_record_set_inputs(inputs: &DesiredInputs<'_>) -> ProviderResult<()> {
+    let id = inputs.id();
+    let record_type = known_string(inputs.attribute("type"));
+    if let Some(name) = known_string(inputs.attribute("name")) {
+        validate_dns_name(name).map_err(|reason| record_input_error(id, "name", reason))?;
+        if record_type == Some("NS") && dns_name_is_wildcard(name) {
+            return Err(record_input_error(
+                id,
+                "name",
+                "NS records cannot use a wildcard",
+            ));
+        }
+    }
+    if let Some(DesiredValue::Map(alias)) = inputs.attribute("alias_target")
+        && let Some(name) = known_string(alias.get("dns_name"))
+    {
+        validate_dns_name(name)
+            .map_err(|reason| record_input_error(id, "alias_target.dns_name", reason))?;
+    }
+    if let Some(DesiredValue::List(records)) = inputs.attribute("resource_records") {
+        validate_record_count(id, record_type, records.iter().count())?;
+        for (index, value) in records.iter().enumerate() {
+            if let Some(value) = known_string(Some(value)) {
+                validate_record_value(id, record_type, index, value)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Execute a ChangeResourceRecordSets UPSERT or DELETE.
@@ -245,7 +503,7 @@ fn alias_target_value(rrs: &ResourceRecordSet) -> Option<Value> {
         alias_map.insert(
             "dns_name".to_string(),
             Value::Concrete(ConcreteValue::String(
-                strip_trailing_dot(alias.dns_name()).into(),
+                canonical_dns_name(alias.dns_name()).into(),
             )),
         );
         alias_map.insert(
@@ -310,7 +568,7 @@ impl AwsProvider {
                             name.map(|value| match value {
                                 Value::Concrete(ConcreteValue::String(name)) => {
                                     Value::Concrete(ConcreteValue::String(
-                                        strip_trailing_dot(name.expose_plaintext()).into(),
+                                        canonical_dns_name(name.expose_plaintext()).into(),
                                     ))
                                 }
                                 value => value,
@@ -537,35 +795,19 @@ impl AwsProvider {
     }
 }
 
-/// Normalize desired-side `route53.RecordSet` attributes so a trailing
-/// dot fed in from another resource's `read` does not produce a spurious
-/// `forces replacement` diff against state.
-///
-/// The read side (`extract_attributes`) already strips trailing dots from
-/// `name` and `alias_target.dns_name`. Without symmetric normalization on
-/// the desired side, values like `cert.domain_validation_options[0]
-/// .resource_record.name` (which the ACM read returns verbatim as
-/// `"_abc.example.com."`) compare unequal against the dot-stripped state
-/// row, surfacing a replace diff that AWS would not actually require —
-/// the apply would just re-UPSERT the same DNS name.
-///
-/// See aws#300, follow-up to aws#117.
+/// Use the same DNS comparison spelling as record lookup and read projection.
+/// This covers case, root dots, escaped letters and `\052` versus `*`, while
+/// leaving deferred leaves opaque. Extends the dot-only symmetry from aws#300.
 pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) -> ProviderResult<()> {
-    if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name")
-        && let Some(stripped) = name.expose_plaintext().strip_suffix('.').map(str::to_owned)
-    {
-        *name = stripped.into();
+    if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name") {
+        *name = canonical_dns_name(name.expose_plaintext()).into();
     }
 
     if let Some(DesiredValueMut::Map(alias)) = input.attribute_mut("alias_target")
         && let Some(DesiredValueMut::Known(DesiredScalar::String(dns_name))) =
             alias.get_mut("dns_name")
-        && let Some(stripped) = dns_name
-            .expose_plaintext()
-            .strip_suffix('.')
-            .map(str::to_owned)
     {
-        *dns_name = stripped.into();
+        *dns_name = canonical_dns_name(dns_name.expose_plaintext()).into();
     }
     Ok(())
 }

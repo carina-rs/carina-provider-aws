@@ -3384,9 +3384,9 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             deferred_populate_struct_field_overrides: vec![],
             // `AliasTarget.HostedZoneId` accepts both the
             // `aws.cloudfront.HostedZoneId.global` namespaced constant (resolved to
-            // `Z2FDTNDATAQYW2`) and identified Route 53 hosted-zone IDs. The top-level
-            // `RecordSet.HostedZoneId` (the user's own Route 53 zone) is intentionally
-            // left as plain String (aws#302, aws#505).
+            // `Z2FDTNDATAQYW2`) and identified Route 53 hosted-zone IDs. The
+            // top-level zone ID uses the existing AWS catalog identity through
+            // the full-path value override in main.rs (aws#588).
             struct_field_type_overrides: vec![(
                 "AliasTarget",
                 "HostedZoneId",
