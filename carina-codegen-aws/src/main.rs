@@ -221,6 +221,27 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                     ),
                     pattern,
                 )
+            } else if let RawShape::String {
+                length: Some((Some(minimum), Some(maximum))),
+                ..
+            } = attr.raw_shape()
+            {
+                MarkdownType::text(format!(
+                    "{} (String; length: {minimum}..={maximum})",
+                    type_code_to_display(row.constructor_path())
+                ))
+            } else if let RawShape::String {
+                pattern: Some(pattern),
+                ..
+            } = attr.raw_shape()
+            {
+                pattern_display(
+                    format!(
+                        "{} (String; pattern: ",
+                        type_code_to_display(row.constructor_path())
+                    ),
+                    pattern,
+                )
             } else {
                 MarkdownType::text(type_code_to_display(row.constructor_path()))
             };
@@ -5999,7 +6020,10 @@ fn generate_markdown_resource(
         let description =
             SmithyModel::documentation(&member_ref.traits).map(Description::from_smithy_html);
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let attr_type = if name == "Arn" {
+        let attr_type = if let Some(override_type) = resource_value_override(res.name, &snake_name)
+        {
+            Some(override_type.display)
+        } else if name == "Arn" {
             resource_identity_parts(res.name)
                 .and_then(|(service, resource)| shared_arn_constructor(service, resource))
                 .map(|constructor| type_code_to_display(&format!("super::{constructor}()")))
@@ -7123,11 +7147,18 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("network_acl_id") => "NetworkAclId".to_string(),
         s if s.contains("s3_grantee") => "S3Grantee".to_string(),
         "super::gateway_id()" => "GatewayId".to_string(),
+        "carina_aws_types::organizations_account_arn()" => "OrganizationsAccountArn".to_string(),
+        "carina_aws_types::organizations_organization_arn()" => {
+            "OrganizationsOrganizationArn".to_string()
+        }
         s if s.contains("arn()") => "Arn".to_string(),
         s if s.contains("aws_account_id") => "AwsAccountId".to_string(),
         s if s.contains("aws_resource_id") => "AwsResourceId".to_string(),
         s if s.contains("availability_zone_id") => "AvailabilityZoneId".to_string(),
         s if s.contains("availability_zone") => "AvailabilityZone".to_string(),
+        "carina_aws_types::organizations_account_email()" => {
+            "OrganizationsAccountEmail".to_string()
+        }
         s if s.contains("email") => "Email".to_string(),
         _ => snake_to_pascal_type(
             type_code
@@ -7336,6 +7367,94 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Role$RoleName -> roleNameType, in the same iam.json.
                     TypeOverride::SharedType(AwsType::IamRoleName),
                 ),
+                (
+                    ("organizations.Account", "role_name"),
+                    // carina-provider-aws/tests/fixtures/smithy/organizations.json:
+                    // CreateAccountRequest$RoleName -> RoleName, length 0..64,
+                    // ^[\w+=,.@-]{1,64}$. The pattern excludes empty strings,
+                    // so this has the same effective 1..64 length and character
+                    // set as iam.json's roleNameType. It names the IAM role
+                    // created in the new account; reuse that role's identity.
+                    // https://docs.aws.amazon.com/organizations/latest/APIReference/API_CreateAccount.html
+                    TypeOverride::SharedType(AwsType::IamRoleName),
+                ),
+                (
+                    ("organizations.Account", "account_name"),
+                    // In the same organizations.json:
+                    // CreateAccountRequest$AccountName -> CreateAccountName,
+                    // length 1..50; ^[\u0020-\u007E]+$.
+                    // carina-provider-aws/tests/fixtures/smithy/account.json:
+                    // PutAccountNameRequest$AccountName -> AccountName,
+                    // length 1..50; ^[ -;=?-~]+$. The provider sends the same
+                    // desired value to CreateAccount and PutAccountName, so
+                    // intersect their constraints: printable ASCII except < >.
+                    // https://docs.aws.amazon.com/accounts/latest/APIReference/API_PutAccountName.html
+                    TypeOverride::RefinedString {
+                        pattern: r"^[ -;=?-~]+\z",
+                        min_length: 1,
+                        max_length: 50,
+                    },
+                ),
+                (
+                    ("organizations.Account", "email"),
+                    // organizations.json: CreateAccountRequest$Email and
+                    // Account$Email -> Email, length 6..64. The shared catalog
+                    // type adds these bounds to core's public validate_email;
+                    // core's cross-service Email identity stays unchanged.
+                    TypeOverride::SharedType(AwsType::OrganizationsAccountEmail),
+                ),
+                (
+                    ("organizations.Organization", "master_account_email"),
+                    // Organization$MasterAccountEmail targets the same Email
+                    // shape and 6..64 bounds. Use the output member's model,
+                    // without CreateAccount's stricter creation-only prose.
+                    // https://docs.aws.amazon.com/organizations/latest/APIReference/API_Organization.html#organizations-Type-Organization-MasterAccountEmail
+                    TypeOverride::SharedType(AwsType::OrganizationsAccountEmail),
+                ),
+                (
+                    ("organizations.Account", "id"),
+                    // organizations.json: Account$Id -> AccountId, length
+                    // 0..12 and ^\d{12}$. The pattern forces exactly 12 ASCII
+                    // digits (ECMA-262), matching the shared aws.AccountId.
+                    TypeOverride::SharedType(AwsType::AccountId),
+                ),
+                (
+                    ("organizations.Organization", "id"),
+                    // organizations.json: Organization$Id -> OrganizationId,
+                    // ^o-[a-z0-9]{10,32}$. No length trait; the prefix and
+                    // quantifier give an effective total length of 12..34.
+                    TypeOverride::RefinedString {
+                        pattern: r"^o-[a-z0-9]{10,32}\z",
+                        min_length: 12,
+                        max_length: 34,
+                    },
+                ),
+                (
+                    ("organizations.Account", "arn"),
+                    // Account$Arn -> AccountArn; the shared catalog retains
+                    // its exact Smithy resource grammar and aws partition.
+                    TypeOverride::SharedType(AwsType::OrganizationsAccountArn),
+                ),
+                (
+                    ("organizations.Organization", "arn"),
+                    // Organization$Arn -> OrganizationArn, in the same model.
+                    TypeOverride::SharedType(AwsType::OrganizationsOrganizationArn),
+                ),
+                (
+                    ("organizations.Organization", "master_account_arn"),
+                    // Organization$MasterAccountArn -> AccountArn: exactly
+                    // the same target as Account$Arn, not a generic ARN.
+                    TypeOverride::SharedType(AwsType::OrganizationsAccountArn),
+                ),
+                (
+                    ("organizations.Organization", "master_account_id"),
+                    // Organization$MasterAccountId -> the same AccountId
+                    // shape as Account$Id. Preserve its existing shared type
+                    // and include the catalog bounds in generated docs.
+                    TypeOverride::SharedType(AwsType::AccountId),
+                ),
+                // Account$JoinedTimestamp -> Timestamp stays String pending
+                // a real-AWS read and a decision about SDK DateTime formatting.
                 (
                     ("logs.LogGroup", "log_group_name"),
                     // Smithy com.amazonaws.cloudwatchlogs#LogGroupName:
@@ -8023,6 +8142,142 @@ mod tests {
             markdown.contains(r"String(length: 1..=512, pattern: `^(?:/|/[\x21-\x7E]+/)\z`)"),
             "{markdown}"
         );
+    }
+
+    #[test]
+    fn organizations_account_codegen_refines_exact_paths_and_keeps_send_strings() {
+        let resource = organizations_account_resource_definition();
+        let model = organizations_account_fixture_model();
+        let attrs = collect_resource_attributes(&resource, &model)
+            .unwrap()
+            .attrs;
+        for (field, expected_constructor) in [
+            ("account_name", "AttributeType::refined_string("),
+            ("role_name", "carina_aws_types::iam_role_name()"),
+            ("email", "carina_aws_types::organizations_account_email()"),
+            ("id", "carina_aws_types::aws_account_id()"),
+            ("arn", "carina_aws_types::organizations_account_arn()"),
+        ] {
+            let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
+            assert!(
+                attr.type_code.starts_with(expected_constructor),
+                "{field}: {}",
+                attr.type_code
+            );
+            assert_eq!(attr.send_type, SendFieldType::String);
+        }
+        let timestamp = attrs
+            .iter()
+            .find(|attr| attr.snake_name == "joined_timestamp")
+            .unwrap();
+        assert_eq!(timestamp.type_code, PLAIN_STRING_TYPE_CODE);
+        for path in [
+            "nested.account_name",
+            "nested.role_name",
+            "account_name[]",
+            "role_name[]",
+            "nested.email",
+            "email[]",
+            "nested.id",
+            "nested.arn",
+            "joined_timestamp",
+        ] {
+            assert!(
+                resource_value_override("organizations.Account", path).is_none(),
+                "{path}"
+            );
+        }
+        let output = resource_value_override("organizations.Organization", "master_account_email")
+            .expect("management account output must share the Organizations Email type");
+        assert_eq!(
+            output.type_code,
+            "carina_aws_types::organizations_account_email()"
+        );
+        for resource in [
+            "organizations.Other",
+            "acm.Certificate",
+            "identitystore.User",
+        ] {
+            assert!(resource_value_override(resource, "email").is_none());
+            assert!(resource_value_override(resource, "master_account_email").is_none());
+        }
+        for resource in ["organizations.Other", "iam.Role"] {
+            assert!(resource_value_override(resource, "account_name").is_none());
+        }
+    }
+
+    #[test]
+    fn organizations_account_codegen_markdown_documents_name_constraints() {
+        let resource = organizations_account_resource_definition();
+        let markdown = generate_markdown_resource(
+            &resource,
+            &organizations_account_fixture_model(),
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        for expected in [
+            r"String(length: 1..=50, pattern: `^[ -;=?-~]+\z`)",
+            r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)",
+            "OrganizationsAccountEmail (String; length: 6..=64)",
+            r"AwsAccountId (String; length: 12..=12, pattern: `^\d{12}$`)",
+            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+        ] {
+            assert!(markdown.contains(expected), "{markdown}");
+        }
+    }
+
+    #[test]
+    fn organizations_organization_codegen_refines_id_and_documents_account_arn() {
+        let fields = [
+            ("Id", false),
+            ("Arn", false),
+            ("MasterAccountArn", false),
+            ("MasterAccountId", false),
+        ];
+        let model = string_fixture_model(&[], &fields);
+        let mut resource =
+            provider_fixture_resource("organizations.Organization", "Id", &[], vec![]);
+        resource.extra_read_only = vec!["Arn", "MasterAccountArn", "MasterAccountId"];
+        let attrs = collect_resource_attributes(&resource, &model)
+            .unwrap()
+            .attrs;
+        for (field, constructor) in [
+            ("id", "AttributeType::refined_string("),
+            ("arn", "carina_aws_types::organizations_organization_arn()"),
+            (
+                "master_account_arn",
+                "carina_aws_types::organizations_account_arn()",
+            ),
+            ("master_account_id", "carina_aws_types::aws_account_id()"),
+        ] {
+            let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
+            assert!(
+                attr.type_code.starts_with(constructor),
+                "{field}: {}",
+                attr.type_code
+            );
+        }
+        for path in [
+            "nested.id",
+            "nested.master_account_arn",
+            "id[]",
+            "master_account_arn[]",
+        ] {
+            assert!(resource_value_override(resource.name, path).is_none());
+        }
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        for expected in [
+            r"String(length: 12..=34, pattern: `^o-[a-z0-9]{10,32}\z`)",
+            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            r"OrganizationsOrganizationArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
+        ] {
+            assert!(markdown.contains(expected), "{markdown}");
+        }
     }
 
     const PROVIDER_FIXTURE_FIELDS: &[&str] = &[

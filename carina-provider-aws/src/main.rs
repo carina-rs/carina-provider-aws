@@ -1420,6 +1420,57 @@ mod tests {
     }
 
     #[test]
+    fn organizations_account_email_witness_dispatches_through_the_sdk_bridge() {
+        let provider = AwsProcessProvider::new();
+        let cache = ProviderSchemaCache::from_provider(&provider)
+            .expect("AWS schemas must build a dispatch table");
+        let row = carina_aws_types::AwsType::OrganizationsAccountEmail;
+        for (resource, field) in [
+            ("organizations.Account", "email"),
+            ("organizations.Organization", "master_account_email"),
+        ] {
+            let schema = cache
+                .schemas()
+                .iter()
+                .find(|schema| schema.parts().resource_type == resource)
+                .unwrap();
+            let RawShape::String {
+                identity: Some(identity),
+                pattern,
+                length,
+                validate: Some(_),
+                ..
+            } = schema.parts().attributes[field].attr_type().raw_shape()
+            else {
+                panic!("{resource}.{field} must carry the shared email validator");
+            };
+            assert_eq!(identity, &row.identity());
+            assert!(pattern.is_none());
+            assert_eq!(length, Some((Some(6), Some(64))));
+        }
+        let identity = wire_identity(&row.identity());
+        for valid in [
+            "ab@c.d".to_string(),
+            format!("{}@b.com", "a".repeat(58)),
+            row.valid_sample().to_string(),
+        ] {
+            dispatch_custom_type_validation(&cache, &identity, &valid)
+                .unwrap_or_else(|error| panic!("valid email {valid:?}: {error}"));
+        }
+        for invalid in [
+            "a@b.c".to_string(),
+            format!("{}@b.com", "a".repeat(59)),
+            "not-an-email".to_string(),
+            "user@b..com".to_string(),
+        ] {
+            assert!(
+                dispatch_custom_type_validation(&cache, &identity, &invalid).is_err(),
+                "invalid email: {invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn iam_role_name_witness_dispatches_through_the_sdk_bridge() {
         let provider = AwsProcessProvider::new();
         let cache = ProviderSchemaCache::from_provider(&provider)

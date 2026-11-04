@@ -542,7 +542,7 @@ impl MockService for OrganizationsAccountService {
             }
             "AWSOrganizationsV20161128.DescribeAccount" => MockResponse::json(
                 200,
-                r#"{"Account":{"Id":"123456789012","Arn":"arn:aws:organizations::111111111111:account/o-example/123456789012","Email":"member@example.com","Name":"member","Status":"ACTIVE","JoinedMethod":"CREATED"}}"#,
+                r#"{"Account":{"Id":"123456789012","Arn":"arn:aws:organizations::111111111111:account/o-exampleorgid/123456789012","Email":"member@example.com","Name":"member","Status":"ACTIVE","JoinedMethod":"CREATED"}}"#,
             ),
             "AWSOrganizationsV20161128.DescribeCreateAccountStatus" => MockResponse::json(
                 200,
@@ -627,7 +627,7 @@ impl MockService for OrganizationsAccountRenameService {
                     serde_json::json!({
                         "Account": {
                             "Id": ORGANIZATIONS_ACCOUNT_ID,
-                            "Arn": "arn:aws:organizations::111111111111:account/o-example/123456789012",
+                            "Arn": "arn:aws:organizations::111111111111:account/o-exampleorgid/123456789012",
                             "Email": "member@example.com",
                             "Name": account_name,
                             "Status": "ACTIVE",
