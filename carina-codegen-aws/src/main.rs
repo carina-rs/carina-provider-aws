@@ -7318,7 +7318,9 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 ),
                 (
                     ("acm.Certificate", "ResourceRecord.Type"),
-                    TypeOverride::EnumIdentity(AwsType::DnsRecordType),
+                    // com.amazonaws.acm#RecordType in acm.json is CNAME-only;
+                    // it cannot share Route 53's full DNS enum definition.
+                    TypeOverride::EnumIdentity(AwsType::AcmCertificateResourceRecordType),
                 ),
             ])
         });
@@ -11077,7 +11079,7 @@ mod tests {
         .expect("generate certificate markdown");
 
         for heading in [
-            "### domain_validation_options.resource_record.type (Type)",
+            "### domain_validation_options.resource_record.type (ResourceRecordType)",
             "### `options`",
             "### domain_validation_options",
             "### renewal_summary.domain_validation_options",
@@ -11103,10 +11105,10 @@ mod tests {
 
         assert_eq!(
             generated
-                .matches("carina_aws_types::AwsType::DnsRecordType.identity()")
+                .matches("carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity()")
                 .count(),
             2,
-            "both projections of ACM's shared ResourceRecord shape need the shared DNS identity: {generated}"
+            "both projections of ACM's ResourceRecord shape need its CNAME-only identity: {generated}"
         );
         assert_eq!(
             generated
@@ -11125,7 +11127,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_acm_resource_record_enum_uses_shared_identity_and_model_values() {
+    fn markdown_acm_resource_record_enum_uses_acm_identity_and_model_values() {
         let resource = resource_defs::acm_resources()
             .into_iter()
             .find(|resource| resource.name == "acm.Certificate")
@@ -11138,11 +11140,15 @@ mod tests {
         .expect("generate certificate markdown");
 
         assert!(
-            markdown.contains("| `CNAME` | `aws.route53.RecordSet.Type.cname` |"),
-            "the identifier table must use the shared DNS identity: {markdown}"
+            markdown.contains("| `CNAME` | `aws.acm.Certificate.ResourceRecordType.cname` |"),
+            "the identifier table must use ACM's CNAME-only identity: {markdown}"
         );
         assert!(
-            !markdown.contains("| `A` | `aws.route53.RecordSet.Type.a` |"),
+            !markdown.contains("aws.route53.RecordSet.Type."),
+            "ACM must not reuse Route 53's broader enum identity: {markdown}"
+        );
+        assert!(
+            !markdown.contains("| `A` | `aws.acm.Certificate.ResourceRecordType.a` |"),
             "the identity override must not replace ACM's CNAME-only value list: {markdown}"
         );
         assert!(
