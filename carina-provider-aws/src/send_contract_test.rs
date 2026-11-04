@@ -15,8 +15,8 @@ use carina_core::provider::{
 };
 use carina_core::resource::{ConcreteValue, Resource, State, Value};
 use carina_core::schema::{
-    CompiledAttributeType, CompiledResourceSchema, SchemaKind, Shape, ShapeWalkBudget,
-    ValidatedResourceSchema,
+    CompiledAttributeType, CompiledPattern, CompiledResourceSchema, CustomValidator, SchemaKind,
+    Shape, ShapeWalkBudget, TypeIdentity, ValidatedResourceSchema,
 };
 use indexmap::IndexMap;
 use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
@@ -469,6 +469,50 @@ fn sample_string(resource_type: &str, path: &[String]) -> String {
     }
 }
 
+fn sample_typed_string(
+    resource_type: &str,
+    path: &[String],
+    identity: Option<&TypeIdentity>,
+    pattern: Option<&str>,
+    length: Option<(Option<u64>, Option<u64>)>,
+    validate: Option<&CustomValidator>,
+) -> Value {
+    let pattern = pattern.map(|pattern| {
+        CompiledPattern::try_new(pattern).expect("sample type's pattern was already admitted")
+    });
+    let accepts = |sample: &&str| {
+        let size = sample.chars().count() as u64;
+        let (minimum, maximum) = length.unwrap_or_default();
+        minimum.is_none_or(|minimum| size >= minimum)
+            && maximum.is_none_or(|maximum| size <= maximum)
+            && pattern
+                .as_ref()
+                .is_none_or(|pattern| pattern.is_match(sample))
+            && validate.is_none_or(|validate| validate(&string(*sample)).is_ok())
+    };
+    let row = identity.and_then(|identity| {
+        carina_aws_types::AwsType::ALL
+            .iter()
+            .find(|row| row.identity() == *identity)
+    });
+    // Retain the path-specific transport marker when it satisfies the type.
+    // Otherwise prefer the identity's catalog sample. Anonymous refinements
+    // select a catalog witness by their constraints and callback, without
+    // guessing from resource/attribute names or duplicating ACM's grammar.
+    let preferred = sample_string(resource_type, path);
+    let sample = std::iter::once(preferred.as_str())
+        .chain(row.map(|row| row.valid_sample()))
+        .chain(carina_aws_types::AwsType::ALL.iter().map(|row| row.valid_sample()))
+        .find(accepts)
+        .unwrap_or_else(|| {
+            panic!(
+                "no valid string sample for {resource_type}.{}: identity={identity:?}, pattern={pattern:?}, length={length:?}",
+                path.join("."),
+            )
+        });
+    string(sample)
+}
+
 fn sample_value(
     resource_type: &str,
     schema: &CompiledResourceSchema,
@@ -482,9 +526,18 @@ fn sample_value(
             unloaded.identity(),
             path.join("."),
         ),
-        Shape::String { .. } | Shape::Reference { .. } => {
-            string(sample_string(resource_type, path))
-        }
+        Shape::String {
+            identity,
+            pattern,
+            length,
+            validate,
+            ..
+        } => sample_typed_string(resource_type, path, identity, pattern, length, validate),
+        Shape::Reference {
+            identity,
+            pattern,
+            length,
+        } => sample_typed_string(resource_type, path, Some(identity), pattern, length, None),
         Shape::Int { range, .. } => {
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);
@@ -601,6 +654,42 @@ fn value_has_scalar(value: &Value) -> bool {
         Value::Concrete(ConcreteValue::List(values)) => values.iter().any(value_has_scalar),
         Value::Concrete(ConcreteValue::Map(values)) => values.values().any(value_has_scalar),
         Value::Deferred(_) => false,
+    }
+}
+
+#[test]
+fn samples_follow_acm_leaf_types_without_attribute_name_hints() {
+    let schema = crate::schemas::all_schemas()
+        .into_iter()
+        .find(|schema| schema.as_schema().resource_type() == "acm.Certificate")
+        .expect("ACM schema");
+    // Cover each distinct ACM string refinement, including the list element,
+    // anonymous read domains, and anonymous DNS names/CNAME targets. The
+    // sampler must succeed without a recognizable resource or attribute name.
+    for path in [
+        "domain_name",
+        "subject_alternative_names",
+        "certificate_arn",
+        "domain_validation_options.http_redirect.redirect_to",
+        "domain_validation_options.domain_name",
+        "domain_validation_options.resource_record.value",
+    ] {
+        let names = path.split('.').map(str::to_string).collect::<Vec<_>>();
+        let value_type = schema
+            .effective_node_at_path(&names)
+            .unwrap_or_else(|| panic!("missing {path}"))
+            .value_type();
+        let sample = sample_value(
+            "fixture.Sample",
+            schema.as_schema(),
+            value_type.as_type(),
+            &mut vec!["opaque".into()],
+            &mut ShapeWalkBudget::new(64),
+        );
+        assert!(
+            value_type.validate(&sample).is_ok(),
+            "{path}: generated an invalid sample {sample:?}"
+        );
     }
 }
 
