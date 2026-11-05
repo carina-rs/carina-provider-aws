@@ -310,9 +310,9 @@ mod tests {
                                 path
                             );
                             let expected_pattern = if arn_only {
-                                carina_aws_types::KMS_KEY_ARN_PATTERN
+                                carina_aws_types::kms_key_arn_pattern()
                             } else {
-                                carina_aws_types::KMS_KEY_REFERENCE_PATTERN
+                                carina_aws_types::kms_key_reference_pattern()
                             };
                             assert_eq!(
                                 pattern,
@@ -966,7 +966,10 @@ mod tests {
         assert_refined_string(
             attr_type(&iam_role.schema, "arn"),
             "aws.iam.Role.Arn",
-            Some("^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$"),
+            // #638: Pin all eight supported partitions in the generated IAM role ARN.
+            Some(
+                "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$",
+            ),
         );
 
         let route53_record_set = super::generated::route53::record_set::route53_record_set_config();
@@ -979,7 +982,10 @@ mod tests {
         assert_refined_string(
             attr_type(&s3_bucket.schema, "arn"),
             "aws.s3.Bucket.Arn",
-            Some("^arn:(aws|aws-cn|aws-us-gov):s3:::.+$"),
+            // #638: Pin all eight supported partitions in the generated S3 bucket ARN.
+            Some(
+                "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):s3:::.+$",
+            ),
         );
 
         let ec2_vpc = super::generated::ec2::vpc::ec2_vpc_config();

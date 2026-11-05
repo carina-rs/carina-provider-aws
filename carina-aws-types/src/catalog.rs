@@ -10,10 +10,11 @@ use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, DslTransform, TypeIdentity, legacy_validator};
 
 use crate::{
-    validate_arn, validate_availability_zone, validate_availability_zone_id,
-    validate_aws_account_id, validate_aws_region, validate_aws_resource_id, validate_iam_arn,
-    validate_iam_policy_name, validate_iam_role_id, validate_iam_role_name, validate_ipam_pool_id,
-    validate_kms_key_arn, validate_kms_key_id, validate_prefixed_resource_id,
+    arn_partition_pattern, arn_regex, validate_arn, validate_availability_zone,
+    validate_availability_zone_id, validate_aws_account_id, validate_aws_region,
+    validate_aws_resource_id, validate_iam_arn, validate_iam_policy_name, validate_iam_role_id,
+    validate_iam_role_name, validate_ipam_pool_id, validate_kms_key_arn, validate_kms_key_id,
+    validate_prefixed_resource_id,
 };
 
 // IAM roleNameType and policyNameType use ^[\w+=,.@-]+$.
@@ -94,7 +95,7 @@ fn validate_acm_validation_url(value: &str) -> Result<(), String> {
 
 fn validated_string(
     identity: TypeIdentity,
-    pattern: &'static str,
+    pattern: &str,
     length: Option<(Option<u64>, Option<u64>)>,
     validator: fn(&str) -> Result<(), String>,
 ) -> AttributeType {
@@ -115,7 +116,7 @@ fn validated_string(
 
 fn metadata_string(
     identity: TypeIdentity,
-    pattern: &'static str,
+    pattern: &str,
     length: Option<(Option<u64>, Option<u64>)>,
 ) -> AttributeType {
     AttributeType::refined_string(Some(identity), Some(pattern.to_string()), length, None)
@@ -307,11 +308,7 @@ fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> Attribu
     )
 }
 
-fn iam_arn(
-    identity: TypeIdentity,
-    pattern: &'static str,
-    resource_prefix: &'static str,
-) -> AttributeType {
+fn iam_arn(identity: TypeIdentity, pattern: &str, resource_prefix: &'static str) -> AttributeType {
     AttributeType::refined_string_with_validator(
         identity,
         Some(pattern.to_string()),
@@ -725,7 +722,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):[^:]+:.*$",
+            &arn_regex("[^:]+:.*$"),
             None,
             validate_arn,
         ),
@@ -839,7 +836,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| iam_arn(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
+            &arn_regex("iam::[^:]*:role/.+$"),
             "role/",
         ),
     },
@@ -851,7 +848,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| iam_arn(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
+            &arn_regex("iam::[^:]*:policy/.+$"),
             "policy/",
         ),
     },
@@ -863,7 +860,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
+            &arn_regex("iam::[^:]*:oidc-provider/.+$"),
             None,
         ),
     },
@@ -875,7 +872,11 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^((arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$",
+            &[
+                "^((arn:",
+                arn_partition_pattern(),
+                ":kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$",
+            ].concat(),
             None,
             validate_kms_key_id,
         ),
@@ -887,7 +888,7 @@ define_aws_type_catalog! {
         valid_sample: "alias/aws/sqs",
         constructor: |identity| AttributeType::reference(
             identity,
-            Some(crate::KMS_KEY_REFERENCE_PATTERN.to_string()),
+            Some(crate::kms_key_reference_pattern().to_string()),
             Some((Some(1), Some(2048))),
         ),
     },
@@ -899,7 +900,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            crate::KMS_KEY_ARN_PATTERN,
+            crate::kms_key_arn_pattern(),
             None,
             validate_kms_key_arn,
         ),
@@ -977,7 +978,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            r"^arn:(?:aws|aws-cn|aws-us-gov):acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z",
+            &arn_regex(r"acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z"),
             Some((Some(20), Some(2048))),
         ),
     },
@@ -1064,7 +1065,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            r"^arn:(?:aws|aws-cn|aws-us-gov):sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+            &arn_regex(r"sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z"),
             None,
         ),
     },
@@ -1126,7 +1127,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):sso:::instance/.+$",
+            &arn_regex("sso:::instance/.+$"),
             None,
         ),
     },
@@ -1138,7 +1139,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):sso:::permissionSet/.+$",
+            &arn_regex("sso:::permissionSet/.+$"),
             None,
         ),
     },
@@ -1176,7 +1177,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
+            &arn_regex("s3:::.+$"),
             None,
         ),
     },
@@ -1188,7 +1189,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^arn:(aws|aws-cn|aws-us-gov):sts:.*$",
+            &arn_regex("sts:.*$"),
             None,
         ),
     },
@@ -1208,9 +1209,18 @@ define_aws_type_catalog! {
         constructor: organizations_account_email_type,
     },
     /// Organizations account ARN. Cached organizations.json AccountArn, used by
-    /// Account$Arn and Organization$MasterAccountArn. The model fixes partition
-    /// aws and an empty region. Spell out ECMA-262's ASCII \d for Rust's regex
-    /// dialect, remove redundant slash escapes, and anchor the entire value.
+    /// Account$Arn and Organization$MasterAccountArn. Keep the model's empty
+    /// region and resource grammar, spelling out ECMA-262's ASCII \d and
+    /// anchoring the entire value. Smithy's aws-only partition restriction is
+    /// narrower than the service (#638): Organizations is available in
+    /// [GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-organizations.html)
+    /// and [China (Beijing and Ningxia)](https://docs.amazonaws.cn/en_us/aws/latest/userguide/organizations.html).
+    /// [GovCloud ARNs](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-arns.html)
+    /// use `arn:aws-us-gov:`;
+    /// [China organization ARNs](https://docs.amazonaws.cn/en_us/AWSEC2/latest/UserGuide/get-org-ou-ARN.html)
+    /// use `arn:aws-cn:`. The
+    /// [Service Authorization Reference](https://docs.amazonaws.cn/en_us/service-authorization/latest/reference/list_awsorganizations.html)
+    /// uses `arn:${Partition}:organizations::${Account}:account/o-${OrganizationId}/${AccountId}`.
     OrganizationsAccountArn => organizations_account_arn {
         segments: ["organizations", "Account"],
         kind: "Arn",
@@ -1218,13 +1228,21 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            r"^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z",
+            &arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"),
             None,
         ),
     },
     /// Organizations organization ARN. Cached organizations.json:
-    /// Organization$Arn -> OrganizationArn. Keep the model's aws partition;
-    /// use ASCII digits and a whole-value anchor as for AccountArn above.
+    /// Organization$Arn -> OrganizationArn. Use ASCII digits and a whole-value
+    /// anchor as for AccountArn above. Smithy's aws-only partition restriction
+    /// is narrower than the service (#638): Organizations is available in
+    /// [GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-organizations.html)
+    /// and [China (Beijing and Ningxia)](https://docs.amazonaws.cn/en_us/aws/latest/userguide/organizations.html).
+    /// [GovCloud ARNs](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/using-govcloud-arns.html)
+    /// use `arn:aws-us-gov:`;
+    /// [China organization ARNs](https://docs.amazonaws.cn/en_us/AWSEC2/latest/UserGuide/get-org-ou-ARN.html)
+    /// use `arn:aws-cn:`. Both resource formats use a Partition field in the
+    /// [Service Authorization Reference](https://docs.amazonaws.cn/en_us/service-authorization/latest/reference/list_awsorganizations.html).
     OrganizationsOrganizationArn => organizations_organization_arn {
         segments: ["organizations", "Organization"],
         kind: "Arn",
@@ -1232,7 +1250,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            r"^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z",
+            &arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z"),
             None,
         ),
     },
@@ -1537,7 +1555,7 @@ define_aws_type_catalog! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{BTreeSet, HashSet};
 
     use carina_core::schema::{CustomValidator, RawShape};
 
@@ -1950,7 +1968,93 @@ mod tests {
     }
 
     #[test]
-    fn organizations_account_arn_matches_smithy_account_resource_and_aws_partition() {
+    fn arn_catalog_rows_accept_every_partition_and_reject_unknown_partitions() {
+        let expected_rows = BTreeSet::from([
+            AwsType::Arn,
+            AwsType::IamRoleArn,
+            AwsType::IamPolicyArn,
+            AwsType::IamOidcProviderArn,
+            AwsType::KmsKeyId,
+            AwsType::KmsKeyReference,
+            AwsType::KmsKeyArn,
+            AwsType::AcmCertificateArn,
+            AwsType::SqsQueueArn,
+            AwsType::SsoInstanceArn,
+            AwsType::SsoPermissionSetArn,
+            AwsType::S3BucketArn,
+            AwsType::StsCallerIdentityArn,
+            AwsType::OrganizationsAccountArn,
+            AwsType::OrganizationsOrganizationArn,
+        ]);
+        let selected_rows: BTreeSet<_> = AwsType::ALL
+            .iter()
+            .copied()
+            .filter(|row| {
+                let attr = row.attribute_type();
+                let pattern = match attr.raw_shape() {
+                    RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => {
+                        pattern
+                    }
+                    _ => return false,
+                };
+                if expected_rows.contains(row) {
+                    assert!(pattern.is_some(), "{row:?} must declare an ARN pattern");
+                }
+                // Include ARN alternatives in rows such as KMS IDs and references,
+                // even when their primary sample is an alias or a bare key ID.
+                row.identity().kind == "Arn" || pattern.is_some_and(|p| p.contains("arn:"))
+            })
+            .collect();
+        let missing: Vec<_> = expected_rows.difference(&selected_rows).copied().collect();
+        let extra: Vec<_> = selected_rows.difference(&expected_rows).copied().collect();
+        assert_eq!(
+            selected_rows, expected_rows,
+            "ARN-capable catalog row selection changed; missing: {missing:?}; extra: {extra:?}"
+        );
+
+        for row in selected_rows {
+            let attr = row.attribute_type();
+            let pattern = match attr.raw_shape() {
+                RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
+                _ => panic!("{row:?} must be a String or Reference ARN row"),
+            };
+            let regex = regex::Regex::new(pattern.expect("ARN row must declare a pattern"))
+                .expect("valid ARN row pattern");
+            let sample = AwsType::ALL
+                .iter()
+                .map(|candidate| candidate.valid_sample())
+                .find(|sample| sample.starts_with("arn:") && regex.is_match(sample))
+                .unwrap_or_else(|| panic!("{row:?} must have an ARN sample in the catalog"));
+            let rest = sample.splitn(3, ':').nth(2).expect("sample ARN fields");
+            let admitted = matches!(attr.raw_shape(), RawShape::String { .. })
+                .then(|| crate::tests::rootless(attr.clone()));
+
+            for partition in crate::Partition::ALL {
+                let arn = format!("arn:{}:{rest}", partition.id());
+                assert!(regex.is_match(&arn), "{row:?} must accept {arn}");
+                if let Some(admitted) = &admitted {
+                    let value = Value::Concrete(ConcreteValue::String(arn.clone().into()));
+                    assert!(
+                        admitted.validate_collect(&value).is_empty(),
+                        "{row:?} validation must accept {arn}"
+                    );
+                }
+            }
+
+            let arn = format!("arn:aws-xx:{rest}");
+            assert!(!regex.is_match(&arn), "{row:?} must reject {arn}");
+            if let Some(admitted) = &admitted {
+                let value = Value::Concrete(ConcreteValue::String(arn.clone().into()));
+                assert!(
+                    !admitted.validate_collect(&value).is_empty(),
+                    "{row:?} validation must reject {arn}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn organizations_account_arn_matches_smithy_account_resource_and_shared_partitions() {
         let row = AwsType::OrganizationsAccountArn;
         let attr = row.attribute_type();
         let admitted = crate::tests::rootless(attr.clone());
@@ -1975,8 +2079,6 @@ mod tests {
             "arn:aws:organizations:us-east-1:123456789012:account/o-0123456789/123456789012",
             "arn:aws:organizations::123456789012:account/o-example/123456789012",
             "arn:aws:organizations::123456789012:account/o-ABCDEFGHIJ/123456789012",
-            "arn:aws-cn:organizations::123456789012:account/o-0123456789/123456789012",
-            "arn:aws-us-gov:organizations::123456789012:account/o-0123456789/123456789012",
             "arn:aws:organizations::１２３４５６７８９０１２:account/o-0123456789/123456789012",
             "arn:aws:organizations::123456789012:account/o-0123456789/123456789012/extra",
             "arn:aws:organizations::123456789012:account/o-0123456789/123456789012\n",
@@ -1987,13 +2089,31 @@ mod tests {
                 "invalid account ARN: {invalid:?}"
             );
         }
+        // #638: Organizations ARNs use the shared partitions, including China.
+        assert!(
+            admitted
+                .validate_collect(&Value::Concrete(ConcreteValue::String(
+                    "arn:aws-cn:organizations::123456789012:account/o-0123456789/123456789012"
+                        .into()
+                )))
+                .is_empty()
+        );
+        // #638: Organizations ARNs use the shared partitions, including GovCloud.
+        assert!(
+            admitted
+                .validate_collect(&Value::Concrete(ConcreteValue::String(
+                    "arn:aws-us-gov:organizations::123456789012:account/o-0123456789/123456789012"
+                        .into()
+                )))
+                .is_empty()
+        );
         let RawShape::String { pattern, .. } = attr.raw_shape() else {
             panic!("account ARN must be a String");
         };
-        assert_eq!(
-            pattern,
-            Some(r"^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z")
-        );
+        let expected_pattern =
+            crate::arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z");
+        // #638: Organizations pattern text follows the shared Partition set.
+        assert_eq!(pattern, Some(expected_pattern.as_str()));
     }
 
     #[test]
@@ -2024,8 +2144,6 @@ mod tests {
                 "a".repeat(33)
             ),
             "arn:aws:organizations::123456789012:organization/o-ABCDEFGHIJ".to_string(),
-            "arn:aws-cn:organizations::123456789012:organization/o-0123456789".to_string(),
-            "arn:aws-us-gov:organizations::123456789012:organization/o-0123456789".to_string(),
             "arn:aws:organizations::１２３４５６７８９０１２:organization/o-0123456789".to_string(),
             "arn:aws:organizations::123456789012:organization/o-0123456789/extra".to_string(),
             "arn:aws:organizations::123456789012:organization/o-0123456789\n".to_string(),
@@ -2036,13 +2154,29 @@ mod tests {
                 "invalid organization ARN: {invalid:?}"
             );
         }
+        // #638: Organizations ARNs use the shared partitions, including China.
+        assert!(
+            admitted
+                .validate_collect(&Value::Concrete(ConcreteValue::String(
+                    "arn:aws-cn:organizations::123456789012:organization/o-0123456789".into()
+                )))
+                .is_empty()
+        );
+        // #638: Organizations ARNs use the shared partitions, including GovCloud.
+        assert!(
+            admitted
+                .validate_collect(&Value::Concrete(ConcreteValue::String(
+                    "arn:aws-us-gov:organizations::123456789012:organization/o-0123456789".into()
+                )))
+                .is_empty()
+        );
         let RawShape::String { pattern, .. } = attr.raw_shape() else {
             panic!("organization ARN must be a String");
         };
-        assert_eq!(
-            pattern,
-            Some(r"^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z")
-        );
+        let expected_pattern =
+            crate::arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z");
+        // #638: Organizations pattern text follows the shared Partition set.
+        assert_eq!(pattern, Some(expected_pattern.as_str()));
     }
 
     #[test]

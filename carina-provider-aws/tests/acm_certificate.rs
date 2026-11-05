@@ -414,6 +414,13 @@ fn acm_certificate_arn_has_a_catalog_identity_and_certificate_resource_grammar()
             );
             assert!(arn.validate(&string(&value)).is_ok(), "{value}");
         }
+        // #638: ACM ARN syntax accepts every partition in Partition::ALL.
+        assert!(
+            arn.validate(&string(
+                "arn:aws-iso:acm:us-east-1:123456789012:certificate/id"
+            ))
+            .is_ok()
+        );
         let prefix = "arn:aws:acm:us-east-1:123456789012:certificate/";
         for (length, valid) in [(2048, true), (2049, false)] {
             let value = format!("{prefix}{}", "a".repeat(length - prefix.len()));
@@ -430,7 +437,6 @@ fn acm_certificate_arn_has_a_catalog_identity_and_certificate_resource_grammar()
             "arn:aws:acm::123456789012:certificate/id",
             "arn:aws:acm:us-east-1:12345678901:certificate/id",
             "arn:aws:acm:us-east-1:1234567890123:certificate/id",
-            "arn:aws-iso:acm:us-east-1:123456789012:certificate/id",
             "arn:aws:acm:us-east-1:123456789012:certificate/",
             "arn:aws:acm:us-east-1:123456789012:certificate/id/extra",
             "arn:aws:acm:us-east-1:123456789012:certificate/id\n",

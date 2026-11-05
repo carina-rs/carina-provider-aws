@@ -16,7 +16,7 @@ use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
-use carina_aws_types::{AwsType, dsl_enum_value};
+use carina_aws_types::{AwsType, arn_regex, dsl_enum_value};
 use carina_codegen_aws::description::Description;
 use carina_codegen_aws::kms_references::{
     self, PathSegment, reference_type_code, validate_smithy_type,
@@ -404,60 +404,82 @@ enum ArnEmitChoice {
     Generic,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ArnValidation {
     service: &'static str,
     resource: &'static str,
-    regex: &'static str,
+    regex: String,
+    #[cfg(test)]
+    sample_arn_rest: &'static str,
 }
 
-static ARN_VALIDATIONS: &[ArnValidation] = &[
-    ArnValidation {
-        service: "iam",
-        resource: "Role",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
-    },
-    ArnValidation {
-        service: "iam",
-        resource: "Policy",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
-    },
-    ArnValidation {
-        service: "iam",
-        resource: "OidcProvider",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
-    },
-    ArnValidation {
-        service: "kms",
-        resource: "Key",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
-    },
-    ArnValidation {
-        service: "s3",
-        resource: "Bucket",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
-    },
-    ArnValidation {
-        service: "cloudfront",
-        resource: "Distribution",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):cloudfront::[^:]*:distribution/.+$",
-    },
-    ArnValidation {
-        service: "ecs",
-        resource: "Cluster",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):ecs:[^:]*:[^:]*:cluster/.+$",
-    },
-    ArnValidation {
-        service: "dynamodb",
-        resource: "Table",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):dynamodb:[^:]*:[^:]*:table/.+$",
-    },
-    ArnValidation {
-        service: "logs",
-        resource: "LogGroup",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):logs:[^:]*:[^:]*:log-group:.+$",
-    },
-];
+static ARN_VALIDATIONS: LazyLock<[ArnValidation; 9]> = LazyLock::new(|| {
+    [
+        ArnValidation {
+            service: "iam",
+            resource: "Role",
+            regex: arn_regex("iam::[^:]*:role/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "iam::123456789012:role/example-role",
+        },
+        ArnValidation {
+            service: "iam",
+            resource: "Policy",
+            regex: arn_regex("iam::[^:]*:policy/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "iam::123456789012:policy/example-policy",
+        },
+        ArnValidation {
+            service: "iam",
+            resource: "OidcProvider",
+            regex: arn_regex("iam::[^:]*:oidc-provider/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "iam::123456789012:oidc-provider/example.com",
+        },
+        ArnValidation {
+            service: "kms",
+            resource: "Key",
+            regex: arn_regex("kms:[^:]*:[^:]*:key/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
+        },
+        ArnValidation {
+            service: "s3",
+            resource: "Bucket",
+            regex: arn_regex("s3:::.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "s3:::example-bucket",
+        },
+        ArnValidation {
+            service: "cloudfront",
+            resource: "Distribution",
+            regex: arn_regex("cloudfront::[^:]*:distribution/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "cloudfront::123456789012:distribution/EXAMPLE",
+        },
+        ArnValidation {
+            service: "ecs",
+            resource: "Cluster",
+            regex: arn_regex("ecs:[^:]*:[^:]*:cluster/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "ecs:us-east-1:123456789012:cluster/example",
+        },
+        ArnValidation {
+            service: "dynamodb",
+            resource: "Table",
+            regex: arn_regex("dynamodb:[^:]*:[^:]*:table/.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "dynamodb:us-east-1:123456789012:table/example",
+        },
+        ArnValidation {
+            service: "logs",
+            resource: "LogGroup",
+            regex: arn_regex("logs:[^:]*:[^:]*:log-group:.+$"),
+            #[cfg(test)]
+            sample_arn_rest: "logs:us-east-1:123456789012:log-group:example",
+        },
+    ]
+});
 
 static KNOWN_SERVICES: &[&str] = &[
     "cloudfront",
@@ -517,8 +539,8 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
         ArnEmitChoice::PerKind(entry) => format!("Some({:?}.to_string())", entry.regex),
         ArnEmitChoice::ServicePrefix(service) => {
             format!(
-                "Some(\"^arn:(aws|aws-cn|aws-us-gov):{}:.*$\".to_string())",
-                service
+                "Some({:?}.to_string())",
+                arn_regex(&format!("{service}:.*$"))
             )
         }
         ArnEmitChoice::Generic => unreachable!("handled above"),
@@ -8270,8 +8292,8 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 ),
                 (
                     ("organizations.Account", "arn"),
-                    // Account$Arn -> AccountArn; the shared catalog retains
-                    // its exact Smithy resource grammar and aws partition.
+                    // Account$Arn -> AccountArn; keep the Smithy resource
+                    // grammar and use the shared Partition set (#638).
                     TypeOverride::SharedType(AwsType::OrganizationsAccountArn),
                 ),
                 (
@@ -9455,7 +9477,8 @@ mod tests {
             r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)",
             "OrganizationsAccountEmail (String; length: 6..=64)",
             r"AwsAccountId (String; length: 12..=12, pattern: `^\d{12}$`)",
-            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            // #638: Organizations account ARN docs pin all eight supported partitions.
+            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -9508,8 +9531,10 @@ mod tests {
         .unwrap();
         for expected in [
             r"String(length: 12..=34, pattern: `^o-[a-z0-9]{10,32}\z`)",
-            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
-            r"OrganizationsOrganizationArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
+            // #638: Management-account ARN docs pin all eight supported partitions.
+            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            // #638: Organization ARN docs pin all eight supported partitions.
+            r"OrganizationsOrganizationArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -11467,6 +11492,43 @@ mod tests {
             "Documentation example checked for resource aws.sts.CallerIdentity cannot render data \
              source aws.sts.CallerIdentity"
         );
+    }
+
+    fn assert_emitted_arn_partitions(emitted: &str, sample_rest: &str) {
+        let literal = emitted
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("Some(")?
+                    .strip_suffix(".to_string()),")
+            })
+            .unwrap_or_else(|| panic!("missing emitted ARN regex:\n{emitted}"));
+        let pattern = syn::parse_str::<syn::LitStr>(literal)
+            .expect("emitted ARN regex must be a Rust string literal")
+            .value();
+        let regex = regex::Regex::new(&pattern).expect("emitted ARN regex must compile");
+        for partition in carina_aws_types::Partition::ALL {
+            let arn = format!("arn:{}:{sample_rest}", partition.id());
+            assert!(regex.is_match(&arn), "{pattern} must accept {arn}");
+        }
+        let arn = format!("arn:aws-xx:{sample_rest}");
+        assert!(!regex.is_match(&arn), "{pattern} must reject {arn}");
+    }
+
+    #[test]
+    fn emit_arn_regexes_accept_all_partitions_and_reject_unknown_partitions() {
+        for entry in ARN_VALIDATIONS.iter() {
+            // Exercise inline PerKind emission even for rows whose normal
+            // resource name delegates to a shared catalog constructor.
+            let emitted = emit_arn_helper(
+                entry.service,
+                "PartitionTest",
+                ArnEmitChoice::PerKind(entry),
+            );
+            assert_emitted_arn_partitions(&emitted, entry.sample_arn_rest);
+        }
+        let emitted = emit_arn_helper("ec2", "Vpc", ArnEmitChoice::ServicePrefix("ec2"));
+        assert_emitted_arn_partitions(&emitted, "ec2:us-east-1:123456789012:vpc/vpc-12345678");
     }
 
     #[test]

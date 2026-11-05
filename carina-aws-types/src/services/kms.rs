@@ -1,22 +1,43 @@
-use crate::validate_service_arn;
+use std::sync::LazyLock;
+
+use crate::{arn_partition_pattern, arn_regex, validate_service_arn};
 
 /// Logs accepts key ARNs only, with the Smithy KmsKeyId length bound.
 pub fn kms_key_arn_reference() -> carina_core::schema::AttributeType {
     carina_core::schema::AttributeType::reference(
         crate::AwsType::KmsKeyReference.identity(),
-        Some(KMS_KEY_ARN_PATTERN.to_string()),
+        Some(kms_key_arn_pattern().to_string()),
         Some((Some(0), Some(256))),
     )
 }
 
-pub const KMS_KEY_ARN_PATTERN: &str = r"^arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})$";
-pub const KMS_KEY_REFERENCE_PATTERN: &str = r"^((arn:(aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+))|(alias/[a-zA-Z0-9:/_-]+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|(mrk-[0-9a-fA-F]{32}))$";
+/// Canonical KMS key ARN grammar over all supported partitions.
+pub fn kms_key_arn_pattern() -> &'static str {
+    static PATTERN: LazyLock<String> = LazyLock::new(|| {
+        arn_regex(
+            r"kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})$",
+        )
+    });
+    &PATTERN
+}
+
+/// KMS reference grammar, retaining aliases and bare key IDs alongside ARNs.
+pub fn kms_key_reference_pattern() -> &'static str {
+    static PATTERN: LazyLock<String> = LazyLock::new(|| {
+        [
+            "^((arn:",
+            arn_partition_pattern(),
+            r":kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+))|(alias/[a-zA-Z0-9:/_-]+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|(mrk-[0-9a-fA-F]{32}))$",
+        ].concat()
+    });
+    &PATTERN
+}
 
 /// Validate the canonical, key-only output type used by both guests.
 pub fn validate_kms_key_arn(value: &str) -> Result<(), String> {
     static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     if PATTERN
-        .get_or_init(|| regex::Regex::new(KMS_KEY_ARN_PATTERN).unwrap())
+        .get_or_init(|| regex::Regex::new(kms_key_arn_pattern()).unwrap())
         .is_match(value)
     {
         Ok(())
@@ -30,7 +51,7 @@ pub fn validate_kms_key_reference(value: &str) -> Result<(), String> {
     static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     if value.len() <= 2048
         && PATTERN
-            .get_or_init(|| regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap())
+            .get_or_init(|| regex::Regex::new(kms_key_reference_pattern()).unwrap())
             .is_match(value)
     {
         Ok(())
@@ -97,8 +118,8 @@ mod tests {
 
     #[test]
     fn patterns_accept_current_partitions_and_regions() {
-        let key_pattern = regex::Regex::new(KMS_KEY_ARN_PATTERN).unwrap();
-        let reference_pattern = regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap();
+        let key_pattern = regex::Regex::new(kms_key_arn_pattern()).unwrap();
+        let reference_pattern = regex::Regex::new(kms_key_reference_pattern()).unwrap();
         for (partition, region) in [
             ("aws", "us-east-1"),
             ("aws", "ap-northeast-1"),
@@ -129,7 +150,7 @@ mod tests {
 
     #[test]
     fn reference_pattern_accepts_uuid_and_mrk_ids_in_both_cases() {
-        let pattern = regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap();
+        let pattern = regex::Regex::new(kms_key_reference_pattern()).unwrap();
         for key_id in KEY_IDS {
             assert!(pattern.is_match(key_id), "{key_id}");
             assert!(validate_kms_key_reference(key_id).is_ok(), "{key_id}");
@@ -139,8 +160,8 @@ mod tests {
 
     #[test]
     fn patterns_reject_malformed_arns() {
-        let key_pattern = regex::Regex::new(KMS_KEY_ARN_PATTERN).unwrap();
-        let reference_pattern = regex::Regex::new(KMS_KEY_REFERENCE_PATTERN).unwrap();
+        let key_pattern = regex::Regex::new(kms_key_arn_pattern()).unwrap();
+        let reference_pattern = regex::Regex::new(kms_key_reference_pattern()).unwrap();
         for (partition, region, account, resource) in [
             (
                 "aws-xx",
