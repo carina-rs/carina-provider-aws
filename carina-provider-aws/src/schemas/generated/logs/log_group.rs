@@ -9,7 +9,7 @@ use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
-const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "INFREQUENT_ACCESS", "STANDARD"];
+const VALID_LOG_GROUP_CLASS: &[&str] = &["DELIVERY", "ESSENTIALS", "INFREQUENT_ACCESS", "STANDARD"];
 
 /// Returns the schema config for logs.LogGroup (Smithy: com.amazonaws.cloudwatchlogs)
 pub fn logs_log_group_config() -> AwsSchemaConfig {
@@ -37,13 +37,13 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::optional("log_group_class", AttributeType::enum_(
     carina_core::schema::enum_identity("LogGroupClass", Some("aws.logs.LogGroup")),
-    Some(vec!["DELIVERY".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]),
-    vec![("DELIVERY".to_string(), "delivery".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
+    Some(vec!["DELIVERY".to_string(), "ESSENTIALS".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]),
+    vec![("DELIVERY".to_string(), "delivery".to_string()), ("ESSENTIALS".to_string(), "essentials".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
     None,
     None,
 ))
                 .create_only()
-                .with_description("Use this parameter to specify the log group class for this log group. There are three classes: The Standard log class supports all CloudWatch Logs fea...")
+                .with_description("Use this parameter to specify the log group class for this log group. There are four classes: The Standard log class supports all CloudWatch Logs feat...")
                 .with_provider_name("logGroupClass")
                 .build(),
         )
