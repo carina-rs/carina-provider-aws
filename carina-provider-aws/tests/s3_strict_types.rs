@@ -379,6 +379,56 @@ fn s3_smithy_integer_members_preserve_width_while_long_filters_remain_i64() {
 }
 
 #[test]
+fn s3_abort_multipart_requires_positive_days_after_initiation() {
+    // The lifecycle XML table specifies Positive Integer; AWS rejects zero.
+    // https://docs.aws.amazon.com/AmazonS3/latest/developerguide/v1-rel-RESTBucketPUTlifecycle.html
+    for schema in schemas("BucketLifecycleConfiguration") {
+        let days = field(
+            &schema,
+            "rules[].abort_incomplete_multipart_upload.days_after_initiation",
+        );
+        for value in [0, -1, i64::from(i32::MIN)] {
+            assert!(
+                days.validate(&int(value)).is_err(),
+                "days_after_initiation = {value}"
+            );
+        }
+        for value in [1, i64::from(i32::MAX)] {
+            assert!(
+                days.validate(&int(value)).is_ok(),
+                "days_after_initiation = {value}"
+            );
+        }
+        assert!(days.validate(&int(i64::from(i32::MAX) + 1)).is_err());
+    }
+}
+
+#[test]
+fn s3_noncurrent_version_transition_requires_nonnegative_days() {
+    // The lifecycle XML table specifies Nonnegative Integer; AWS accepts zero.
+    // https://docs.aws.amazon.com/AmazonS3/latest/developerguide/v1-rel-RESTBucketPUTlifecycle.html
+    for schema in schemas("BucketLifecycleConfiguration") {
+        let days = field(
+            &schema,
+            "rules[].noncurrent_version_transitions[].noncurrent_days",
+        );
+        for value in [-1, i64::from(i32::MIN)] {
+            assert!(
+                days.validate(&int(value)).is_err(),
+                "transition noncurrent_days = {value}"
+            );
+        }
+        for value in [0, 1, i64::from(i32::MAX)] {
+            assert!(
+                days.validate(&int(value)).is_ok(),
+                "transition noncurrent_days = {value}"
+            );
+        }
+        assert!(days.validate(&int(i64::from(i32::MAX) + 1)).is_err());
+    }
+}
+
+#[test]
 fn s3_lifecycle_numeric_bounds_distinguish_expiration_and_transition() {
     for (path, minimum, maximum) in [
         ("rules[].expiration.days", 1, i64::from(i32::MAX)),
