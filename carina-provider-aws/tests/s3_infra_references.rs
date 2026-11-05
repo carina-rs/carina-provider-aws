@@ -31,9 +31,13 @@ fn validate_source(source: &str, registry: SchemaRegistry, expected_resources: u
         snapshot.schema_registry(),
         context,
     );
-    carina_core::validation::validate_resource_ref_types(
+    let configuration = carina_core::config_loader::load_buffer_configuration(
         &parsed,
         snapshot.schema_registry(),
+        context,
+    );
+    carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
         &HashSet::new(),
         &bindings,
     )
