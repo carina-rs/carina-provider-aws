@@ -125,7 +125,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::optional("resource_record", AttributeType::struct_(
                     "ResourceRecord".to_string(),
                     vec![
-                    StructField::required("name", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.?\\z".to_string()), None, None)).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
+                    StructField::required("name", carina_aws_types::route53_dns_name()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
                     StructField::required("type", AttributeType::enum_(
     carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(),
     Some(vec!["CNAME".to_string()]),
@@ -133,7 +133,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
     None,
     None,
 )).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
-                    StructField::required("value", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.?\\z".to_string()), None, None)).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
+                    StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).deferred_populate().with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
                     StructField::optional("validation_domain", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
@@ -188,7 +188,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::optional("resource_record", AttributeType::struct_(
                     "ResourceRecord".to_string(),
                     vec![
-                    StructField::required("name", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.?\\z".to_string()), None, None)).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
+                    StructField::required("name", carina_aws_types::route53_dns_name()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
                     StructField::required("type", AttributeType::enum_(
     carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(),
     Some(vec!["CNAME".to_string()]),
@@ -196,7 +196,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
     None,
     None,
 )).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
-                    StructField::required("value", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\\.?\\z".to_string()), None, None)).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
+                    StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
                     StructField::optional("validation_domain", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),

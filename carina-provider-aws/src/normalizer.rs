@@ -15,9 +15,7 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
         return None;
     }
     match id.resource_type.as_str() {
-        "route53.RecordSet" => {
-            Some(crate::services::route53::record_set::normalize_record_set_dns_names)
-        }
+        "route53.RecordSet" => Some(validate_route53_record_set_view),
         "acm.Certificate" => {
             Some(crate::services::acm::certificate::normalize_acm_certificate_inputs)
         }
@@ -31,6 +29,11 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
         "sqs.Queue" => Some(validate_sqs_queue_view),
         _ => None,
     }
+}
+
+fn validate_route53_record_set_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    crate::services::route53::record_set::validate_record_set_inputs(&view.inputs())?;
+    crate::services::route53::record_set::normalize_record_set_dns_names(view)
 }
 
 fn known_string(value: Option<&DesiredValue>) -> Option<&str> {

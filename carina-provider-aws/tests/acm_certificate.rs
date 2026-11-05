@@ -254,6 +254,16 @@ fn acm_sans_and_read_domains_allow_253_octets_and_63_octet_labels() {
 // https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
 #[test]
 fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
+    let shared_dns_name = carina_aws_types::route53_dns_name();
+    let RawShape::String {
+        identity: shared_identity,
+        pattern: shared_pattern,
+        length: shared_length,
+        ..
+    } = shared_dns_name.raw_shape()
+    else {
+        panic!("shared DNS String");
+    };
     for schema in acm_schemas() {
         for prefix in [
             "domain_validation_options[]",
@@ -269,6 +279,12 @@ fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
                     "_0123456789abcdef0123456789abcdef.abc123.acm-validations.aws.",
                     "_token.example.com",
                     "a-b._token.example.com.",
+                    // ACM records are read-only outputs and use the shared Route 53
+                    // DNS-name type so they can be assigned to RecordSet.name /
+                    // resource_records; wildcard rejection lived only on read validation.
+                    // Both spellings are valid Route 53 names, which allow : and / in labels.
+                    "*.example.com.",
+                    "http://example.com/",
                 ] {
                     assert!(record.validate(&string(valid)).is_ok(), "{path}: {valid:?}");
                 }
@@ -276,10 +292,8 @@ fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
                     "",
                     "_token..example.com.",
                     ".example.com.",
-                    "*.example.com.",
                     "_token.example.com.\n",
                     "_token example.com.",
-                    "http://example.com/",
                 ] {
                     assert!(
                         record.validate(&string(invalid)).is_err(),
@@ -290,10 +304,20 @@ fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
                 assert!(record.validate(&string(&longest_label)).is_ok());
                 let overlong_label = format!("_{}.example.com.", "a".repeat(63));
                 assert!(record.validate(&string(&overlong_label)).is_err());
-                let RawShape::String { length, .. } = record.as_type().raw_shape() else {
+                let RawShape::String {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                } = record.as_type().raw_shape()
+                else {
                     panic!("DNS String");
                 };
-                assert!(length.is_none(), "do not invent an ACM record length trait");
+                assert_eq!(
+                    (identity, pattern, length),
+                    (shared_identity, shared_pattern, shared_length),
+                    "{path} must use the shared Route 53 DNS-name type"
+                );
             }
         }
     }

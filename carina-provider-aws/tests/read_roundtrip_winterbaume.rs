@@ -441,6 +441,236 @@ struct AcmService {
     key_algorithm: &'static str,
 }
 
+// Exact read spellings observed in carina-test-004 on 2026-11-05. Only the
+// transport is scripted: SDK deserialization, record lookup, generated read
+// projection, desired normalization and the core differ all run normally.
+struct Route53DnsReadService {
+    name: &'static str,
+    alias_dns_name: Option<&'static str>,
+    record_type: &'static str,
+    record_value: &'static str,
+}
+
+impl MockService for Route53DnsReadService {
+    fn service_name(&self) -> &str {
+        "route53"
+    }
+
+    fn url_patterns(&self) -> Vec<&str> {
+        vec![r"^https://route53\.amazonaws\.com"]
+    }
+
+    fn handle(
+        &self,
+        request: MockRequest,
+    ) -> Pin<Box<dyn Future<Output = MockResponse> + Send + '_>> {
+        assert_eq!(request.method, "GET");
+        assert!(
+            request
+                .uri
+                .contains("/2013-04-01/hostedzone/Z123EXAMPLE/rrset"),
+            "{}",
+            request.uri
+        );
+        let data = if let Some(alias) = self.alias_dns_name {
+            format!(
+                "<AliasTarget><HostedZoneId>Z123EXAMPLE</HostedZoneId><DNSName>{alias}</DNSName><EvaluateTargetHealth>false</EvaluateTargetHealth></AliasTarget>"
+            )
+        } else {
+            format!(
+                "<TTL>300</TTL><ResourceRecords><ResourceRecord><Value>{}</Value></ResourceRecord></ResourceRecords>",
+                self.record_value
+            )
+        };
+        let response = MockResponse::xml(
+            200,
+            format!(
+                "<ListResourceRecordSetsResponse xmlns=\"https://route53.amazonaws.com/doc/2013-04-01/\"><ResourceRecordSets><ResourceRecordSet><Name>{}</Name><Type>{}</Type>{data}</ResourceRecordSet></ResourceRecordSets><IsTruncated>false</IsTruncated><MaxItems>100</MaxItems></ListResourceRecordSetsResponse>",
+                self.name, self.record_type,
+            ),
+        );
+        Box::pin(async move { response })
+    }
+}
+
+async fn assert_route53_dns_read_no_diff(
+    desired_name: &str,
+    read_name: &'static str,
+    identifier_name: &str,
+    alias: Option<(&str, &'static str)>,
+) {
+    let provider = provider_from_service(Route53DnsReadService {
+        name: read_name,
+        alias_dns_name: alias.map(|(_, read)| read),
+        record_type: "A",
+        record_value: "185.199.108.153",
+    })
+    .await;
+    let mut desired = Resource::with_provider("aws", "route53.RecordSet", "dns-roundtrip", None);
+    desired.set_attr("name", string(desired_name));
+    desired.set_attr("hosted_zone_id", string("Z123EXAMPLE"));
+    desired.set_attr(
+        "type",
+        Value::Concrete(ConcreteValue::enum_identifier(
+            "aws.route53.RecordSet.Type.a",
+        )),
+    );
+    if let Some((dns_name, _)) = alias {
+        desired.set_attr(
+            "alias_target",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([
+                ("dns_name".into(), string(dns_name)),
+                ("hosted_zone_id".into(), string("Z123EXAMPLE")),
+                ("evaluate_target_health".into(), bool_value(false)),
+            ]))),
+        );
+    } else {
+        desired.set_attr("ttl", Value::Concrete(ConcreteValue::Int(300)));
+        desired.set_attr("resource_records", list(&["185.199.108.153"]));
+    }
+    carina_core::value::canonicalize_resources_with_schemas(
+        std::slice::from_mut(&mut desired),
+        &schema_registry(),
+    )
+    .unwrap();
+    let desired = normalize_desired_for_test(desired).await;
+    let current = provider
+        .read(
+            &desired.id,
+            &applied_identifier(&format!("Z123EXAMPLE|{identifier_name}|A")),
+            ReadRequest,
+        )
+        .await
+        .expect("read Route 53 DNS spellings")
+        .into_state();
+    assert_no_diff(desired, current);
+}
+
+#[tokio::test]
+async fn route53_aws_probe_dns_read_round_trip_has_no_diff() {
+    for (desired, read) in [
+        ("example.com", "example.com."),
+        ("example.com.", "example.com."),
+        ("Example.com", "example.com."),
+        ("EXAMPLE.COM.", "example.com."),
+        (r"\105xample.com", "example.com."),
+        (r"\101bc.example.com", "abc.example.com."),
+        ("*.example.com", r"\052.example.com."),
+        ("a.*.example.com", r"a.\052.example.com."),
+        (r"\052.example.com", r"\052.example.com."),
+        (
+            "T4.Carina-588-Probe2.Example",
+            "t4.carina-588-probe2.example.",
+        ),
+    ] {
+        // Authored identifiers exercise lookup; returned identifiers isolate
+        // read projection and differ behavior. Avoid repeating identical ones.
+        for identifier in std::iter::once(desired).chain((desired != read).then_some(read)) {
+            assert_route53_dns_read_no_diff(desired, read, identifier, None).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn route53_aws_probe_alias_dns_read_round_trip_has_no_diff() {
+    for alias in [
+        ("d123.cloudfront.net", "d123.cloudfront.net."),
+        ("D123.CLOUDFRONT.NET.", "d123.cloudfront.net."),
+        (r"\104123.cloudfront.net", "d123.cloudfront.net."),
+        ("*.example.com", r"\052.example.com."),
+        ("a.*.example.com", r"a.\052.example.com."),
+    ] {
+        assert_route53_dns_read_no_diff(
+            "alias.example.com",
+            "alias.example.com.",
+            "alias.example.com",
+            Some(alias),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn route53_aws_probe_txt_read_preserves_quoted_chunks() {
+    for value in [
+        r#""5b78b5973e386afa9e64155fe3541d" "a" "b""#,
+        r#""a\"b""#,
+        r#""a"  "b""#,
+        r#""a""b""#,
+    ] {
+        let provider = provider_from_service(Route53DnsReadService {
+            name: "_github-pages-challenge-carina-rs.carina-rs.dev.",
+            alias_dns_name: None,
+            record_type: "TXT",
+            record_value: value,
+        })
+        .await;
+        let mut desired =
+            Resource::with_provider("aws", "route53.RecordSet", "txt-roundtrip", None);
+        desired.set_attr(
+            "name",
+            string("_github-pages-challenge-carina-rs.carina-rs.dev"),
+        );
+        desired.set_attr("hosted_zone_id", string("Z123EXAMPLE"));
+        desired.set_attr(
+            "type",
+            Value::Concrete(ConcreteValue::enum_identifier(
+                "aws.route53.RecordSet.Type.txt",
+            )),
+        );
+        desired.set_attr("ttl", Value::Concrete(ConcreteValue::Int(300)));
+        desired.set_attr("resource_records", list(&[value]));
+        carina_core::value::canonicalize_resources_with_schemas(
+            std::slice::from_mut(&mut desired),
+            &schema_registry(),
+        )
+        .unwrap();
+        let desired = normalize_desired_for_test(desired).await;
+        let current = provider
+            .read(
+                &desired.id,
+                &applied_identifier(
+                    "Z123EXAMPLE|_github-pages-challenge-carina-rs.carina-rs.dev|TXT",
+                ),
+                ReadRequest,
+            )
+            .await
+            .unwrap()
+            .into_state();
+        assert_eq!(
+            current.attributes.get("resource_records"),
+            Some(&list(&[value]).to_snapshot())
+        );
+        assert_no_diff(desired, current);
+    }
+}
+
+#[tokio::test]
+async fn route53_aws_probe_lookup_does_not_confuse_escaped_label_dots_with_separators() {
+    let provider = provider_from_service(Route53DnsReadService {
+        name: r"a\056b.example.com.",
+        alias_dns_name: None,
+        record_type: "A",
+        record_value: "185.199.108.153",
+    })
+    .await;
+    let resource: Resource =
+        Resource::with_provider("aws", "route53.RecordSet", "distinct-labels", None);
+    let id = resource.id;
+    let current = provider
+        .read(
+            &id,
+            &applied_identifier("Z123EXAMPLE|a.b.example.com|A"),
+            ReadRequest,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        current,
+        carina_core::provider::ReadOutcome::NotFound { .. }
+    ));
+}
+
 impl MockService for AcmService {
     fn service_name(&self) -> &str {
         "acm"
