@@ -1,7 +1,6 @@
-// ========== ARN validators ==========
+use super::Partition;
 
-/// Valid AWS partition values.
-const VALID_PARTITIONS: &[&str] = &["aws", "aws-cn", "aws-us-gov"];
+// ========== ARN validators ==========
 
 /// Validate basic ARN format (starts with "arn:", has 6+ colon-separated parts).
 /// Enforces valid partition and non-empty service.
@@ -15,11 +14,11 @@ pub fn validate_arn(arn: &str) -> Result<(), String> {
             "must have at least 6 colon-separated parts (arn:partition:service:region:account:resource)".to_string()
         );
     }
-    if !VALID_PARTITIONS.contains(&parts[1]) {
+    if Partition::from_id(parts[1]).is_none() {
         return Err(format!(
             "invalid partition '{}', must be one of: {}",
             parts[1],
-            VALID_PARTITIONS.join(", ")
+            Partition::ALL.map(Partition::id).join(", ")
         ));
     }
     // Service must be non-empty (e.g., "s3", "iam", "ec2")

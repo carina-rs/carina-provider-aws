@@ -16,7 +16,7 @@ use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
-use carina_aws_types::{AwsType, dsl_enum_value};
+use carina_aws_types::{AwsType, arn_regex, dsl_enum_value};
 use carina_codegen_aws::description::Description;
 use carina_codegen_aws::kms_references::{
     self, PathSegment, reference_type_code, validate_smithy_type,
@@ -404,60 +404,62 @@ enum ArnEmitChoice {
     Generic,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ArnValidation {
     service: &'static str,
     resource: &'static str,
-    regex: &'static str,
+    regex: String,
 }
 
-static ARN_VALIDATIONS: &[ArnValidation] = &[
-    ArnValidation {
-        service: "iam",
-        resource: "Role",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:role/.+$",
-    },
-    ArnValidation {
-        service: "iam",
-        resource: "Policy",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:policy/.+$",
-    },
-    ArnValidation {
-        service: "iam",
-        resource: "OidcProvider",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):iam::[^:]*:oidc-provider/.+$",
-    },
-    ArnValidation {
-        service: "kms",
-        resource: "Key",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):kms:[^:]*:[^:]*:key/.+$",
-    },
-    ArnValidation {
-        service: "s3",
-        resource: "Bucket",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):s3:::.+$",
-    },
-    ArnValidation {
-        service: "cloudfront",
-        resource: "Distribution",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):cloudfront::[^:]*:distribution/.+$",
-    },
-    ArnValidation {
-        service: "ecs",
-        resource: "Cluster",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):ecs:[^:]*:[^:]*:cluster/.+$",
-    },
-    ArnValidation {
-        service: "dynamodb",
-        resource: "Table",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):dynamodb:[^:]*:[^:]*:table/.+$",
-    },
-    ArnValidation {
-        service: "logs",
-        resource: "LogGroup",
-        regex: "^arn:(aws|aws-cn|aws-us-gov):logs:[^:]*:[^:]*:log-group:.+$",
-    },
-];
+static ARN_VALIDATIONS: LazyLock<[ArnValidation; 9]> = LazyLock::new(|| {
+    [
+        ArnValidation {
+            service: "iam",
+            resource: "Role",
+            regex: arn_regex("iam::[^:]*:role/.+$"),
+        },
+        ArnValidation {
+            service: "iam",
+            resource: "Policy",
+            regex: arn_regex("iam::[^:]*:policy/.+$"),
+        },
+        ArnValidation {
+            service: "iam",
+            resource: "OidcProvider",
+            regex: arn_regex("iam::[^:]*:oidc-provider/.+$"),
+        },
+        ArnValidation {
+            service: "kms",
+            resource: "Key",
+            regex: arn_regex("kms:[^:]*:[^:]*:key/.+$"),
+        },
+        ArnValidation {
+            service: "s3",
+            resource: "Bucket",
+            regex: arn_regex("s3:::.+$"),
+        },
+        ArnValidation {
+            service: "cloudfront",
+            resource: "Distribution",
+            regex: arn_regex("cloudfront::[^:]*:distribution/.+$"),
+        },
+        ArnValidation {
+            service: "ecs",
+            resource: "Cluster",
+            regex: arn_regex("ecs:[^:]*:[^:]*:cluster/.+$"),
+        },
+        ArnValidation {
+            service: "dynamodb",
+            resource: "Table",
+            regex: arn_regex("dynamodb:[^:]*:[^:]*:table/.+$"),
+        },
+        ArnValidation {
+            service: "logs",
+            resource: "LogGroup",
+            regex: arn_regex("logs:[^:]*:[^:]*:log-group:.+$"),
+        },
+    ]
+});
 
 static KNOWN_SERVICES: &[&str] = &[
     "cloudfront",
@@ -517,8 +519,8 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
         ArnEmitChoice::PerKind(entry) => format!("Some({:?}.to_string())", entry.regex),
         ArnEmitChoice::ServicePrefix(service) => {
             format!(
-                "Some(\"^arn:(aws|aws-cn|aws-us-gov):{}:.*$\".to_string())",
-                service
+                "Some({:?}.to_string())",
+                arn_regex(&format!("{service}:.*$"))
             )
         }
         ArnEmitChoice::Generic => unreachable!("handled above"),
@@ -9455,7 +9457,8 @@ mod tests {
             r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)",
             "OrganizationsAccountEmail (String; length: 6..=64)",
             r"AwsAccountId (String; length: 12..=12, pattern: `^\d{12}$`)",
-            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            // #638: Organizations account ARN docs pin all eight supported partitions.
+            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -9508,8 +9511,10 @@ mod tests {
         .unwrap();
         for expected in [
             r"String(length: 12..=34, pattern: `^o-[a-z0-9]{10,32}\z`)",
-            r"OrganizationsAccountArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
-            r"OrganizationsOrganizationArn (String; pattern: `^arn:aws:organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
+            // #638: Management-account ARN docs pin all eight supported partitions.
+            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            // #638: Organization ARN docs pin all eight supported partitions.
+            r"OrganizationsOrganizationArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
