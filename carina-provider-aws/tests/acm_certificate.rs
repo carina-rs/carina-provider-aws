@@ -504,9 +504,13 @@ fn validate_source(source: &str) {
         snapshot.schema_registry(),
         context,
     );
-    carina_core::validation::validate_resource_ref_types(
+    let configuration = carina_core::config_loader::load_buffer_configuration(
         &parsed,
         snapshot.schema_registry(),
+        context,
+    );
+    carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
         &HashSet::new(),
         &bindings,
     )
@@ -693,8 +697,13 @@ aws.route53.RecordSet {
             );
         // CLI wiring::validate_module_internal_ref_types checks this authored
         // template BEFORE expansion substitutes the caller's literal (#3798).
+        let configuration = carina_core::config_loader::load_buffer_configuration(
+            &template,
+            schemas,
+            session.catalog(),
+        );
         let diagnostics =
-            validate_resource_ref_types(&template, schemas, &HashSet::new(), &bindings)
+            validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
                 .err()
                 .map(|error| {
                     error
@@ -721,7 +730,12 @@ aws.route53.RecordSet {
                 &signatures,
                 session,
             );
-        validate_resource_ref_types(&expanded, schemas, &HashSet::new(), &bindings)
+        let configuration = carina_core::config_loader::load_buffer_configuration(
+            &expanded,
+            schemas,
+            session.catalog(),
+        );
+        validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
             .expect("validate expanded module references");
         diagnostics
     })

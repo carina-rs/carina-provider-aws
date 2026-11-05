@@ -166,9 +166,13 @@ fn organizations_organization_output_reference_types_distinguish_accounts_from_o
             snapshot.schema_registry(),
             context,
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );

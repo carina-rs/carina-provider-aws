@@ -171,9 +171,13 @@ fn validate_iam_roles_name_reference(
         snapshot.schema_registry(),
         context,
     );
-    carina_core::validation::validate_resource_ref_types(
+    let configuration = carina_core::config_loader::load_buffer_configuration(
         &parsed,
         snapshot.schema_registry(),
+        context,
+    );
+    carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
         &HashSet::new(),
         &bindings,
     )
