@@ -47,6 +47,7 @@ pub(crate) fn applied_identifier(
 }
 
 /// Check the wire width before passing a user integer to an SDK builder.
+/// The `clippy::cast_possible_truncation` deny lint enforces use of this helper.
 pub(crate) fn sdk_i32(id: &ResourceId, field: &str, value: i64) -> ProviderResult<i32> {
     i32::try_from(value).map_err(|_| {
         ProviderError::invalid_input(format!("{field} must be in -2147483648..=2147483647"))

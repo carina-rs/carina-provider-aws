@@ -2,6 +2,8 @@
 //!
 //! AWS Provider implementation
 
+#![cfg_attr(not(test), deny(clippy::cast_possible_truncation))]
+
 mod aws_operation;
 mod create_resource;
 mod data_source_lookups;
