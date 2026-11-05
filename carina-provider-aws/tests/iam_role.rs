@@ -188,9 +188,13 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             snapshot.schema_registry(),
             context,
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );

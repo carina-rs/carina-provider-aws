@@ -593,9 +593,13 @@ fn ec2_infra_network_shapes_and_existing_id_references_remain_valid() {
         snapshot.schema_registry(),
         snapshot.provider_context(),
     );
-    carina_core::validation::validate_resource_ref_types(
+    let configuration = carina_core::config_loader::load_buffer_configuration(
         &parsed,
         snapshot.schema_registry(),
+        snapshot.provider_context(),
+    );
+    carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
         &HashSet::new(),
         &bindings,
     )
@@ -647,9 +651,13 @@ fn ec2_anonymous_names_accept_plain_string_refs_and_named_cidrs_require_matching
             snapshot.schema_registry(),
             snapshot.provider_context(),
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            snapshot.provider_context(),
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );

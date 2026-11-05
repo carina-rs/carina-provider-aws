@@ -246,9 +246,13 @@ fn organizations_account_email_reference_types_require_annotation_or_matching_ou
             snapshot.schema_registry(),
             context,
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );
@@ -324,9 +328,13 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             snapshot.schema_registry(),
             context,
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );
