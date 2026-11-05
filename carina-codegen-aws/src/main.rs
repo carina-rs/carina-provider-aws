@@ -125,6 +125,8 @@ enum TypeOverride {
         min_length: u64,
         max_length: u64,
     },
+    /// Anonymous String carrier with documented character bounds only.
+    StringBounds { min: u64, max: u64 },
     /// Anonymous whole-string pattern with no documented numeric length cap.
     StringPattern(&'static str),
     /// Share an anonymous String constructor and derive documentation from it.
@@ -163,6 +165,13 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             format!("AttributeType::refined_int(None, Some((Some({min}), Some({max}))))"),
             MarkdownType::text(format!("Int({min}..={max})")),
             AttributeType::refined_int(None, Some((Some(*min), Some(*max)))),
+        ),
+        TypeOverride::StringBounds { min, max } => (
+            format!(
+                "AttributeType::refined_string(None, None, Some((Some({min}), Some({max}))), None)"
+            ),
+            MarkdownType::text(format!("String(length: {min}..={max})")),
+            AttributeType::refined_string(None, None, Some((Some(*min), Some(*max))), None),
         ),
         TypeOverride::RefinedString {
             pattern,
@@ -329,16 +338,47 @@ impl ValueTypeOverride {
     }
 }
 
-/// Preserve a hand-written unordered list while refining its exact element path.
-fn unordered_string_list_value_override(
+/// Preserve flattened string lists while refining their exact element path.
+fn string_list_value_override(
+    model: &SmithyModel,
+    target: &str,
     resource: &str,
     property_path: &str,
     constructor: &str,
 ) -> Option<ValueTypeOverride> {
-    if constructor != "AttributeType::unordered_list(AttributeType::string())" {
-        return None;
-    }
+    let ordered = match constructor {
+        "AttributeType::list(AttributeType::string())" => true,
+        "AttributeType::unordered_list(AttributeType::string())" => false,
+        _ => return None,
+    };
     let element = resource_value_override(resource, &format!("{property_path}[]"))?;
+    // The ordered Route 53 override flattens ResourceRecord{Value}; retain the
+    // source list's min=1 instead of silently dropping it during flattening.
+    // Leave the existing unordered-list contracts (ACM SANs) unchanged.
+    if ordered {
+        let length = match model.get_shape(target) {
+            Some(Shape::List(list)) => list.traits.get("smithy.api#length").map(|length| {
+                (
+                    length.get("min").and_then(|v| v.as_u64()),
+                    length.get("max").and_then(|v| v.as_u64()),
+                )
+            }),
+            _ => None,
+        };
+        return Some(ValueTypeOverride {
+            type_code: format!(
+                "AttributeType::refined_list({}, true, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
+                element.type_code
+            ),
+            display: MarkdownType::list(element.display),
+            attribute_type: AttributeType::refined_list(
+                element.attribute_type,
+                true,
+                length,
+                carina_core::schema::ListElements::AllowDuplicates,
+            ),
+        });
+    }
     Some(ValueTypeOverride {
         type_code: format!("AttributeType::unordered_list({})", element.type_code),
         display: MarkdownType::list(element.display),
@@ -615,6 +655,7 @@ fn send_field_type(
 ) -> SendFieldType {
     if type_code == "AttributeType::list(AttributeType::string())"
         || type_code == "AttributeType::unordered_list(AttributeType::string())"
+        || type_code.starts_with("AttributeType::refined_list(AttributeType::refined_string(")
         || (matches!(model.get_shape(target), Some(Shape::List(list))
             if matches!(model.shape_kind(&list.member.target), Some(ShapeKind::String))))
     {
@@ -2809,6 +2850,7 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         };
     }
     let constructors = constructors![
+        route53_dns_name,
         iam_path,
         iam_path_prefix,
         iam_policy_document,
@@ -2904,7 +2946,9 @@ fn resolve_type(
     }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
-        if let Some(list) = unordered_string_list_value_override(
+        if let Some(list) = string_list_value_override(
+            ctx.model,
+            target,
             ctx.resource_name,
             &ctx.property_path,
             override_type,
@@ -6891,7 +6935,7 @@ fn discover_markdown_type(
     // Check type overrides
     if let Some(&override_type) = type_overrides.get(field_name) {
         if let Some(list) =
-            unordered_string_list_value_override(resource_name, property_path, override_type)
+            string_list_value_override(model, target, resource_name, property_path, override_type)
         {
             return Ok(list.display);
         }
@@ -7426,17 +7470,43 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 // Unlike core's wildcard_domain_name(), ACM's pattern excludes a terminal dot.
 const ACM_DOMAIN_NAME_PATTERN: &str = carina_aws_types::ACM_CERTIFICATE_DOMAIN_NAME_PATTERN;
 
-// ResourceRecord.{Name,Value} are DNS names, not hostnames. ACM publishes
-// _token labels, with terminal dots in its DNS-validation examples. Accept
-// both absolute and unqualified spellings; impose no undocumented total cap.
-// https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
-// https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
-const ACM_VALIDATION_RECORD_PATTERN: &str = r"^(?:[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.)+[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?\.?\z";
-
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
             HashMap::from([
+                (
+                    ("route53.RecordSet", "name"),
+                    // ResourceRecordSet$Name -> DNSName (0..1024); the guide
+                    // requires nonempty labels, decoded byte limits, and the
+                    // record-specific wildcard rules. Share ACM's DNS carrier.
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
+                ),
+                (
+                    ("route53.RecordSet", "alias_target.dns_name"),
+                    // AliasTarget$DNSName -> DNSName. CloudFront, ALB (also
+                    // dualstack), S3 websites and another record's DNS name:
+                    // https://docs.aws.amazon.com/Route53/latest/APIReference/API_AliasTarget.html
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
+                ),
+                (
+                    ("route53.RecordSet", "resource_records[]"),
+                    // ResourceRecord$Value -> RData (0..4000 characters).
+                    // Format is conditional on Type, validated provider-locally.
+                    // https://docs.aws.amazon.com/Route53/latest/APIReference/API_ResourceRecord.html
+                    TypeOverride::StringBounds { min: 0, max: 4000 },
+                ),
+                (
+                    ("route53.RecordSet", "hosted_zone_id"),
+                    // ChangeResourceRecordSetsRequest$HostedZoneId ->
+                    // ResourceId (max 32), same as AliasTarget$HostedZoneId.
+                    // Reuse the existing AWS-only zone identity.
+                    // https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeResourceRecordSets.html
+                    TypeOverride::SharedType(AwsType::Route53HostedZoneId),
+                ),
                 (
                     ("ec2.Eip", "address"),
                     // ec2.json AllocateAddressRequest$Address -> PublicIpAddress.
@@ -7654,28 +7724,38 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                         "acm.Certificate",
                         "domain_validation_options[].resource_record.name",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    // ACM supplies the DNS name and CNAME target to publish:
+                    // https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.name",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::StringPattern(ACM_VALIDATION_RECORD_PATTERN),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
                 ),
                 (
                     (
@@ -8277,6 +8357,166 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn route53_value_fixture() -> (ResourceDef, SmithyModel) {
+        let resource = resource_defs::route53_resources().remove(0);
+        let model = carina_smithy::parse(r##"{
+            "smithy": "2.0",
+            "shapes": {
+                "com.amazonaws.route53#ChangeResourceRecordSets": {"type": "operation", "input": {"target": "com.amazonaws.route53#ChangeResourceRecordSetsRequest"}},
+                "com.amazonaws.route53#ChangeResourceRecordSetsRequest": {"type": "structure", "members": {"HostedZoneId": {"target": "com.amazonaws.route53#ResourceId", "traits": {"smithy.api#required": {}}}}},
+                "com.amazonaws.route53#ResourceRecordSet": {
+                    "type": "structure",
+                    "members": {
+                        "Name": {"target": "com.amazonaws.route53#DNSName", "traits": {"smithy.api#required": {}}},
+                        "Type": {"target": "com.amazonaws.route53#RRType", "traits": {"smithy.api#required": {}}},
+                        "AliasTarget": {"target": "com.amazonaws.route53#AliasTarget"},
+                        "ResourceRecords": {"target": "com.amazonaws.route53#ResourceRecords"},
+                        "TTL": {"target": "com.amazonaws.route53#TTL"}
+                    }
+                },
+                "com.amazonaws.route53#AliasTarget": {
+                    "type": "structure",
+                    "members": {
+                        "DNSName": {"target": "com.amazonaws.route53#DNSName", "traits": {"smithy.api#required": {}}},
+                        "HostedZoneId": {"target": "com.amazonaws.route53#ResourceId", "traits": {"smithy.api#required": {}}},
+                        "EvaluateTargetHealth": {"target": "smithy.api#Boolean", "traits": {"smithy.api#required": {}}}
+                    }
+                },
+                "com.amazonaws.route53#ResourceRecords": {"type": "list", "member": {"target": "com.amazonaws.route53#ResourceRecord"}, "traits": {"smithy.api#length": {"min": 1}}},
+                "com.amazonaws.route53#ResourceRecord": {"type": "structure", "members": {"Value": {"target": "com.amazonaws.route53#RData", "traits": {"smithy.api#required": {}}}}},
+                "com.amazonaws.route53#DNSName": {"type": "string", "traits": {"smithy.api#length": {"min": 0, "max": 1024}}},
+                "com.amazonaws.route53#RData": {"type": "string", "traits": {"smithy.api#length": {"min": 0, "max": 4000}}},
+                "com.amazonaws.route53#ResourceId": {"type": "string", "traits": {"smithy.api#length": {"min": 0, "max": 32}}},
+                "com.amazonaws.route53#TTL": {"type": "long", "traits": {"smithy.api#range": {"min": 0, "max": 2147483647}}},
+                "com.amazonaws.route53#RRType": {"type": "enum", "members": {"A": {"target": "smithy.api#Unit", "traits": {"smithy.api#enumValue": "A"}}, "CNAME": {"target": "smithy.api#Unit", "traits": {"smithy.api#enumValue": "CNAME"}}}}
+            }
+        }"##).unwrap();
+        (resource, model)
+    }
+
+    #[test]
+    fn acm_and_route53_dns_overrides_share_one_bounded_constructor() {
+        for (resource, path) in [
+            ("route53.RecordSet", "name"),
+            ("route53.RecordSet", "alias_target.dns_name"),
+            (
+                "acm.Certificate",
+                "domain_validation_options[].resource_record.name",
+            ),
+            (
+                "acm.Certificate",
+                "domain_validation_options[].resource_record.value",
+            ),
+            (
+                "acm.Certificate",
+                "renewal_summary.domain_validation_options[].resource_record.name",
+            ),
+            (
+                "acm.Certificate",
+                "renewal_summary.domain_validation_options[].resource_record.value",
+            ),
+        ] {
+            let value = resource_value_override(resource, path).unwrap();
+            assert_eq!(
+                value.type_code, "carina_aws_types::route53_dns_name()",
+                "{resource}.{path}"
+            );
+            let RawShape::String {
+                identity,
+                pattern,
+                length,
+                ..
+            } = value.attribute_type.raw_shape()
+            else {
+                panic!("{resource}.{path}: DNS String");
+            };
+            assert!(identity.is_none());
+            assert!(pattern.is_some());
+            assert_eq!(length, Some((Some(1), Some(1024))));
+        }
+    }
+
+    #[test]
+    fn route53_codegen_refines_only_exact_paths_and_preserves_send_carriers() {
+        let (resource, model) = route53_value_fixture();
+        let attrs = collect_resource_attributes(&resource, &model)
+            .unwrap()
+            .attrs;
+        for (path, send_type) in [
+            ("name", SendFieldType::String),
+            ("hosted_zone_id", SendFieldType::String),
+            ("resource_records", SendFieldType::StringList),
+        ] {
+            let attr = attrs.iter().find(|attr| attr.snake_name == path).unwrap();
+            assert_eq!(attr.send_type, send_type, "{path}");
+            assert_ne!(attr.type_code, PLAIN_STRING_TYPE_CODE, "{path}");
+        }
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert!(generated.contains("carina_aws_types::route53_hosted_zone_id()"));
+        assert!(generated.contains("Some(4000)"), "{generated}");
+        assert!(
+            generated.contains(
+                "StructField::required(\"dns_name\", carina_aws_types::route53_dns_name())"
+            )
+        );
+        assert!(
+            generated.contains(
+                "AttributeSchema::required(\"name\", carina_aws_types::route53_dns_name())"
+            )
+        );
+        for path in [
+            "name",
+            "alias_target.dns_name",
+            "hosted_zone_id",
+            "resource_records[]",
+        ] {
+            assert!(
+                resource_value_override(resource.name, path).is_some(),
+                "{path}"
+            );
+            assert!(
+                resource_value_override("route53.Other", path).is_none(),
+                "{path}"
+            );
+        }
+        for path in [
+            "nested.name",
+            "alias_target.name",
+            "dns_name",
+            "other.resource_records[]",
+            "alias_target.hosted_zone_id",
+            "ttl",
+            "type",
+        ] {
+            assert!(
+                resource_value_override(resource.name, path).is_none(),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn route53_codegen_documents_the_dns_and_record_value_carriers() {
+        let (resource, model) = route53_value_fixture();
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        for expected in [
+            "length: 1..=1024",
+            "length: 0..=4000",
+            "Route53HostedZoneId",
+            "pattern:",
+        ] {
+            assert!(
+                markdown.contains(expected),
+                "missing {expected}: {markdown}"
+            );
+        }
+    }
     use carina_core::schema::StructField;
 
     fn markdown_resource_example(dsl_name: &str) -> DocExample {

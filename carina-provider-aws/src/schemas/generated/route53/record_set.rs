@@ -26,7 +26,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
             AttributeSchema::optional("alias_target", AttributeType::struct_(
                     "AliasTarget".to_string(),
                     vec![
-                    StructField::required("dns_name", AttributeType::string()).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
+                    StructField::required("dns_name", carina_aws_types::route53_dns_name()).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
                     StructField::required("evaluate_target_health", AttributeType::bool()).with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth").build(),
                     StructField::required("hosted_zone_id", AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])).with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId").build()
                     ],
@@ -36,7 +36,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("name", AttributeType::string())
+            AttributeSchema::required("name", carina_aws_types::route53_dns_name())
                 .create_only()
                 .identity()
                 .with_description("For ChangeResourceRecordSets requests, the name of the record that you want to create, update, or delete. For ListResourceRecordSets responses, the na...")
@@ -44,7 +44,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("resource_records", AttributeType::list(AttributeType::string()))
+            AttributeSchema::optional("resource_records", AttributeType::refined_list(AttributeType::refined_string(None, None, Some((Some(0), Some(4000))), None), true, Some((Some(1), None)), carina_core::schema::ListElements::AllowDuplicates))
                 .with_description("Information about the resource records to act upon. If you're creating an alias resource record set, omit ResourceRecords.")
                 .with_provider_name("ResourceRecords")
                 .build(),
@@ -73,7 +73,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("hosted_zone_id", AttributeType::string())
+            AttributeSchema::required("hosted_zone_id", carina_aws_types::route53_hosted_zone_id())
                 .create_only()
                 .identity()
                 .with_description("The ID of the hosted zone that contains this record set.")
