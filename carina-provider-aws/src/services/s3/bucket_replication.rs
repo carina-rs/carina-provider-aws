@@ -296,7 +296,9 @@ fn build_rule(
     // `Priority` — S3 uses it to resolve precedence when rules overlap.
     // Default to 0 (lowest precedence) when the DSL omits it.
     let priority = match map.get("priority") {
-        Some(Value::Concrete(ConcreteValue::Int(n))) => *n as i32,
+        Some(Value::Concrete(ConcreteValue::Int(n))) => {
+            crate::helpers::sdk_i32(id, "priority", *n)?
+        }
         _ => 0,
     };
     builder = builder.priority(priority);

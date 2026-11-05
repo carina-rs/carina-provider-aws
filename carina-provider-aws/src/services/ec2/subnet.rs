@@ -311,7 +311,7 @@ impl AwsProvider {
             schema,
             assign_ipv6_address_on_creation,
             enable_dns64,
-            enable_lni_at_device_index,
+            enable_lni_at_device_index.map(i64::from),
             map_public_ip_on_launch,
             private_dns_name_options_on_launch.as_ref(),
         ) {
@@ -324,7 +324,7 @@ impl AwsProvider {
             "IPv4",
             cidr_block.as_deref(),
             ipv4_ipam_pool_id.as_deref(),
-            ipv4_netmask_length,
+            ipv4_netmask_length.map(i64::from),
             !ipv6_native_value,
         ) {
             return Err(attempt.not_created(error));
@@ -334,7 +334,7 @@ impl AwsProvider {
             "IPv6",
             ipv6_cidr_block.as_deref(),
             ipv6_ipam_pool_id.as_deref(),
-            ipv6_netmask_length,
+            ipv6_netmask_length.map(i64::from),
             ipv6_native_value,
         ) {
             return Err(attempt.not_created(error));
@@ -359,7 +359,7 @@ impl AwsProvider {
             req = req.ipv4_ipam_pool_id(ipv4_ipam_pool_id);
         }
         if let Some(ipv4_netmask_length) = ipv4_netmask_length {
-            req = req.ipv4_netmask_length(ipv4_netmask_length as i32);
+            req = req.ipv4_netmask_length(ipv4_netmask_length);
         }
         if let Some(ipv6_cidr_block) = ipv6_cidr_block {
             req = req.ipv6_cidr_block(ipv6_cidr_block);
@@ -368,7 +368,7 @@ impl AwsProvider {
             req = req.ipv6_ipam_pool_id(ipv6_ipam_pool_id);
         }
         if let Some(ipv6_netmask_length) = ipv6_netmask_length {
-            req = req.ipv6_netmask_length(ipv6_netmask_length as i32);
+            req = req.ipv6_netmask_length(ipv6_netmask_length);
         }
         if ipv6_native.is_some() {
             req = req.ipv6_native(ipv6_native_value);
@@ -389,7 +389,7 @@ impl AwsProvider {
             TaggedEc2Create::Subnet {
                 assign_ipv6_address_on_creation,
                 enable_dns64,
-                enable_lni_at_device_index,
+                enable_lni_at_device_index: enable_lni_at_device_index.map(i64::from),
                 map_public_ip_on_launch,
                 private_dns_name_options_on_launch,
             }
@@ -460,7 +460,7 @@ impl AwsProvider {
             schema,
             assign_ipv6_address_on_creation,
             enable_dns64,
-            enable_lni_at_device_index,
+            enable_lni_at_device_index.map(i64::from),
             map_public_ip_on_launch,
             private_dns_name_options_on_launch.as_ref(),
         )?;

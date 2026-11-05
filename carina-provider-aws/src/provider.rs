@@ -495,7 +495,7 @@ impl TaggedEc2Create {
                 Ok(Self::Subnet {
                     assign_ipv6_address_on_creation,
                     enable_dns64,
-                    enable_lni_at_device_index,
+                    enable_lni_at_device_index: enable_lni_at_device_index.map(i64::from),
                     map_public_ip_on_launch,
                     private_dns_name_options_on_launch,
                 })

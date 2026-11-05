@@ -20,7 +20,7 @@ aws.s3.BucketCorsConfiguration {
   cors_rules = [
     {
       id              = 'allow-example-get'
-      allowed_methods = ['GET']
+      allowed_methods = [get]
       # Replace with the browser origin that should be allowed.
       allowed_origins = ['https://example.com']
       allowed_headers = ['*']

@@ -364,10 +364,22 @@ fn availability_zone_type(identity: TypeIdentity) -> AttributeType {
     )
 }
 
+// Include Gregorian calendar validity in the transported pattern as well as
+// the native validator. Protocol schemas cannot serialize Rust callbacks.
+const S3_LIFECYCLE_DATE_PATTERN: &str = concat!(
+    r"^(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|",
+    r"(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|",
+    r"(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)",
+    r"T00:00:00Z\z",
+);
+
 fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
     validated_string(
         identity,
-        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+        // LifecycleExpiration$Date and Transition$Date always use midnight UTC.
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Transition.html
+        S3_LIFECYCLE_DATE_PATTERN,
         Some((Some(20), Some(20))),
         |value| {
             let parsed = DateTime::from_str(value, Format::DateTime)
@@ -375,7 +387,36 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
             let canonical = parsed
                 .fmt(Format::DateTime)
                 .map_err(|error| format!("cannot format UTC RFC 3339 timestamp: {error}"))?;
-            if canonical == value {
+            // Smithy's parser can preserve an impossible day. Check the
+            // Gregorian calendar before comparing the timestamp round trip.
+            let components = value
+                .split('T')
+                .next()
+                .unwrap_or("")
+                .split('-')
+                .map(str::parse::<u32>)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "invalid lifecycle calendar date".to_string())?;
+            let [year, month, day] = components.as_slice() else {
+                return Err("invalid lifecycle calendar date".to_string());
+            };
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let maximum = match month {
+                2 => {
+                    if leap {
+                        29
+                    } else {
+                        28
+                    }
+                }
+                4 | 6 | 9 | 11 => 30,
+                1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+                _ => 0,
+            };
+            if *day == 0 || *day > maximum {
+                return Err("invalid lifecycle calendar date".to_string());
+            }
+            if canonical == value && value.ends_with("T00:00:00Z") {
                 Ok(())
             } else {
                 Err(format!(

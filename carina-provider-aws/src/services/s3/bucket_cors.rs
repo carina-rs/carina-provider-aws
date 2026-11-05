@@ -195,7 +195,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
         builder = builder.set_expose_headers(Some(strings_from_list(id, items, "expose_headers")?));
     }
     if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("max_age_seconds") {
-        builder = builder.max_age_seconds(*n as i32);
+        builder = builder.max_age_seconds(crate::helpers::sdk_i32(id, "max_age_seconds", *n)?);
     }
 
     builder.build().map_err(|e| {
@@ -223,6 +223,9 @@ fn strings_from_list(id: &ResourceId, items: &[Value], field: &str) -> ProviderR
         .iter()
         .map(|v| match v {
             Value::Concrete(ConcreteValue::String(s)) => Ok(s.expose_plaintext().to_string()),
+            Value::Concrete(ConcreteValue::CanonicalEnum(method)) if field == "allowed_methods" => {
+                Ok(method.api_value().to_string())
+            }
             _ => Err(ProviderError::invalid_input(format!(
                 "cors_rule.{field} must be a list of strings"
             ))
@@ -287,6 +290,43 @@ fn rule_to_value(rule: &CorsRule) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_http_methods_reach_the_sdk_as_uppercase_wire_values() {
+        let schema = crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema.validate().unwrap();
+        let methods = ["GET", "PUT", "HEAD", "POST", "DELETE"];
+        let rules = Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+            ConcreteValue::Map(IndexMap::from([
+                (
+                    "allowed_methods".to_string(),
+                    Value::Concrete(ConcreteValue::List(
+                        methods
+                            .iter()
+                            .map(|method| Value::Concrete(ConcreteValue::String((*method).into())))
+                            .collect(),
+                    )),
+                ),
+                (
+                    "allowed_origins".to_string(),
+                    Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                        ConcreteValue::String("*".into()),
+                    )])),
+                ),
+            ])),
+        )]));
+        let canonical = schema
+            .effective_attribute("cors_rules")
+            .unwrap()
+            .canonicalize_state(rules)
+            .into_present()
+            .unwrap();
+        let Value::Concrete(ConcreteValue::List(rules)) = canonical else {
+            panic!("CORS rules list")
+        };
+        let id = ResourceId::with_identity("s3.BucketCorsConfiguration", "canonical-methods");
+        let rule = build_rule(&id, &rules[0]).unwrap();
+        assert_eq!(rule.allowed_methods(), methods);
+    }
 
     #[test]
     fn empty_optional_cors_fields_are_preserved() {

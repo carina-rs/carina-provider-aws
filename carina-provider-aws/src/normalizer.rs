@@ -5,7 +5,9 @@ use carina_core::provider::{
     ready_noop,
 };
 use carina_core::resource::{ProviderResource, ResourceId};
-use carina_plugin_sdk::{DesiredScalar, DesiredValue, DesiredView, NativeDesiredNormalization};
+use carina_plugin_sdk::{
+    DesiredMap, DesiredScalar, DesiredValue, DesiredView, NativeDesiredNormalization,
+};
 
 type DesiredNormalizer = fn(&mut DesiredView<'_>) -> ProviderResult<()>;
 
@@ -19,9 +21,11 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
         "acm.Certificate" => {
             Some(crate::services::acm::certificate::normalize_acm_certificate_inputs)
         }
-        "s3.BucketReplicationConfiguration" => {
-            Some(crate::services::s3::bucket_replication::normalize_delete_marker_replication)
-        }
+        "s3.BucketReplicationConfiguration" => Some(validate_s3_replication_view),
+        "s3.BucketLifecycleConfiguration" => Some(validate_s3_lifecycle_view),
+        "s3.BucketLogging" => Some(validate_s3_logging_view),
+        "s3.BucketWebsiteConfiguration" => Some(validate_s3_website_view),
+        "s3.BucketNotificationConfiguration" => Some(validate_s3_notification_view),
         "ec2.Subnet" => Some(normalize_subnet_view),
         "ec2.FlowLog" => Some(validate_flow_log_view),
         "ec2.Vpc" => Some(validate_vpc_view),
@@ -41,6 +45,277 @@ fn known_string(value: Option<&DesiredValue>) -> Option<&str> {
         Some(DesiredValue::Known(value)) => value.as_str(),
         _ => None,
     }
+}
+
+fn known_map(value: Option<&DesiredValue>) -> Option<&DesiredMap> {
+    match value {
+        Some(DesiredValue::Map(value)) => Some(value),
+        _ => None,
+    }
+}
+
+fn known_int(value: Option<&DesiredValue>) -> Option<i64> {
+    match value {
+        Some(DesiredValue::Known(DesiredScalar::Int(value))) => Some(*value),
+        _ => None,
+    }
+}
+
+fn known_present(value: Option<&DesiredValue>) -> bool {
+    matches!(
+        value,
+        Some(DesiredValue::Known(_) | DesiredValue::Map(_) | DesiredValue::List(_))
+    )
+}
+
+fn s3_filter_has_tags(filter: &DesiredMap) -> bool {
+    known_map(filter.get("tag")).is_some()
+        || known_map(filter.get("and")).is_some_and(|and| {
+            matches!(and.get("tags"), Some(DesiredValue::List(tags)) if tags.iter().any(|tag| known_map(Some(tag)).is_some()))
+        })
+}
+
+fn validate_s3_replication_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html
+    let inputs = view.inputs();
+    let invalid = |message| ProviderError::invalid_input(message).for_resource(inputs.id().clone());
+    if let Some(DesiredValue::List(rules)) = inputs.attribute("rules") {
+        for rule in rules.iter().filter_map(|value| known_map(Some(value))) {
+            if let Some(filter) = known_map(rule.get("filter")) {
+                if ["prefix", "tag", "and"]
+                    .iter()
+                    .filter(|field| known_present(filter.get(field)))
+                    .count()
+                    > 1
+                {
+                    return Err(invalid(
+                        "s3.BucketReplicationConfiguration rules[].filter must select at most one of prefix, tag or and; an empty filter matches all objects",
+                    ));
+                }
+                if s3_filter_has_tags(filter)
+                    && known_map(rule.get("delete_marker_replication"))
+                        .and_then(|marker| known_string(marker.get("status")))
+                        == Some("Enabled")
+                {
+                    return Err(invalid(
+                        "s3.BucketReplicationConfiguration delete_marker_replication must be Disabled with tag filters",
+                    ));
+                }
+            }
+        }
+    }
+    crate::services::s3::bucket_replication::normalize_delete_marker_replication(view)
+}
+
+fn validate_s3_lifecycle_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    let inputs = view.inputs();
+    let invalid = |message| ProviderError::invalid_input(message).for_resource(inputs.id().clone());
+    let Some(DesiredValue::List(rules)) = inputs.attribute("rules") else {
+        return Ok(());
+    };
+    for rule in rules.iter().filter_map(|rule| known_map(Some(rule))) {
+        // Days and Date are alternative clocks for current-version actions.
+        // https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-configuration-examples.html
+        // ExpiredObjectDeleteMarker cannot accompany Days or Date, even false.
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html
+        let expiration = known_map(rule.get("expiration"));
+        let mut has_days = expiration.is_some_and(|action| known_present(action.get("days")));
+        let mut has_date = expiration.is_some_and(|action| known_present(action.get("date")));
+        if let Some(expiration) = expiration {
+            if known_present(expiration.get("days")) && known_present(expiration.get("date")) {
+                return Err(invalid(
+                    "s3.BucketLifecycleConfiguration rules[].expiration cannot combine days and date",
+                ));
+            }
+            if known_present(expiration.get("expired_object_delete_marker"))
+                && (known_present(expiration.get("days")) || known_present(expiration.get("date")))
+            {
+                return Err(invalid(
+                    "s3.BucketLifecycleConfiguration rules[].expiration.expired_object_delete_marker cannot combine with days or date",
+                ));
+            }
+        }
+        if let Some(DesiredValue::List(transitions)) = rule.get("transitions") {
+            for transition in transitions
+                .iter()
+                .filter_map(|value| known_map(Some(value)))
+            {
+                has_days |= known_present(transition.get("days"));
+                has_date |= known_present(transition.get("date"));
+                if known_present(transition.get("days")) && known_present(transition.get("date")) {
+                    return Err(invalid(
+                        "s3.BucketLifecycleConfiguration rules[].transitions[] cannot combine days and date",
+                    ));
+                }
+            }
+        }
+        if has_days && has_date {
+            return Err(invalid(
+                "s3.BucketLifecycleConfiguration rules[] cannot mix days and date across expiration and transitions",
+            ));
+        }
+        // No independent size cap: '50 TB' is not defined exactly for filters.
+        // The ordering is explicit and independent of that unresolved cap.
+        // https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-filters.html
+        if let Some(filter) = known_map(rule.get("filter")) {
+            // https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html
+            if s3_filter_has_tags(filter)
+                && (known_present(rule.get("abort_incomplete_multipart_upload"))
+                    || expiration.is_some_and(|action| {
+                        known_present(action.get("expired_object_delete_marker"))
+                    }))
+            {
+                return Err(invalid(
+                    "s3.BucketLifecycleConfiguration tag filters cannot combine with abort_incomplete_multipart_upload or expired_object_delete_marker",
+                ));
+            }
+            for bounds in [Some(filter), known_map(filter.get("and"))]
+                .into_iter()
+                .flatten()
+            {
+                if let (Some(lower), Some(upper)) = (
+                    known_int(bounds.get("object_size_greater_than")),
+                    known_int(bounds.get("object_size_less_than")),
+                ) && lower >= upper
+                {
+                    return Err(invalid(
+                        "s3.BucketLifecycleConfiguration filter object_size_greater_than must be less than object_size_less_than",
+                    ));
+                }
+            }
+        }
+        // NewerNoncurrentVersions requires Filter on the wire; build_rule
+        // already supplies Filter={} when authored input omits it.
+    }
+    Ok(())
+}
+
+fn validate_s3_logging_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_TargetObjectKeyFormat.html
+    let inputs = view.inputs();
+    if let Some(format) = known_map(inputs.attribute("target_object_key_format")) {
+        let simple = format.get("simple_prefix");
+        let partitioned = format.get("partitioned_prefix");
+        if (simple.is_none() && partitioned.is_none())
+            || (known_present(simple) && known_present(partitioned))
+        {
+            return Err(ProviderError::invalid_input("s3.BucketLogging target_object_key_format must select exactly one of simple_prefix or partitioned_prefix").for_resource(inputs.id().clone()));
+        }
+    }
+    Ok(())
+}
+
+fn validate_s3_website_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_WebsiteConfiguration.html
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html
+    let inputs = view.inputs();
+    let redirect = inputs.attribute("redirect_all_requests_to");
+    if known_present(redirect)
+        && ["index_document", "error_document"]
+            .iter()
+            .any(|field| known_present(inputs.attribute(field)))
+    {
+        return Err(ProviderError::invalid_input("s3.BucketWebsiteConfiguration redirect_all_requests_to cannot combine with index_document or error_document").for_resource(inputs.id().clone()));
+    }
+    if redirect.is_none() && inputs.attribute("index_document").is_none() {
+        return Err(ProviderError::invalid_input("s3.BucketWebsiteConfiguration index_document is required unless redirect_all_requests_to is supplied").for_resource(inputs.id().clone()));
+    }
+    Ok(())
+}
+
+struct S3NotificationScope {
+    events: Vec<String>,
+    prefix: String,
+    suffix: String,
+}
+
+fn s3_notification_scope(configuration: &DesiredMap) -> Option<S3NotificationScope> {
+    let Some(DesiredValue::List(events)) = configuration.get("events") else {
+        return None;
+    };
+    let events = events
+        .iter()
+        .filter_map(|value| known_string(Some(value)))
+        .map(str::to_string)
+        .collect();
+    let mut prefix = String::new();
+    let mut suffix = String::new();
+    match configuration.get("filter") {
+        None => {}
+        Some(DesiredValue::Map(filter)) => match filter.get("filter_rules") {
+            None => {}
+            Some(DesiredValue::List(rules)) => {
+                for rule in rules.iter() {
+                    let rule = known_map(Some(rule))?;
+                    let name = known_string(rule.get("name"))?;
+                    let value = known_string(rule.get("value"))?;
+                    // Compare logical key prefixes/suffixes, including encoded
+                    // spaces. Leave admitted read/write encoding forms to AWS.
+                    let value = value.replace('+', " ");
+                    let decoded = urlencoding::decode(&value).ok()?.into_owned();
+                    match name {
+                        "prefix" => prefix = decoded,
+                        "suffix" => suffix = decoded,
+                        _ => return None,
+                    }
+                }
+            }
+            _ => return None,
+        },
+        _ => return None,
+    }
+    Some(S3NotificationScope {
+        events,
+        prefix,
+        suffix,
+    })
+}
+
+fn validate_s3_notification_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    // Overlap is forbidden when the same event can reach both configurations.
+    // https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-how-to-filtering.html
+    let inputs = view.inputs();
+    let mut scopes: Vec<S3NotificationScope> = Vec::new();
+    for attribute in [
+        "topic_configurations",
+        "queue_configurations",
+        "lambda_function_configurations",
+    ] {
+        let Some(DesiredValue::List(configurations)) = inputs.attribute(attribute) else {
+            continue;
+        };
+        for configuration in configurations
+            .iter()
+            .filter_map(|value| known_map(Some(value)))
+        {
+            let Some(scope) = s3_notification_scope(configuration) else {
+                continue;
+            };
+            for previous in &scopes {
+                let events_overlap = scope.events.iter().any(|left| {
+                    previous.events.iter().any(|right| {
+                        left == right
+                            || left
+                                .strip_suffix('*')
+                                .is_some_and(|prefix| right.starts_with(prefix))
+                            || right
+                                .strip_suffix('*')
+                                .is_some_and(|prefix| left.starts_with(prefix))
+                    })
+                });
+                if events_overlap
+                    && (scope.prefix.starts_with(&previous.prefix)
+                        || previous.prefix.starts_with(&scope.prefix))
+                    && (scope.suffix.ends_with(&previous.suffix)
+                        || previous.suffix.ends_with(&scope.suffix))
+                {
+                    return Err(ProviderError::invalid_input("s3.BucketNotificationConfiguration has overlapping notification filters for overlapping events").for_resource(inputs.id().clone()));
+                }
+            }
+            scopes.push(scope);
+        }
+    }
+    Ok(())
 }
 
 fn validate_flow_log_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {

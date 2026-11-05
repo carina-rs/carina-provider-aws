@@ -15,7 +15,7 @@ pub(crate) struct Ec2VpcCreateInput {
     enable_dns_support: Option<bool>,
     instance_tenancy: Option<String>,
     ipv4_ipam_pool_id: Option<String>,
-    ipv4_netmask_length: Option<i64>,
+    ipv4_netmask_length: Option<i32>,
     tags: Option<crate::send_model::Tags>,
 }
 
@@ -25,7 +25,7 @@ pub(crate) struct Ec2VpcCreateParts {
     pub(crate) enable_dns_support: crate::send_model::Sent<Option<bool>>,
     pub(crate) instance_tenancy: crate::send_model::Sent<Option<String>>,
     pub(crate) ipv4_ipam_pool_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i32>>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
@@ -47,7 +47,7 @@ impl Ec2VpcCreateInput {
                 "instance_tenancy",
             )?,
             ipv4_ipam_pool_id: crate::send_model::optional_string(_resource, "ipv4_ipam_pool_id")?,
-            ipv4_netmask_length: crate::send_model::optional_int(_resource, "ipv4_netmask_length")?,
+            ipv4_netmask_length: crate::send_model::optional_i32(_resource, "ipv4_netmask_length")?,
             tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
@@ -162,13 +162,13 @@ pub(crate) struct Ec2SubnetCreateInput {
     availability_zone_id: Option<String>,
     cidr_block: Option<String>,
     enable_dns64: Option<bool>,
-    enable_lni_at_device_index: Option<i64>,
+    enable_lni_at_device_index: Option<i32>,
     ipv4_ipam_pool_id: Option<String>,
-    ipv4_netmask_length: Option<i64>,
+    ipv4_netmask_length: Option<i32>,
     ipv6_cidr_block: Option<String>,
     ipv6_ipam_pool_id: Option<String>,
     ipv6_native: Option<bool>,
-    ipv6_netmask_length: Option<i64>,
+    ipv6_netmask_length: Option<i32>,
     map_public_ip_on_launch: Option<bool>,
     outpost_arn: Option<String>,
     private_dns_name_options_on_launch: Option<Value>,
@@ -182,13 +182,13 @@ pub(crate) struct Ec2SubnetCreateParts {
     pub(crate) availability_zone_id: crate::send_model::Sent<Option<String>>,
     pub(crate) cidr_block: crate::send_model::Sent<Option<String>>,
     pub(crate) enable_dns64: crate::send_model::Sent<Option<bool>>,
-    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i64>>,
+    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i32>>,
     pub(crate) ipv4_ipam_pool_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) ipv4_netmask_length: crate::send_model::Sent<Option<i32>>,
     pub(crate) ipv6_cidr_block: crate::send_model::Sent<Option<String>>,
     pub(crate) ipv6_ipam_pool_id: crate::send_model::Sent<Option<String>>,
     pub(crate) ipv6_native: crate::send_model::Sent<Option<bool>>,
-    pub(crate) ipv6_netmask_length: crate::send_model::Sent<Option<i64>>,
+    pub(crate) ipv6_netmask_length: crate::send_model::Sent<Option<i32>>,
     pub(crate) map_public_ip_on_launch: crate::send_model::Sent<Option<bool>>,
     pub(crate) outpost_arn: crate::send_model::Sent<Option<String>>,
     pub(crate) private_dns_name_options_on_launch: crate::send_model::Sent<Option<Value>>,
@@ -217,16 +217,16 @@ impl Ec2SubnetCreateInput {
             )?,
             cidr_block: crate::send_model::optional_string(_resource, "cidr_block")?,
             enable_dns64: crate::send_model::optional_bool(_resource, "enable_dns64")?,
-            enable_lni_at_device_index: crate::send_model::optional_int(
+            enable_lni_at_device_index: crate::send_model::optional_i32(
                 _resource,
                 "enable_lni_at_device_index",
             )?,
             ipv4_ipam_pool_id: crate::send_model::optional_string(_resource, "ipv4_ipam_pool_id")?,
-            ipv4_netmask_length: crate::send_model::optional_int(_resource, "ipv4_netmask_length")?,
+            ipv4_netmask_length: crate::send_model::optional_i32(_resource, "ipv4_netmask_length")?,
             ipv6_cidr_block: crate::send_model::optional_string(_resource, "ipv6_cidr_block")?,
             ipv6_ipam_pool_id: crate::send_model::optional_string(_resource, "ipv6_ipam_pool_id")?,
             ipv6_native: crate::send_model::optional_bool(_resource, "ipv6_native")?,
-            ipv6_netmask_length: crate::send_model::optional_int(_resource, "ipv6_netmask_length")?,
+            ipv6_netmask_length: crate::send_model::optional_i32(_resource, "ipv6_netmask_length")?,
             map_public_ip_on_launch: crate::send_model::optional_bool(
                 _resource,
                 "map_public_ip_on_launch",
@@ -362,7 +362,7 @@ impl Ec2SubnetCreateInput {
 pub(crate) struct Ec2SubnetUpdateInput {
     assign_ipv6_address_on_creation: Option<bool>,
     enable_dns64: Option<bool>,
-    enable_lni_at_device_index: Option<i64>,
+    enable_lni_at_device_index: Option<i32>,
     map_public_ip_on_launch: Option<bool>,
     private_dns_name_options_on_launch: Option<Value>,
     tags: Option<crate::send_model::Tags>,
@@ -371,7 +371,7 @@ pub(crate) struct Ec2SubnetUpdateInput {
 pub(crate) struct Ec2SubnetUpdateParts {
     pub(crate) assign_ipv6_address_on_creation: crate::send_model::Sent<Option<bool>>,
     pub(crate) enable_dns64: crate::send_model::Sent<Option<bool>>,
-    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i64>>,
+    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i32>>,
     pub(crate) map_public_ip_on_launch: crate::send_model::Sent<Option<bool>>,
     pub(crate) private_dns_name_options_on_launch: crate::send_model::Sent<Option<Value>>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
@@ -386,7 +386,7 @@ impl Ec2SubnetUpdateInput {
                 "assign_ipv6_address_on_creation",
             )?,
             enable_dns64: crate::send_model::optional_bool(_resource, "enable_dns64")?,
-            enable_lni_at_device_index: crate::send_model::optional_int(
+            enable_lni_at_device_index: crate::send_model::optional_i32(
                 _resource,
                 "enable_lni_at_device_index",
             )?,
@@ -769,26 +769,26 @@ pub(crate) struct Ec2SecurityGroupIngressCreateInput {
     cidr_ip: Option<String>,
     cidr_ipv6: Option<String>,
     description: Option<String>,
-    from_port: Option<i64>,
+    from_port: Option<i32>,
     group_id: Option<String>,
     ip_protocol: String,
     source_prefix_list_id: Option<String>,
     source_security_group_id: Option<String>,
     source_security_group_owner_id: Option<String>,
-    to_port: Option<i64>,
+    to_port: Option<i32>,
 }
 
 pub(crate) struct Ec2SecurityGroupIngressCreateParts {
     pub(crate) cidr_ip: crate::send_model::Sent<Option<String>>,
     pub(crate) cidr_ipv6: crate::send_model::Sent<Option<String>>,
     pub(crate) description: crate::send_model::Sent<Option<String>>,
-    pub(crate) from_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) from_port: crate::send_model::Sent<Option<i32>>,
     pub(crate) group_id: crate::send_model::Sent<Option<String>>,
     pub(crate) ip_protocol: crate::send_model::Sent<String>,
     pub(crate) source_prefix_list_id: crate::send_model::Sent<Option<String>>,
     pub(crate) source_security_group_id: crate::send_model::Sent<Option<String>>,
     pub(crate) source_security_group_owner_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) to_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) to_port: crate::send_model::Sent<Option<i32>>,
 }
 
 impl Ec2SecurityGroupIngressCreateInput {
@@ -800,7 +800,7 @@ impl Ec2SecurityGroupIngressCreateInput {
             cidr_ip: crate::send_model::optional_string(_resource, "cidr_ip")?,
             cidr_ipv6: crate::send_model::optional_string(_resource, "cidr_ipv6")?,
             description: crate::send_model::optional_string(_resource, "description")?,
-            from_port: crate::send_model::optional_int(_resource, "from_port")?,
+            from_port: crate::send_model::optional_i32(_resource, "from_port")?,
             group_id: crate::send_model::optional_string(_resource, "group_id")?,
             ip_protocol: crate::send_model::required_enum(_resource, _schema, "ip_protocol")?,
             source_prefix_list_id: crate::send_model::optional_string(
@@ -815,7 +815,7 @@ impl Ec2SecurityGroupIngressCreateInput {
                 _resource,
                 "source_security_group_owner_id",
             )?,
-            to_port: crate::send_model::optional_int(_resource, "to_port")?,
+            to_port: crate::send_model::optional_i32(_resource, "to_port")?,
         })
     }
 
@@ -934,11 +934,11 @@ pub(crate) struct Ec2SecurityGroupEgressCreateInput {
     description: Option<String>,
     destination_prefix_list_id: Option<String>,
     destination_security_group_id: Option<String>,
-    from_port: Option<i64>,
+    from_port: Option<i32>,
     group_id: String,
     ip_protocol: String,
     source_security_group_owner_id: Option<String>,
-    to_port: Option<i64>,
+    to_port: Option<i32>,
 }
 
 pub(crate) struct Ec2SecurityGroupEgressCreateParts {
@@ -947,11 +947,11 @@ pub(crate) struct Ec2SecurityGroupEgressCreateParts {
     pub(crate) description: crate::send_model::Sent<Option<String>>,
     pub(crate) destination_prefix_list_id: crate::send_model::Sent<Option<String>>,
     pub(crate) destination_security_group_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) from_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) from_port: crate::send_model::Sent<Option<i32>>,
     pub(crate) group_id: crate::send_model::Sent<String>,
     pub(crate) ip_protocol: crate::send_model::Sent<String>,
     pub(crate) source_security_group_owner_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) to_port: crate::send_model::Sent<Option<i64>>,
+    pub(crate) to_port: crate::send_model::Sent<Option<i32>>,
 }
 
 impl Ec2SecurityGroupEgressCreateInput {
@@ -971,14 +971,14 @@ impl Ec2SecurityGroupEgressCreateInput {
                 _resource,
                 "destination_security_group_id",
             )?,
-            from_port: crate::send_model::optional_int(_resource, "from_port")?,
+            from_port: crate::send_model::optional_i32(_resource, "from_port")?,
             group_id: crate::send_model::required_string(_resource, "group_id")?,
             ip_protocol: crate::send_model::required_enum(_resource, _schema, "ip_protocol")?,
             source_security_group_owner_id: crate::send_model::optional_string(
                 _resource,
                 "source_security_group_owner_id",
             )?,
-            to_port: crate::send_model::optional_int(_resource, "to_port")?,
+            to_port: crate::send_model::optional_i32(_resource, "to_port")?,
         })
     }
 
@@ -1252,7 +1252,7 @@ pub(crate) struct Ec2FlowLogCreateInput {
     log_destination_type: Option<String>,
     log_format: Option<String>,
     log_group_name: Option<String>,
-    max_aggregation_interval: Option<i64>,
+    max_aggregation_interval: Option<i32>,
     resource_ids: crate::send_model::StringList,
     resource_type: String,
     tag_field_specifications: Option<Value>,
@@ -1266,7 +1266,7 @@ pub(crate) struct Ec2FlowLogCreateParts {
     pub(crate) log_destination_type: crate::send_model::Sent<Option<String>>,
     pub(crate) log_format: crate::send_model::Sent<Option<String>>,
     pub(crate) log_group_name: crate::send_model::Sent<Option<String>>,
-    pub(crate) max_aggregation_interval: crate::send_model::Sent<Option<i64>>,
+    pub(crate) max_aggregation_interval: crate::send_model::Sent<Option<i32>>,
     pub(crate) resource_ids: crate::send_model::Sent<crate::send_model::StringList>,
     pub(crate) resource_type: crate::send_model::Sent<String>,
     pub(crate) tag_field_specifications: crate::send_model::Sent<Option<Value>>,
@@ -1292,7 +1292,7 @@ impl Ec2FlowLogCreateInput {
             )?,
             log_format: crate::send_model::optional_string(_resource, "log_format")?,
             log_group_name: crate::send_model::optional_string(_resource, "log_group_name")?,
-            max_aggregation_interval: crate::send_model::optional_int(
+            max_aggregation_interval: crate::send_model::optional_i32(
                 _resource,
                 "max_aggregation_interval",
             )?,
@@ -2535,7 +2535,21 @@ impl S3BucketObjectLockConfigurationCreateInput {
                 _schema,
                 "object_lock_enabled",
             )?,
-            rule: crate::send_model::optional_value(_resource, "rule")?,
+            rule: {
+                let value = crate::send_model::optional_value(_resource, "rule")?;
+                if let Some(value) = &value {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "rule",
+                        value,
+                        &[
+                            &["default_retention", "retention_period", "days"],
+                            &["default_retention", "retention_period", "years"],
+                        ],
+                    )?;
+                }
+                value
+            },
         })
     }
 
@@ -2594,7 +2608,21 @@ impl S3BucketObjectLockConfigurationUpdateInput {
                 _schema,
                 "object_lock_enabled",
             )?,
-            rule: crate::send_model::optional_value(_resource, "rule")?,
+            rule: {
+                let value = crate::send_model::optional_value(_resource, "rule")?;
+                if let Some(value) = &value {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "rule",
+                        value,
+                        &[
+                            &["default_retention", "retention_period", "days"],
+                            &["default_retention", "retention_period", "years"],
+                        ],
+                    )?;
+                }
+                value
+            },
         })
     }
 
@@ -2859,7 +2887,16 @@ impl S3BucketReplicationConfigurationCreateInput {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             role: crate::send_model::required_string(_resource, "role")?,
-            rules: crate::send_model::required_value(_resource, "rules")?,
+            rules: {
+                let value = crate::send_model::required_value(_resource, "rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "rules",
+                    &value,
+                    &[&["[]", "priority"]],
+                )?;
+                value
+            },
         })
     }
 
@@ -2910,7 +2947,16 @@ impl S3BucketReplicationConfigurationUpdateInput {
         let _schema = &crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema;
         Ok(Self {
             role: crate::send_model::required_string(_resource, "role")?,
-            rules: crate::send_model::required_value(_resource, "rules")?,
+            rules: {
+                let value = crate::send_model::required_value(_resource, "rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "rules",
+                    &value,
+                    &[&["[]", "priority"]],
+                )?;
+                value
+            },
         })
     }
 
@@ -2947,7 +2993,42 @@ impl S3BucketLifecycleConfigurationCreateInput {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
-            rules: crate::send_model::required_value(_resource, "rules")?,
+            rules: {
+                let value = crate::send_model::required_value(_resource, "rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "rules",
+                    &value,
+                    &[
+                        &[
+                            "[]",
+                            "abort_incomplete_multipart_upload",
+                            "days_after_initiation",
+                        ],
+                        &["[]", "expiration", "days"],
+                        &[
+                            "[]",
+                            "noncurrent_version_expiration",
+                            "newer_noncurrent_versions",
+                        ],
+                        &["[]", "noncurrent_version_expiration", "noncurrent_days"],
+                        &[
+                            "[]",
+                            "noncurrent_version_transitions",
+                            "[]",
+                            "newer_noncurrent_versions",
+                        ],
+                        &[
+                            "[]",
+                            "noncurrent_version_transitions",
+                            "[]",
+                            "noncurrent_days",
+                        ],
+                        &["[]", "transitions", "[]", "days"],
+                    ],
+                )?;
+                value
+            },
         })
     }
 
@@ -2986,7 +3067,42 @@ impl S3BucketLifecycleConfigurationUpdateInput {
     pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
-            rules: crate::send_model::required_value(_resource, "rules")?,
+            rules: {
+                let value = crate::send_model::required_value(_resource, "rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "rules",
+                    &value,
+                    &[
+                        &[
+                            "[]",
+                            "abort_incomplete_multipart_upload",
+                            "days_after_initiation",
+                        ],
+                        &["[]", "expiration", "days"],
+                        &[
+                            "[]",
+                            "noncurrent_version_expiration",
+                            "newer_noncurrent_versions",
+                        ],
+                        &["[]", "noncurrent_version_expiration", "noncurrent_days"],
+                        &[
+                            "[]",
+                            "noncurrent_version_transitions",
+                            "[]",
+                            "newer_noncurrent_versions",
+                        ],
+                        &[
+                            "[]",
+                            "noncurrent_version_transitions",
+                            "[]",
+                            "noncurrent_days",
+                        ],
+                        &["[]", "transitions", "[]", "days"],
+                    ],
+                )?;
+                value
+            },
         })
     }
 
@@ -3142,7 +3258,16 @@ impl S3BucketCorsConfigurationCreateInput {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
-            cors_rules: crate::send_model::required_value(_resource, "cors_rules")?,
+            cors_rules: {
+                let value = crate::send_model::required_value(_resource, "cors_rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "cors_rules",
+                    &value,
+                    &[&["[]", "max_age_seconds"]],
+                )?;
+                value
+            },
         })
     }
 
@@ -3181,7 +3306,16 @@ impl S3BucketCorsConfigurationUpdateInput {
     pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
-            cors_rules: crate::send_model::required_value(_resource, "cors_rules")?,
+            cors_rules: {
+                let value = crate::send_model::required_value(_resource, "cors_rules")?;
+                crate::send_model::check_i32_value(
+                    _resource,
+                    "cors_rules",
+                    &value,
+                    &[&["[]", "max_age_seconds"]],
+                )?;
+                value
+            },
         })
     }
 
@@ -3925,7 +4059,7 @@ impl Route53RecordSetUpdateInput {
 pub(crate) struct IamRoleCreateInput {
     assume_role_policy_document: Value,
     description: Option<String>,
-    max_session_duration: Option<i64>,
+    max_session_duration: Option<i32>,
     path: Option<String>,
     role_name: String,
     tags: Option<crate::send_model::Tags>,
@@ -3934,7 +4068,7 @@ pub(crate) struct IamRoleCreateInput {
 pub(crate) struct IamRoleCreateParts {
     pub(crate) assume_role_policy_document: crate::send_model::Sent<Value>,
     pub(crate) description: crate::send_model::Sent<Option<String>>,
-    pub(crate) max_session_duration: crate::send_model::Sent<Option<i64>>,
+    pub(crate) max_session_duration: crate::send_model::Sent<Option<i32>>,
     pub(crate) path: crate::send_model::Sent<Option<String>>,
     pub(crate) role_name: crate::send_model::Sent<String>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
@@ -3951,7 +4085,7 @@ impl IamRoleCreateInput {
                 "assume_role_policy_document",
             )?,
             description: crate::send_model::optional_string(_resource, "description")?,
-            max_session_duration: crate::send_model::optional_int(
+            max_session_duration: crate::send_model::optional_i32(
                 _resource,
                 "max_session_duration",
             )?,
@@ -4037,7 +4171,7 @@ pub(crate) struct LogsLogGroupCreateInput {
     kms_key_id: Option<String>,
     log_group_class: Option<String>,
     log_group_name: String,
-    retention_in_days: Option<i64>,
+    retention_in_days: Option<i32>,
     tags: Option<crate::send_model::Tags>,
 }
 
@@ -4046,7 +4180,7 @@ pub(crate) struct LogsLogGroupCreateParts {
     pub(crate) kms_key_id: crate::send_model::Sent<Option<String>>,
     pub(crate) log_group_class: crate::send_model::Sent<Option<String>>,
     pub(crate) log_group_name: crate::send_model::Sent<String>,
-    pub(crate) retention_in_days: crate::send_model::Sent<Option<i64>>,
+    pub(crate) retention_in_days: crate::send_model::Sent<Option<i32>>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
@@ -4067,7 +4201,7 @@ impl LogsLogGroupCreateInput {
                 "log_group_class",
             )?,
             log_group_name: crate::send_model::required_string(_resource, "log_group_name")?,
-            retention_in_days: crate::send_model::optional_int(_resource, "retention_in_days")?,
+            retention_in_days: crate::send_model::optional_i32(_resource, "retention_in_days")?,
             tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
@@ -4125,13 +4259,13 @@ impl LogsLogGroupCreateInput {
 /// Exhaustive typed update input for `logs.LogGroup`.
 pub(crate) struct LogsLogGroupUpdateInput {
     deletion_protection_enabled: Option<bool>,
-    retention_in_days: Option<i64>,
+    retention_in_days: Option<i32>,
     tags: Option<crate::send_model::Tags>,
 }
 
 pub(crate) struct LogsLogGroupUpdateParts {
     pub(crate) deletion_protection_enabled: crate::send_model::Sent<Option<bool>>,
-    pub(crate) retention_in_days: crate::send_model::Sent<Option<i64>>,
+    pub(crate) retention_in_days: crate::send_model::Sent<Option<i32>>,
     pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
 }
 
@@ -4143,7 +4277,7 @@ impl LogsLogGroupUpdateInput {
                 _resource,
                 "deletion_protection_enabled",
             )?,
-            retention_in_days: crate::send_model::optional_int(_resource, "retention_in_days")?,
+            retention_in_days: crate::send_model::optional_i32(_resource, "retention_in_days")?,
             tags: crate::send_model::optional_tags(_resource, "tags")?,
         })
     }
@@ -4374,7 +4508,18 @@ impl SqsQueueCreateInput {
                 _resource,
                 "redrive_allow_policy",
             )?,
-            redrive_policy: crate::send_model::optional_value(_resource, "redrive_policy")?,
+            redrive_policy: {
+                let value = crate::send_model::optional_value(_resource, "redrive_policy")?;
+                if let Some(value) = &value {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "redrive_policy",
+                        value,
+                        &[&["max_receive_count"]],
+                    )?;
+                }
+                value
+            },
             sqs_managed_sse_enabled: crate::send_model::optional_bool(
                 _resource,
                 "sqs_managed_sse_enabled",
@@ -4583,7 +4728,18 @@ impl SqsQueueUpdateInput {
                 _resource,
                 "redrive_allow_policy",
             )?,
-            redrive_policy: crate::send_model::optional_value(_resource, "redrive_policy")?,
+            redrive_policy: {
+                let value = crate::send_model::optional_value(_resource, "redrive_policy")?;
+                if let Some(value) = &value {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "redrive_policy",
+                        value,
+                        &[&["max_receive_count"]],
+                    )?;
+                }
+                value
+            },
             sqs_managed_sse_enabled: crate::send_model::optional_bool(
                 _resource,
                 "sqs_managed_sse_enabled",

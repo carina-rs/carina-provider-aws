@@ -240,6 +240,62 @@ pub(crate) fn required_int(resource: &impl SendResource, name: &str) -> Provider
     optional_int(resource, name)?.ok_or_else(|| missing(resource, name))
 }
 
+/// Narrow during decoding; no Sent guard has been created yet.
+pub(crate) fn optional_i32(
+    resource: &impl SendResource,
+    name: &str,
+) -> ProviderResult<Option<i32>> {
+    optional_int(resource, name)?
+        .map(|value| crate::helpers::sdk_i32(resource.id(), name, value))
+        .transpose()
+}
+
+#[allow(dead_code)]
+pub(crate) fn required_i32(resource: &impl SendResource, name: &str) -> ProviderResult<i32> {
+    optional_i32(resource, name)?.ok_or_else(|| missing(resource, name))
+}
+
+/// Preflight nested wire integers before into_parts creates guards. Unknown
+/// or differently shaped values remain the responsibility of schema/SDK packing.
+pub(crate) fn check_i32_value(
+    resource: &impl SendResource,
+    name: &str,
+    value: &Value,
+    paths: &[&[&str]],
+) -> ProviderResult<()> {
+    fn check(id: &ResourceId, name: &str, value: &Value, path: &[&str]) -> ProviderResult<()> {
+        let Some((head, tail)) = path.split_first() else {
+            if let Value::Concrete(ConcreteValue::Int(value)) = value {
+                crate::helpers::sdk_i32(id, name, *value)?;
+            }
+            return Ok(());
+        };
+        match (*head, value) {
+            ("[]", Value::Concrete(ConcreteValue::List(items))) => {
+                for item in items {
+                    check(id, &format!("{name}[]"), item, tail)?;
+                }
+            }
+            ("{}", Value::Concrete(ConcreteValue::Map(items))) => {
+                for item in items.values() {
+                    check(id, &format!("{name}{{}}"), item, tail)?;
+                }
+            }
+            (field, Value::Concrete(ConcreteValue::Map(fields))) => {
+                if let Some(value) = fields.get(field) {
+                    check(id, &format!("{name}.{field}"), value, tail)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    for path in paths {
+        check(resource.id(), name, value, path)?;
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub(crate) fn optional_float(
     resource: &impl SendResource,

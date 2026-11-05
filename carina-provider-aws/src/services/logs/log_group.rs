@@ -166,7 +166,7 @@ impl AwsProvider {
                 .logs_client
                 .put_retention_policy()
                 .log_group_name(&log_group_name)
-                .retention_in_days(days as i32)
+                .retention_in_days(days)
                 .send()
                 .await;
             if let Err(error) = result {
@@ -217,7 +217,7 @@ impl AwsProvider {
                 self.logs_client
                     .put_retention_policy()
                     .log_group_name(identifier.as_str())
-                    .retention_in_days(days as i32)
+                    .retention_in_days(days)
                     .send()
                     .await
                     .map_err(|e| {

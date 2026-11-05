@@ -130,6 +130,7 @@ impl std::error::Error for AssumeRoleFailure {}
 #[derive(Debug)]
 pub struct GuardedAssumeRoleProvider {
     request: AssumeRoleFluentBuilder,
+    duration_seconds: Result<Option<i32>, std::num::TryFromIntError>,
     in_flight: Mutex<Option<PendingAssumeRole>>,
 }
 
@@ -162,6 +163,9 @@ impl GuardedAssumeRoleProvider {
             .identity_cache(IdentityCache::no_cache())
             .build();
         let client = StsClient::new(&config, sts_idempotency);
+        let duration_seconds = session_length
+            .map(|duration| i32::try_from(duration.as_secs()))
+            .transpose();
         Self {
             request: client
                 .inner()
@@ -169,12 +173,16 @@ impl GuardedAssumeRoleProvider {
                 .role_arn(role_arn)
                 .role_session_name(session_name)
                 .set_external_id(external_id)
-                .set_duration_seconds(session_length.map(|duration| duration.as_secs() as i32)),
+                .set_duration_seconds(duration_seconds.as_ref().ok().copied().flatten()),
+            duration_seconds,
             in_flight: Mutex::new(None),
         }
     }
 
     async fn credentials(&self) -> provider::Result {
+        self.duration_seconds
+            .as_ref()
+            .map_err(|error| CredentialsError::invalid_configuration(*error))?;
         let pending = {
             let mut slot = self.in_flight.lock().expect("AssumeRole in-flight lock");
             // A completed request is never a credentials cache. Another waiter

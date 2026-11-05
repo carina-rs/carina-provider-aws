@@ -620,6 +620,9 @@ struct AttrInfo {
     send_reason: Option<String>,
     /// Rust value shape used by generated create/update inputs.
     send_type: SendFieldType,
+    /// Wire integers are narrowed while decoding, before Sent guards exist.
+    sdk_i32: bool,
+    sdk_i32_paths: Vec<Vec<String>>,
     /// Whether the underlying Smithy member target is a plain string shape.
     /// This is captured before rendered type overrides are applied.
     is_plain_string: bool,
@@ -1747,6 +1750,16 @@ fn collect_resource_attributes_unvalidated(
 
         let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
         let send_type = send_field_type(model, &member_ref.target, &type_code, enum_info.as_ref());
+        let sdk_i32 = send_type == SendFieldType::Int
+            && matches!(
+                model.shape_kind(&member_ref.target),
+                Some(ShapeKind::Integer | ShapeKind::IntEnum)
+            );
+        let sdk_i32_paths = if send_type == SendFieldType::Value {
+            nested_sdk_i32_paths(model, &member_ref.target, &type_code)
+        } else {
+            Vec::new()
+        };
         let is_identity = identity_overrides.contains(&snake_name);
         let is_deferred_populate = deferred_populate_overrides.contains(name.as_str());
 
@@ -1768,6 +1781,8 @@ fn collect_resource_attributes_unvalidated(
             send_via: None,
             send_reason: None,
             send_type,
+            sdk_i32,
+            sdk_i32_paths,
             is_plain_string,
             is_identity,
             is_deferred_populate,
@@ -1808,6 +1823,11 @@ fn collect_resource_attributes_unvalidated(
                 || create_only_overrides.contains(extra.name));
         let is_required = required_overrides.contains(extra.name);
         let send_type = send_field_type(model, "smithy.api#String", &type_code, None);
+        let sdk_i32_paths = if send_type == SendFieldType::Value {
+            nested_sdk_i32_paths(model, "smithy.api#String", &type_code)
+        } else {
+            Vec::new()
+        };
         attrs.push(AttrInfo {
             snake_name,
             provider_name: extra.name.to_string(),
@@ -1826,6 +1846,8 @@ fn collect_resource_attributes_unvalidated(
             send_via: None,
             send_reason: None,
             send_type,
+            sdk_i32: false,
+            sdk_i32_paths,
             is_plain_string: false,
             is_identity: identity_overrides.contains(&extra.name.to_snake_case()),
             is_deferred_populate: deferred_populate_overrides.contains(extra.name),
@@ -1866,6 +1888,16 @@ fn collect_resource_attributes_unvalidated(
 
         let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
         let send_type = send_field_type(model, &member_ref.target, &type_code, enum_info.as_ref());
+        let sdk_i32 = send_type == SendFieldType::Int
+            && matches!(
+                model.shape_kind(&member_ref.target),
+                Some(ShapeKind::Integer | ShapeKind::IntEnum)
+            );
+        let sdk_i32_paths = if send_type == SendFieldType::Value {
+            nested_sdk_i32_paths(model, &member_ref.target, &type_code)
+        } else {
+            Vec::new()
+        };
         attrs.push(AttrInfo {
             snake_name,
             provider_name: name.clone(),
@@ -1880,6 +1912,8 @@ fn collect_resource_attributes_unvalidated(
             send_via: None,
             send_reason: None,
             send_type,
+            sdk_i32,
+            sdk_i32_paths,
             is_plain_string,
             is_identity: identity_overrides.contains(&name.to_snake_case()),
             is_deferred_populate: deferred_populate_overrides.contains(name.as_str()),
@@ -2942,7 +2976,10 @@ fn resolve_type(
         return Ok((code.to_string(), None));
     }
     if let Some(override_type) = resource_value_override(ctx.resource_name, &ctx.property_path) {
-        return Ok((override_type.type_code, None));
+        return Ok((
+            bound_int_override(ctx.model, target, field_name, override_type).type_code,
+            None,
+        ));
     }
     // Check type overrides first
     if let Some(&override_type) = ctx.type_overrides.get(field_name) {
@@ -2955,7 +2992,10 @@ fn resolve_type(
         ) {
             return Ok((list.type_code, None));
         }
-        return Ok((override_type.to_string(), None));
+        return Ok((
+            bounded_int_constructor_code(ctx.model, target, field_name, override_type)?,
+            None,
+        ));
     }
 
     // Check known enum overrides
@@ -3200,9 +3240,16 @@ fn generate_struct_type(
             } else if let Some(override_type) =
                 resource_value_override(ctx.resource_name, &ctx.property_path)
             {
-                (override_type.type_code, None)
+                (
+                    bound_int_override(ctx.model, &member_ref.target, field_name, override_type)
+                        .type_code,
+                    None,
+                )
             } else if let Some(t) = override_type {
-                (t.to_string(), None)
+                (
+                    bounded_int_constructor_code(ctx.model, &member_ref.target, field_name, t)?,
+                    None,
+                )
             } else {
                 resolve_type(ctx, &member_ref.target, field_name)?
             };
@@ -3282,39 +3329,122 @@ fn generate_struct_type(
     ))
 }
 
-/// Get integer range for a field from Smithy traits or known overrides.
+/// Intersect wire width, Smithy traits, and documented field bounds.
+/// https://smithy.io/2.0/spec/simple-types.html#integer
 fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<IntRange> {
-    // Check Smithy range trait on the target shape
-    if let Some(shape) = model.get_shape(target) {
-        let traits = match shape {
-            carina_smithy::Shape::Integer(t) => &t.traits,
-            carina_smithy::Shape::Long(t) => &t.traits,
-            _ => {
-                // Check known overrides for the field name
-                return known_int_range_overrides()
-                    .get(field_name)
-                    .map(|&(min, max)| IntRange {
-                        min: Some(min),
-                        max: Some(max),
-                    });
-            }
-        };
-        if let Some(range_val) = traits.get("smithy.api#range") {
-            let min = range_val.get("min").and_then(|v| v.as_i64());
-            let max = range_val.get("max").and_then(|v| v.as_i64());
-            if min.is_some() || max.is_some() {
-                return Some(IntRange { min, max });
-            }
-        }
+    let mut bounds = Vec::new();
+    if model.shape_kind(target) == Some(ShapeKind::Integer) {
+        bounds.push(IntRange {
+            min: Some(i64::from(i32::MIN)),
+            max: Some(i64::from(i32::MAX)),
+        });
     }
-
-    // Check known overrides
-    known_int_range_overrides()
-        .get(field_name)
-        .map(|&(min, max)| IntRange {
+    let traits = match model.get_shape(target) {
+        Some(Shape::Integer(shape)) => Some(&shape.traits),
+        Some(Shape::Long(shape)) => Some(&shape.traits),
+        _ => None,
+    };
+    if let Some(range) = traits.and_then(|traits| traits.get("smithy.api#range")) {
+        bounds.push(IntRange {
+            min: range.get("min").and_then(|value| value.as_i64()),
+            max: range.get("max").and_then(|value| value.as_i64()),
+        });
+    }
+    if let Some(&(min, max)) = known_int_range_overrides().get(field_name) {
+        bounds.push(IntRange {
             min: Some(min),
             max: Some(max),
+        });
+    }
+    bounds.into_iter().reduce(|left, right| IntRange {
+        min: left.min.into_iter().chain(right.min).max(),
+        max: left.max.into_iter().chain(right.max).min(),
+    })
+}
+
+/// Overrides can refine or name an integer, but cannot widen its wire carrier.
+fn bound_int_override(
+    model: &SmithyModel,
+    target: &str,
+    field_name: &str,
+    mut value: ValueTypeOverride,
+) -> ValueTypeOverride {
+    if !matches!(
+        model.shape_kind(target),
+        Some(ShapeKind::Integer | ShapeKind::Long)
+    ) {
+        return value;
+    }
+    let Some(bounds) = get_int_range(model, target, field_name) else {
+        return value;
+    };
+    let RawShape::Int {
+        identity, range, ..
+    } = value.attribute_type.raw_shape()
+    else {
+        return value;
+    };
+    // A closed Int set already enforces the carrier when every member fits.
+    // Preserve its constructor, callback and allowed-value documentation.
+    if let Some(identity) = identity
+        && let Some(values) = AwsType::ALL
+            .iter()
+            .find(|row| row.identity() == *identity)
+            .and_then(|row| row.allowed_int_values())
+        && values.iter().all(|value| {
+            bounds.min.is_none_or(|minimum| *value >= minimum)
+                && bounds.max.is_none_or(|maximum| *value <= maximum)
         })
+    {
+        return value;
+    }
+    let bounded =
+        carina_aws_types::with_int_range(value.attribute_type.clone(), bounds.min, bounds.max);
+    if let RawShape::Int {
+        range: bounded_range,
+        identity,
+        ..
+    } = bounded.raw_shape()
+    {
+        if range == bounded_range {
+            return value;
+        }
+        if identity.is_none() {
+            let (min, max) = bounded_range.unwrap();
+            value.display = MarkdownType::text(format!("Int({})", range_display_string(min, max)));
+        }
+    }
+    value.type_code = format!(
+        "carina_aws_types::with_int_range({}, {:?}, {:?})",
+        value.type_code, bounds.min, bounds.max
+    );
+    value.attribute_type = bounded;
+    value
+}
+
+fn bounded_int_constructor_code(
+    model: &SmithyModel,
+    target: &str,
+    field_name: &str,
+    code: &str,
+) -> Result<String> {
+    if !matches!(
+        model.shape_kind(target),
+        Some(ShapeKind::Integer | ShapeKind::Long)
+    ) {
+        return Ok(code.to_string());
+    }
+    Ok(bound_int_override(
+        model,
+        target,
+        field_name,
+        ValueTypeOverride {
+            type_code: code.to_string(),
+            display: type_code_to_markdown(code),
+            attribute_type: attribute_type_from_code(code)?,
+        },
+    )
+    .type_code)
 }
 
 /// Generate per-service mod.rs files that declare resource modules.
@@ -4868,6 +4998,8 @@ struct SendInputField {
     is_required: bool,
     is_create_only: bool,
     send_type: SendFieldType,
+    sdk_i32: bool,
+    sdk_i32_paths: Vec<Vec<String>>,
 }
 
 fn send_input_type_name(resource_name: &str, operation: &str) -> String {
@@ -4884,13 +5016,129 @@ fn send_parts_type_name(resource_name: &str, operation: &str) -> String {
     send_input_type_name(resource_name, operation).replace("Input", "Parts")
 }
 
+/// Prefer authored DSL paths; otherwise walk the Smithy structure that codegen
+/// renders. Lists and maps use explicit markers so Long siblings stay untouched.
+fn nested_sdk_i32_paths(model: &SmithyModel, target: &str, constructor: &str) -> Vec<Vec<String>> {
+    fn authored(ty: &AttributeType, path: &mut Vec<String>, paths: &mut Vec<Vec<String>>) {
+        match ty.raw_shape() {
+            RawShape::Int {
+                identity, range, ..
+            } => {
+                let bounded = range.is_some_and(|(min, max)| {
+                    min.is_some_and(|min| min >= i64::from(i32::MIN))
+                        && max.is_some_and(|max| max <= i64::from(i32::MAX))
+                });
+                let closed = identity
+                    .and_then(|identity| {
+                        AwsType::ALL.iter().find(|row| row.identity() == *identity)
+                    })
+                    .and_then(|row| row.allowed_int_values())
+                    .is_some_and(|values| values.iter().all(|value| i32::try_from(*value).is_ok()));
+                if bounded || closed {
+                    paths.push(path.clone());
+                }
+            }
+            RawShape::Struct { fields, .. } => {
+                for field in fields {
+                    path.push(field.name().to_string());
+                    authored(field.field_type(), path, paths);
+                    path.pop();
+                }
+            }
+            RawShape::List { element_type, .. } => {
+                path.push("[]".to_string());
+                authored(element_type, path, paths);
+                path.pop();
+            }
+            RawShape::Map { value, .. } => {
+                path.push("{}".to_string());
+                authored(value, path, paths);
+                path.pop();
+            }
+            RawShape::Union(members) => {
+                for member in members {
+                    authored(member, path, paths);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn smithy(
+        model: &SmithyModel,
+        target: &str,
+        path: &mut Vec<String>,
+        paths: &mut Vec<Vec<String>>,
+        visiting: &mut HashSet<String>,
+    ) {
+        if matches!(
+            model.shape_kind(target),
+            Some(ShapeKind::Integer | ShapeKind::IntEnum)
+        ) {
+            paths.push(path.clone());
+            return;
+        }
+        if !visiting.insert(target.to_string()) {
+            return;
+        }
+        match model.get_shape(target) {
+            Some(Shape::Structure(shape)) => {
+                for (name, member) in &shape.members {
+                    path.push(name.to_snake_case());
+                    smithy(model, &member.target, path, paths, visiting);
+                    path.pop();
+                }
+            }
+            Some(Shape::Union(shape)) => {
+                for (name, member) in &shape.members {
+                    path.push(name.to_snake_case());
+                    smithy(model, &member.target, path, paths, visiting);
+                    path.pop();
+                }
+            }
+            Some(Shape::List(shape)) => {
+                path.push("[]".to_string());
+                smithy(model, &shape.member.target, path, paths, visiting);
+                path.pop();
+            }
+            Some(Shape::Map(shape)) => {
+                path.push("{}".to_string());
+                smithy(model, &shape.value.target, path, paths, visiting);
+                path.pop();
+            }
+            _ => {}
+        }
+        visiting.remove(target);
+    }
+    let mut paths = Vec::new();
+    if let Ok(ty) = attribute_type_from_code(constructor) {
+        authored(&ty, &mut Vec::new(), &mut paths);
+    } else {
+        smithy(
+            model,
+            target,
+            &mut Vec::new(),
+            &mut paths,
+            &mut HashSet::new(),
+        );
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 fn send_field_rust_type(field: &SendInputField) -> String {
     let inner = match field.send_type {
         SendFieldType::String | SendFieldType::Enum => "String",
         SendFieldType::StringList => "crate::send_model::StringList",
         SendFieldType::Tags => "crate::send_model::Tags",
         SendFieldType::Bool => "bool",
-        SendFieldType::Int => "i64",
+        SendFieldType::Int => {
+            if field.sdk_i32 {
+                "i32"
+            } else {
+                "i64"
+            }
+        }
         SendFieldType::Float => "f64",
         SendFieldType::Value => "Value",
     };
@@ -4913,7 +5161,13 @@ fn send_decode_expression(field: &SendInputField) -> String {
         SendFieldType::Tags => "tags",
         SendFieldType::Enum => "enum",
         SendFieldType::Bool => "bool",
-        SendFieldType::Int => "int",
+        SendFieldType::Int => {
+            if field.sdk_i32 {
+                "i32"
+            } else {
+                "int"
+            }
+        }
         SendFieldType::Float => "float",
         SendFieldType::Value => "value",
     };
@@ -4922,10 +5176,29 @@ fn send_decode_expression(field: &SendInputField) -> String {
     } else {
         ""
     };
-    format!(
+    let decoded = format!(
         "crate::send_model::{requiredness}_{kind}(_resource, {schema_arg}\"{}\")?",
         field.snake_name
-    )
+    );
+    if field.sdk_i32_paths.is_empty() {
+        return decoded;
+    }
+    let paths = field
+        .sdk_i32_paths
+        .iter()
+        .map(|path| format!("&{path:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let value_argument = if field.is_required { "&value" } else { "value" };
+    let check = format!(
+        "crate::send_model::check_i32_value(_resource, {:?}, {value_argument}, &[{paths}])?;",
+        field.snake_name
+    );
+    if field.is_required {
+        format!("{{ let value = {decoded}; {check} value }}")
+    } else {
+        format!("{{ let value = {decoded}; if let Some(value) = &value {{ {check} }} value }}")
+    }
 }
 
 fn emit_send_input(
@@ -5108,6 +5381,8 @@ fn generate_send_models_code(
                 is_required: attr.is_required,
                 is_create_only: attr.is_create_only,
                 send_type: attr.send_type,
+                sdk_i32: attr.sdk_i32,
+                sdk_i32_paths: attr.sdk_i32_paths.clone(),
             })
             .collect::<Vec<_>>();
         let tags_sent = res.has_tags
@@ -5128,6 +5403,8 @@ fn generate_send_models_code(
                 is_required: false,
                 is_create_only: false,
                 send_type: SendFieldType::Tags,
+                sdk_i32: false,
+                sdk_i32_paths: Vec::new(),
             });
         }
         create_fields.sort_by(|left, right| left.snake_name.cmp(&right.snake_name));
@@ -5782,14 +6059,26 @@ fn discover_markdown_attribute_type(
             }
             MarkdownType::link(MarkdownTarget::Struct(key), format!("Struct({name})"))
         }
-        RawShape::List { element_type, .. } => {
-            MarkdownType::list(discover_markdown_attribute_type(
+        RawShape::List {
+            element_type,
+            constraints,
+            ..
+        } => {
+            let list = MarkdownType::list(discover_markdown_attribute_type(
                 element_type,
                 heading_path,
                 namespace,
                 enums,
                 structs,
-            )?)
+            )?);
+            if let Some((min, max)) = constraints.length() {
+                MarkdownType::sequence([
+                    list,
+                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
+                ])
+            } else {
+                list
+            }
         }
         RawShape::Map { value, .. } => MarkdownType::map(discover_markdown_attribute_type(
             value,
@@ -5843,11 +6132,34 @@ fn discover_markdown_attribute_type(
                 MarkdownType::text(identity.kind.clone())
             }
         }
-        RawShape::String { identity, .. } => MarkdownType::text(
-            identity
-                .map(declared_scalar_display_name)
-                .unwrap_or_else(|| "String".to_string()),
-        ),
+        RawShape::String {
+            identity,
+            pattern,
+            length,
+            ..
+        } => {
+            if let Some(identity) = identity {
+                MarkdownType::text(declared_scalar_display_name(identity))
+            } else {
+                let prefix = match length {
+                    Some((min, max)) => {
+                        format!("String(length: {}", range_display_string(min, max))
+                    }
+                    None => "String(".to_string(),
+                };
+                match pattern {
+                    Some(pattern) => pattern_display(
+                        format!(
+                            "{prefix}{}pattern: ",
+                            if length.is_some() { ", " } else { "" }
+                        ),
+                        pattern,
+                    ),
+                    None if length.is_some() => MarkdownType::text(format!("{prefix})")),
+                    None => MarkdownType::text("String".to_string()),
+                }
+            }
+        }
         RawShape::Reference { identity, .. } => {
             MarkdownType::text(declared_scalar_display_name(identity))
         }
@@ -6570,7 +6882,9 @@ fn generate_data_source(
                 ds_attrs.push(DsAttr {
                     name: output.name.to_string(),
                     provider_name: output.provider_name.unwrap_or("").to_string(),
-                    type_str: output.type_code.to_string(),
+                    type_str: resource_value_override(ds.name, output.name)
+                        .map(|value| value.type_code)
+                        .unwrap_or_else(|| output.type_code.to_string()),
                     description: Description::authored(output.description),
                     required: false,
                     read_only: true,
@@ -6715,13 +7029,22 @@ fn generate_markdown_data_source(
             .map(|output| {
                 Ok(MarkdownDataSourceOutput {
                     name: output.name,
-                    attr_type: discover_markdown_override(
-                        output.type_code,
-                        &[output.name.to_string()],
-                        &namespace,
-                        &mut all_enums,
-                        &mut struct_defs,
-                    )?,
+                    attr_type: if let Some(value) = resource_value_override(ds.name, output.name) {
+                        value.markdown(
+                            &[output.name.to_string()],
+                            &namespace,
+                            &mut all_enums,
+                            &mut struct_defs,
+                        )?
+                    } else {
+                        discover_markdown_override(
+                            output.type_code,
+                            &[output.name.to_string()],
+                            &namespace,
+                            &mut all_enums,
+                            &mut struct_defs,
+                        )?
+                    },
                     description: Description::authored(output.description),
                 })
             })
@@ -6917,15 +7240,30 @@ fn discover_markdown_type(
         );
     }
     if let Some(override_type) = resource_value_override(resource_name, property_path) {
-        return override_type.markdown(heading_path, enum_namespace, all_enums, struct_defs);
+        return bound_int_override(model, target, field_name, override_type).markdown(
+            heading_path,
+            enum_namespace,
+            all_enums,
+            struct_defs,
+        );
     }
     // Per-(parent_struct, member) override wins over per-member and Smithy
     // default. Distinguishes a member name shared across structs (aws#302).
     if let Some(parent) = parent_struct
         && let Some(&override_type) = struct_field_type_overrides.get(&(parent, field_name))
     {
-        return discover_markdown_override(
-            override_type,
+        let value = bound_int_override(
+            model,
+            target,
+            field_name,
+            ValueTypeOverride {
+                type_code: override_type.to_string(),
+                display: type_code_to_markdown(override_type),
+                attribute_type: attribute_type_from_code(override_type)?,
+            },
+        );
+        return discover_markdown_attribute_type(
+            &value.attribute_type,
             heading_path,
             enum_namespace,
             all_enums,
@@ -6939,8 +7277,18 @@ fn discover_markdown_type(
         {
             return Ok(list.display);
         }
-        return discover_markdown_override(
-            override_type,
+        let value = bound_int_override(
+            model,
+            target,
+            field_name,
+            ValueTypeOverride {
+                type_code: override_type.to_string(),
+                display: type_code_to_markdown(override_type),
+                attribute_type: attribute_type_from_code(override_type)?,
+            },
+        );
+        return discover_markdown_attribute_type(
+            &value.attribute_type,
             heading_path,
             enum_namespace,
             all_enums,
@@ -7439,7 +7787,7 @@ fn int_range_condition_and_display(min: Option<i64>, max: Option<i64>) -> (Strin
 }
 
 /// Format a range display string for type names.
-fn range_display_string(min: Option<i64>, max: Option<i64>) -> String {
+fn range_display_string<T: std::fmt::Display>(min: Option<T>, max: Option<T>) -> String {
     match (min, max) {
         (Some(min), Some(max)) => format!("{}..={}", min, max),
         (Some(min), None) => format!("{}..", min),
@@ -7474,6 +7822,24 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
             HashMap::from([
+                // Share Route 53's anonymous DNS carrier, as ACM validation
+                // records do, so CloudFront/Route 53/module references retain
+                // compatible grammar and bounds in both managed and read views.
+                // https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html
+                // Keep region as String in both Bucket views: aws.Region
+                // canonicalizes read values and changes their recorded state.
+                (
+                    ("s3.Bucket", "bucket_domain_name"),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
+                ),
+                (
+                    ("s3.Bucket", "bucket_regional_domain_name"),
+                    TypeOverride::AnonymousStringConstructor(
+                        "carina_aws_types::route53_dns_name()",
+                    ),
+                ),
                 (
                     ("route53.RecordSet", "name"),
                     // ResourceRecordSet$Name -> DNSName (0..1024); the guide
@@ -8356,6 +8722,190 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn generated_integer_inputs_are_narrowed_before_guarded_parts() {
+        let model = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "com.amazonaws.test#CreateFixture":{"type":"operation","input":{"target":"com.amazonaws.test#Request"}},
+                "com.amazonaws.test#Request":{"type":"structure","members":{
+                    "Count":{"target":"smithy.api#Integer"},
+                    "WideCount":{"target":"smithy.api#Long"},
+                    "Options":{"target":"com.amazonaws.test#Payload"}
+                }},
+                "com.amazonaws.test#ReadFixture":{"type":"structure","members":{
+                    "Count":{"target":"smithy.api#Integer"},
+                    "WideCount":{"target":"smithy.api#Long"},
+                    "Options":{"target":"com.amazonaws.test#Payload"}
+                }},
+                "com.amazonaws.test#Payload":{"type":"structure","members":{"Items":{"target":"com.amazonaws.test#Items"}}},
+                "com.amazonaws.test#Items":{"type":"list","member":{"target":"com.amazonaws.test#Item"}},
+                "com.amazonaws.test#Item":{"type":"structure","members":{"Count":{"target":"smithy.api#Integer"},"WideCount":{"target":"smithy.api#Long"}}}
+            }
+        }"##).unwrap();
+        let resource = provider_fixture_resource(
+            "test.IntegerSendFixture",
+            "",
+            &["Count", "WideCount", "Options"],
+            vec![],
+        );
+        let dispositions = [
+            resource_defs::SendDisposition::sent("Count"),
+            resource_defs::SendDisposition::sent("WideCount"),
+            resource_defs::SendDisposition::sent("Options"),
+        ];
+        let code = generate_send_models_code(
+            &[(&resource, &dispositions)],
+            &HashMap::from([(resource.service_namespace, model)]),
+        )
+        .unwrap();
+        assert!(code.contains("count: Option<i32>"), "{code}");
+        assert!(
+            code.contains("optional_i32(_resource, \"count\")?"),
+            "{code}"
+        );
+        assert!(code.contains("wide_count: Option<i64>"), "{code}");
+        assert!(
+            code.contains("optional_int(_resource, \"wide_count\")?"),
+            "{code}"
+        );
+        let decode = code
+            .split("pub(crate) fn decode")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) fn sent")
+            .next()
+            .unwrap();
+        assert!(
+            decode.contains("check_i32_value") && decode.contains("[\"items\", \"[]\", \"count\"]"),
+            "{decode}"
+        );
+        assert!(!decode.contains("Sent::new"), "{decode}");
+    }
+
+    #[test]
+    fn smithy_integer_bounds_preserve_int_enum_and_contained_range_constructors() {
+        let model = carina_smithy::parse(
+            r##"{
+            "smithy": "2.0", "shapes": {"test#Integer": {"type":"integer"}}
+        }"##,
+        )
+        .unwrap();
+        let retention = resource_value_override("logs.LogGroup", "retention_in_days").unwrap();
+        let original = retention.type_code.clone();
+        let retention = bound_int_override(&model, "test#Integer", "Count", retention);
+        assert_eq!(retention.type_code, original);
+        assert!(matches!(
+            retention.attribute_type.raw_shape(),
+            RawShape::Int { range: None, .. }
+        ));
+
+        for (minimum, maximum) in [(0, 100), (i64::from(i32::MIN), i64::from(i32::MAX))] {
+            let original = format!(
+                "AttributeType::refined_int(None, Some((Some({minimum}), Some({maximum}))))"
+            );
+            let bounded = bound_int_override(
+                &model,
+                "test#Integer",
+                "Count",
+                ValueTypeOverride {
+                    type_code: original.clone(),
+                    display: MarkdownType::text("Int"),
+                    attribute_type: AttributeType::refined_int(
+                        None,
+                        Some((Some(minimum), Some(maximum))),
+                    ),
+                },
+            );
+            assert_eq!(bounded.type_code, original);
+        }
+    }
+
+    #[test]
+    fn smithy_integer_ranges_intersect_width_traits_and_known_overrides() {
+        let model = carina_smithy::parse(r##"{
+            "smithy": "2.0", "shapes": {
+                "test#Integer": {"type":"integer"},
+                "test#PositiveInteger": {"type":"integer", "traits":{"smithy.api#range":{"min":1,"max":9223372036854775807}}},
+                "test#Long": {"type":"long"},
+                "test#PositiveLong": {"type":"long", "traits":{"smithy.api#range":{"min":1,"max":9223372036854775807}}}
+            }
+        }"##).unwrap();
+        for target in ["test#Integer", "smithy.api#Integer"] {
+            let range = get_int_range(&model, target, "Count")
+                .expect("Integer must have its carrier bounds");
+            assert_eq!(
+                (range.min, range.max),
+                (Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX)))
+            );
+        }
+        let range = get_int_range(&model, "test#PositiveInteger", "Count").unwrap();
+        assert_eq!((range.min, range.max), (Some(1), Some(i64::from(i32::MAX))));
+        let range = get_int_range(&model, "test#PositiveInteger", "FromPort").unwrap();
+        assert_eq!((range.min, range.max), (Some(1), Some(65535)));
+        assert!(get_int_range(&model, "test#Long", "Count").is_none());
+        let range = get_int_range(&model, "test#PositiveLong", "Count").unwrap();
+        assert_eq!((range.min, range.max), (Some(1), Some(i64::MAX)));
+        for (target, maximum) in [
+            ("test#Integer", i64::from(i32::MAX)),
+            ("test#Long", i64::MAX),
+        ] {
+            let value = bound_int_override(&model, target, "Count", ValueTypeOverride {
+                type_code: "AttributeType::refined_int(None, Some((Some(1), Some(9223372036854775807))))".to_string(),
+                display: MarkdownType::text("Int(1..=9223372036854775807)"),
+                attribute_type: AttributeType::refined_int(None, Some((Some(1), Some(i64::MAX)))),
+            });
+            assert!(matches!(value.attribute_type.raw_shape(), RawShape::Int {
+                range: Some((Some(1), Some(actual))), ..
+            } if actual == maximum));
+        }
+    }
+
+    #[test]
+    fn s3_full_paths_refine_handwritten_helpers_and_keep_other_resources_unchanged() {
+        // Keep this fixture self-contained: the Smithy download cache is absent in CI.
+        let model = carina_smithy::parse(r##"{
+            "smithy": "2.0",
+            "shapes": {
+                "com.amazonaws.s3#PutBucketCors": { "type": "operation", "input": { "target": "com.amazonaws.s3#Request" } },
+                "com.amazonaws.s3#PutBucketLifecycleConfiguration": { "type": "operation", "input": { "target": "com.amazonaws.s3#Request" } },
+                "com.amazonaws.s3#PutBucketReplication": { "type": "operation", "input": { "target": "com.amazonaws.s3#Request" } },
+                "com.amazonaws.s3#Request": { "type": "structure", "members": { "Bucket": { "target": "smithy.api#String" } } }
+            }
+        }"##).unwrap();
+        for resource in resource_defs::s3_resources()
+            .into_iter()
+            .filter(|resource| {
+                matches!(
+                    resource.name,
+                    "s3.BucketCorsConfiguration"
+                        | "s3.BucketLifecycleConfiguration"
+                        | "s3.BucketReplicationConfiguration"
+                )
+            })
+        {
+            let generated = generate_resource(&resource, &model).unwrap();
+            let constructor = match resource.name {
+                "s3.BucketCorsConfiguration" => "super::bucket_cors_rules()",
+                "s3.BucketLifecycleConfiguration" => "super::bucket_lifecycle_rules()",
+                "s3.BucketReplicationConfiguration" => "super::bucket_replication_rules()",
+                _ => unreachable!("fixture resource filter"),
+            };
+            assert!(generated.contains(constructor), "{generated}");
+        }
+        assert!(resource_value_override("s3.Other", "rules[].id").is_none());
+        assert!(
+            resource_value_override(
+                "s3.BucketLifecycleConfiguration",
+                "rules[].noncurrent_version_transitions[].noncurrent_days"
+            )
+            .is_none()
+        );
+        let markdown = lifecycle_markdown_fixture();
+        assert!(markdown.contains("Int(1..=100)"), "{markdown}");
+        assert!(markdown.contains("Int(1..=2147483647)"), "{markdown}");
+        assert!(markdown.contains("String(length: 0..=255)"), "{markdown}");
+    }
+
     use super::*;
 
     fn route53_value_fixture() -> (ResourceDef, SmithyModel) {
@@ -8700,9 +9250,14 @@ mod tests {
         );
         assert_eq!(retention.send_type, SendFieldType::Int);
         let generated = generate_resource(&resource, &model).expect("generate Logs schema");
+        // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            generated
-                .contains("StructField::optional(\"retention_in_days\", AttributeType::int())"),
+            generated.contains(concat!(
+                "StructField::optional(\"retention_in_days\", AttributeType::refined_int(\n",
+                "                None,\n",
+                "                Some((Some(-2147483648), Some(2147483647))),\n",
+                "            ))",
+            )),
             "the override must not match nested suffixes: {generated}"
         );
     }
@@ -8728,8 +9283,9 @@ mod tests {
             markdown.contains("| `log_group_name` | String |"),
             "{markdown}"
         );
+        // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            markdown.contains("| `retention_in_days` | Int |"),
+            markdown.contains("| `retention_in_days` | Int(-2147483648..=2147483647) |"),
             "{markdown}"
         );
     }
@@ -9017,8 +9573,14 @@ mod tests {
             code.contains("StructField::optional(\"details\", AttributeType::struct_("),
             "{code}"
         );
+        // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            code.contains("StructField::optional(\"count\", AttributeType::int())"),
+            code.contains(concat!(
+                "StructField::optional(\"count\", AttributeType::refined_int(\n",
+                "                None,\n",
+                "                Some((Some(-2147483648), Some(2147483647))),\n",
+                "            ))",
+            )),
             "{code}"
         );
         assert!(code.contains("aws.ec2.RouteTable.Choice.Details"), "{code}");
@@ -11023,6 +11585,8 @@ mod tests {
             send_via: None,
             send_reason: None,
             send_type: SendFieldType::Value,
+            sdk_i32: false,
+            sdk_i32_paths: Vec::new(),
             is_plain_string,
             is_identity,
             is_deferred_populate: false,

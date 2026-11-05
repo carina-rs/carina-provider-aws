@@ -49,6 +49,7 @@ fn s3_sse_rule() -> AttributeType {
 
 /// List of SSE rules — the `rules` attribute on
 /// `aws.s3.BucketServerSideEncryptionConfiguration`.
+/// Rules is required: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ServerSideEncryptionConfiguration.html
 pub fn bucket_encryption_rules() -> AttributeType {
-    AttributeType::list(s3_sse_rule())
+    super::nonempty_list(s3_sse_rule())
 }

@@ -33,13 +33,17 @@ fn s3_transition_storage_class() -> AttributeType {
     )
 }
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html
 fn s3_lifecycle_expiration() -> AttributeType {
     AttributeType::struct_(
         "LifecycleExpiration".to_string(),
         vec![
-            StructField::optional("days", AttributeType::int())
-                .with_provider_name("Days")
-                .build(),
+            StructField::optional(
+                "days",
+                crate::with_int_range(crate::smithy_integer(), Some(1), None),
+            )
+            .with_provider_name("Days")
+            .build(),
             StructField::optional("date", crate::s3_lifecycle_date())
                 .with_provider_name("Date")
                 .build(),
@@ -50,13 +54,17 @@ fn s3_lifecycle_expiration() -> AttributeType {
     )
 }
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_Transition.html
 fn s3_lifecycle_transition() -> AttributeType {
     AttributeType::struct_(
         "LifecycleTransition".to_string(),
         vec![
-            StructField::optional("days", AttributeType::int())
-                .with_provider_name("Days")
-                .build(),
+            StructField::optional(
+                "days",
+                crate::with_int_range(crate::smithy_integer(), Some(0), None),
+            )
+            .with_provider_name("Days")
+            .build(),
             StructField::optional("date", crate::s3_lifecycle_date())
                 .with_provider_name("Date")
                 .build(),
@@ -67,44 +75,65 @@ fn s3_lifecycle_transition() -> AttributeType {
     )
 }
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_NoncurrentVersionExpiration.html
+// https://docs.aws.amazon.com/AmazonS3/latest/userguide/intro-lifecycle-rules.html
 fn s3_noncurrent_version_expiration() -> AttributeType {
     AttributeType::struct_(
         "NoncurrentVersionExpiration".to_string(),
         vec![
-            StructField::optional("noncurrent_days", AttributeType::int())
-                .with_provider_name("NoncurrentDays")
-                .build(),
-            StructField::optional("newer_noncurrent_versions", AttributeType::int())
-                .with_provider_name("NewerNoncurrentVersions")
-                .build(),
+            StructField::optional(
+                "noncurrent_days",
+                crate::with_int_range(crate::smithy_integer(), Some(1), None),
+            )
+            .with_provider_name("NoncurrentDays")
+            .build(),
+            StructField::optional(
+                "newer_noncurrent_versions",
+                crate::with_int_range(crate::smithy_integer(), Some(1), Some(100)),
+            )
+            .with_provider_name("NewerNoncurrentVersions")
+            .build(),
         ],
     )
 }
 
+// The lifecycle XML table specifies Nonnegative Integer for NoncurrentDays.
+// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/v1-rel-RESTBucketPUTlifecycle.html
 fn s3_noncurrent_version_transition() -> AttributeType {
     AttributeType::struct_(
         "NoncurrentVersionTransition".to_string(),
         vec![
-            StructField::optional("noncurrent_days", AttributeType::int())
-                .with_provider_name("NoncurrentDays")
-                .build(),
+            StructField::optional(
+                "noncurrent_days",
+                crate::with_int_range(crate::smithy_integer(), Some(0), None),
+            )
+            .with_provider_name("NoncurrentDays")
+            .build(),
             StructField::required("storage_class", s3_transition_storage_class())
                 .with_provider_name("StorageClass")
                 .build(),
-            StructField::optional("newer_noncurrent_versions", AttributeType::int())
-                .with_provider_name("NewerNoncurrentVersions")
-                .build(),
+            StructField::optional(
+                "newer_noncurrent_versions",
+                crate::with_int_range(crate::smithy_integer(), Some(1), Some(100)),
+            )
+            .with_provider_name("NewerNoncurrentVersions")
+            .build(),
         ],
     )
 }
 
+// The lifecycle XML table specifies Positive Integer for DaysAfterInitiation.
+// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/v1-rel-RESTBucketPUTlifecycle.html
 fn s3_abort_multipart() -> AttributeType {
     AttributeType::struct_(
         "AbortIncompleteMultipartUpload".to_string(),
         vec![
-            StructField::optional("days_after_initiation", AttributeType::int())
-                .with_provider_name("DaysAfterInitiation")
-                .build(),
+            StructField::optional(
+                "days_after_initiation",
+                crate::with_int_range(crate::smithy_integer(), Some(1), None),
+            )
+            .with_provider_name("DaysAfterInitiation")
+            .build(),
         ],
     )
 }
@@ -176,7 +205,7 @@ fn s3_lifecycle_rule() -> AttributeType {
     AttributeType::struct_(
         "LifecycleRule".to_string(),
         vec![
-            StructField::optional("id", AttributeType::string())
+            StructField::optional("id", super::rule_id())
                 .with_provider_name("ID")
                 .build(),
             StructField::required("status", s3_lifecycle_status())
@@ -219,6 +248,7 @@ fn s3_lifecycle_rule() -> AttributeType {
     )
 }
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html
 pub fn bucket_lifecycle_rules() -> AttributeType {
-    AttributeType::list(s3_lifecycle_rule())
+    super::rule_list(s3_lifecycle_rule(), 1, 1000)
 }

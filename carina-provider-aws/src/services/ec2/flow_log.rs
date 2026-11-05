@@ -325,6 +325,9 @@ impl AwsProvider {
         let resource_ids = resource_ids.into_inner();
         let resource_type = resource_type.into_inner();
         let tag_field_specifications = tag_field_specifications.into_inner();
+        let tags = tags.into_inner();
+        let tags = crate::send_model::optional_tags_value(tags);
+        let traffic_type = traffic_type.into_inner();
         let tag_field_specifications = match build_tag_field_specifications(
             &resource.id,
             tag_field_specifications.as_ref(),
@@ -333,9 +336,6 @@ impl AwsProvider {
             Ok(specifications) => specifications,
             Err(error) => return Err(attempt.not_created(error)),
         };
-        let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        let traffic_type = traffic_type.into_inner();
         if resource_ids.is_empty() {
             return Err(attempt.not_created(
                 ProviderError::invalid_input(
@@ -389,7 +389,7 @@ impl AwsProvider {
         }
 
         if let Some(interval) = max_aggregation_interval {
-            req = req.configure(|builder| builder.max_aggregation_interval(interval as i32));
+            req = req.configure(|builder| builder.max_aggregation_interval(interval));
         }
 
         // Retry loop for IAM eventual consistency: newly created IAM roles may
