@@ -1,0 +1,55 @@
+aws.s3.BucketPolicy {
+  bucket = bucket.bucket_name
+
+  policy = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      sid    = 'AllowRegistryUpstreamRead'
+      effect = allow
+
+      principal = {
+        aws = [
+          "arn:aws:iam::${orgs.accounts.registry_dev}:root",
+          "arn:aws:iam::${orgs.accounts.registry_prod}:root",
+        ]
+      }
+
+      action   = 's3:GetObject'
+      resource = "${bucket.arn}/management/route53/carina.state.json"
+    }
+    statement {
+      sid    = 'AllowRegistryUpstreamList'
+      effect = allow
+
+      principal = {
+        aws = [
+          "arn:aws:iam::${orgs.accounts.registry_dev}:root",
+          "arn:aws:iam::${orgs.accounts.registry_prod}:root",
+        ]
+      }
+
+      action   = 's3:ListBucket'
+      resource = bucket.arn
+
+      condition = {
+        string_equals = {
+          's3:prefix' = 'management/route53/'
+        }
+      }
+    }
+    statement {
+      sid    = 'AllowRegistryUpstreamGetBucketLocation'
+      effect = allow
+
+      principal = {
+        aws = [
+          "arn:aws:iam::${orgs.accounts.registry_dev}:root",
+          "arn:aws:iam::${orgs.accounts.registry_prod}:root",
+        ]
+      }
+
+      action   = 's3:GetBucketLocation'
+      resource = bucket.arn
+    }
+  }
+}

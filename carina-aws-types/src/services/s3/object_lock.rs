@@ -33,7 +33,7 @@ fn s3_object_lock_retention_period() -> AttributeType {
         AttributeType::struct_(
             "RetentionDays",
             vec![
-                StructField::required("days", AttributeType::int())
+                StructField::required("days", crate::smithy_integer())
                     .with_provider_name("Days")
                     .with_description(
                         "Retention duration in days. Set exactly one of `days` or `years`.",
@@ -44,7 +44,7 @@ fn s3_object_lock_retention_period() -> AttributeType {
         AttributeType::struct_(
             "RetentionYears",
             vec![
-                StructField::required("years", AttributeType::int())
+                StructField::required("years", crate::smithy_integer())
                     .with_provider_name("Years")
                     .with_description(
                         "Retention duration in years. Set exactly one of `days` or `years`.",

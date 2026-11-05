@@ -1,0 +1,116 @@
+aws.s3.BucketPolicy {
+  bucket = bucket.bucket
+
+  policy = {
+    version = aws.iam.PolicyDocument.Version.2012_10_17
+    statement {
+      sid    = 'AllowCloudFrontOAC'
+      effect = allow
+
+      principal = {
+        service = 'cloudfront.amazonaws.com'
+      }
+
+      action   = 's3:GetObject'
+      resource = "${bucket.arn}/*"
+
+      condition = {
+        string_equals = {
+          'AWS:SourceArn' = distribution.arn
+        }
+      }
+    }
+
+    # Without s3:ListBucket, S3 answers a GetObject for an absent key
+    # with 403 AccessDenied rather than 404 NoSuchKey, so it does not
+    # reveal whether the key exists. The registry protocol needs that
+    # distinction: an absent revision or version is "no match → 404",
+    # and the client treats any other non-404/410 answer as
+    # authoritative. Everything in this bucket is public through the
+    # distribution anyway, so existence is not a secret. The bucket-root
+    # listing this would otherwise expose is closed by
+    # `default_root_object` on the distribution above.
+    statement {
+      sid    = 'AllowCloudFrontOACList'
+      effect = allow
+
+      principal = {
+        service = 'cloudfront.amazonaws.com'
+      }
+
+      action   = 's3:ListBucket'
+      resource = bucket.arn
+
+      condition = {
+        string_equals = {
+          'AWS:SourceArn' = distribution.arn
+        }
+      }
+    }
+
+    # `blob/` is the digest-addressed provider-artifact store
+    # (registry#14). A key there names the SHA256 of its own content, so
+    # a write to an existing key is either a byte-identical no-op or an
+    # attempt to serve different bytes under a digest someone already
+    # pinned. This Deny makes the second case impossible.
+    #
+    # Why this is not redundant with Object Lock: Object Lock protects
+    # object *versions*, not object *keys*. A PutObject to a key whose
+    # current version is locked SUCCEEDS and becomes the new current
+    # version — AWS documents this explicitly ("Retention periods and
+    # legal holds don't prevent new versions of the object from being
+    # created"). The locked bytes survive under their old version id, so
+    # nothing is destroyed, but a plain GET returns the new content.
+    # Object Lock therefore buys recoverability, not immutability of what
+    # the CDN serves. Withholding s3:BypassGovernanceRetention does not
+    # change this; that permission governs altering an existing version,
+    # not creating another one.
+    #
+    # `s3:if-none-match` is the piece that actually closes it. The key
+    # exists on a request only when the caller sent the header, so
+    # `null = true` reads "the header was absent" — exactly the requests
+    # this statement denies. A caller that sends `If-None-Match: *` does
+    # not match the Deny and proceeds; S3 then enforces the precondition
+    # itself and answers 412 when the key already exists. IAM compels the
+    # header, S3 supplies the semantics.
+    #
+    # Deny in the *bucket* policy, not in the task role: an identity
+    # policy binds only the principal it is attached to, so anything else
+    # in the account holding broad S3 access — or anyone able to write an
+    # identity policy — sidesteps it. The invariant belongs to the
+    # bucket, so it is expressed on the bucket and binds every principal.
+    #
+    # The `s3:ObjectCreationOperation` guard exempts the multipart
+    # sub-operations (CreateMultipartUpload / UploadPart / UploadPartCopy),
+    # which cannot carry conditional headers at all and would otherwise be
+    # denied unconditionally. Blob writes are single-shot PutObject today;
+    # the guard keeps a future switch to multipart from silently breaking.
+    #
+    # Note the exact spelling `s3:if-none-match` — lowercase, hyphenated.
+    # IAM ignores unrecognised condition keys rather than rejecting them,
+    # so a camel-case typo here would fail *open*: it would validate,
+    # plan, and apply cleanly while enforcing nothing. That is why the PR
+    # that introduced this verified enforcement with a real unconditioned
+    # PUT rather than trusting a green apply.
+    statement {
+      sid    = 'DenyBlobOverwrite'
+      effect = deny
+
+      principal = {
+        aws = '*'
+      }
+
+      action   = 's3:PutObject'
+      resource = "${bucket.arn}/blob/*"
+
+      condition = {
+        null = {
+          's3:if-none-match' = 'true'
+        }
+        bool = {
+          's3:ObjectCreationOperation' = 'true'
+        }
+      }
+    }
+  }
+}

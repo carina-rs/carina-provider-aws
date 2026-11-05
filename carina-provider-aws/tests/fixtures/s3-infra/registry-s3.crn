@@ -1,0 +1,96 @@
+# Private bucket. CloudFront access via OAC is wired up in T6e (the
+# bucket policy is added then; until T6e the bucket has no policy and
+# is therefore inaccessible).
+#
+# Defined with the `aws` provider, not `awscc`. Cloud Control silently
+# drops writes to bucket settings — it accepts the update, reports
+# SUCCESS, and changes nothing (carina-provider-awscc#419) — so a bucket
+# declared through `awscc` cannot be trusted to match its own code. That
+# is not specific to any one field: every setting below went through the
+# same path. The `aws` resources each call a real Put* API.
+let bucket = aws.s3.Bucket {
+  bucket = "carina-registry-${environment}"
+}
+
+aws.s3.BucketVersioning {
+  bucket = bucket.bucket
+  status = aws.s3.BucketVersioning.VersioningStatus.enabled
+}
+
+# Object Lock, with no `rule` on purpose: `rule` would set a *bucket
+# default* retention, which S3 applies to every new object version. The
+# listing objects (`v1/providers/{ns}/{name}/versions`) are rewritten on
+# every publish and on the 6-hourly freshness re-issue, so a bucket
+# default would lock them and stop republication — providers would become
+# unresolvable once `valid_until` passed. There is no prefix-scoped form
+# of a bucket default; retention has to come from the writer, per object,
+# on the immutable objects only (registry#48).
+#
+# So enabling this alone changes no behaviour: Object Lock is not
+# retroactive, and with no default retention nothing is locked until the
+# writer starts sending retention headers. What it does is make that
+# possible — retention cannot be set on a bucket where Object Lock was
+# never enabled.
+#
+# This is one-way. Once enabled, Object Lock cannot be disabled and
+# versioning cannot be suspended on this bucket, ever. Both are intended
+# here: the immutability guarantee behind every published
+# `carina-providers.lock` pin depends on them staying on.
+aws.s3.BucketObjectLockConfiguration {
+  bucket              = bucket.bucket
+  object_lock_enabled = aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled.enabled
+}
+
+aws.s3.BucketPublicAccessBlock {
+  bucket = bucket.bucket
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+aws.s3.BucketServerSideEncryptionConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = aws.s3.BucketServerSideEncryptionConfiguration.SseRule.SseByDefault.SseAlgorithm.aes256
+      }
+    },
+  ]
+}
+
+aws.s3.BucketOwnershipControls {
+  bucket           = bucket.bucket
+  object_ownership = aws.s3.BucketOwnershipControls.ObjectOwnership.bucket_owner_enforced
+}
+
+# No noncurrent-version expiration. A blanket rule here would also expire
+# the noncurrent versions of the immutable objects (`.../{version}/download`
+# and `.../{version}/sigstore.json`), which is exactly the recovery window
+# versioning exists to provide: if the single writer ever overwrites one,
+# the previous version is the only way back, and losing it breaks every
+# pinned `carina-providers.lock` resolution permanently.
+#
+# S3 lifecycle filters match on prefix, not suffix, and the mutable listing
+# objects (`v1/providers/{ns}/{name}/versions`) sit in the same prefix
+# hierarchy as the immutable ones, so the two cannot be separated by prefix.
+# Their noncurrent versions therefore accumulate — a few KB rewritten every
+# 6 hours, which is negligible. Object Lock on the immutable objects
+# (registry#48) is the durable fix; this keeps the window open until then.
+aws.s3.BucketLifecycleConfiguration {
+  bucket = bucket.bucket
+
+  rules = [
+    {
+      id                                = 'abort-incomplete-multipart-uploads'
+      status                            = aws.s3.BucketLifecycleConfiguration.LifecycleRule.Status.enabled
+
+      abort_incomplete_multipart_upload = {
+        days_after_initiation = 7
+      }
+    },
+  ]
+}

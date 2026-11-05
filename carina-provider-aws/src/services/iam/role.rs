@@ -126,7 +126,7 @@ impl AwsProvider {
         }
 
         if let Some(max_session_duration) = max_session_duration {
-            req = req.max_session_duration(max_session_duration as i32);
+            req = req.max_session_duration(max_session_duration);
         }
 
         // Apply tags at creation time

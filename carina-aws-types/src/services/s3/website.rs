@@ -2,13 +2,17 @@ use carina_core::schema::{AttributeType, StructField};
 
 use crate::enum_with_dsl_aliases;
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_IndexDocument.html
 pub fn s3_index_document() -> AttributeType {
     AttributeType::struct_(
         "IndexDocument".to_string(),
         vec![
-            StructField::required("suffix", AttributeType::string())
-                .with_provider_name("Suffix")
-                .build(),
+            StructField::required(
+                "suffix",
+                AttributeType::refined_string(None, Some(r"^[^/]+\z".to_string()), None, None),
+            )
+            .with_provider_name("Suffix")
+            .build(),
         ],
     )
 }

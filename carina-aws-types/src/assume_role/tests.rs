@@ -307,6 +307,30 @@ fn provider(config: &SdkConfig) -> GuardedAssumeRoleProvider {
     )
 }
 
+#[tokio::test]
+async fn session_duration_overflow_is_invalid_configuration_without_sending() {
+    for seconds in [2_147_483_648, 4_294_967_297, u64::MAX] {
+        let connector = Connector::new([]);
+        let clock = ManualTimeSource::new(UNIX_EPOCH + Duration::from_secs(NOW));
+        let provider = GuardedAssumeRoleProvider::new(
+            &config(&connector, &clock),
+            "arn:aws:iam::222222222222:role/test".into(),
+            Some("test-session".into()),
+            None,
+            Some(Duration::from_secs(seconds)),
+        );
+        let error = provider
+            .provide_credentials()
+            .await
+            .expect_err("duration must not wrap");
+        assert!(
+            matches!(error, CredentialsError::InvalidConfiguration(_)),
+            "{error:?}"
+        );
+        assert!(connector.0.lock().unwrap().requests.is_empty());
+    }
+}
+
 fn failure(error: &CredentialsError) -> &AssumeRoleFailure {
     error
         .source()

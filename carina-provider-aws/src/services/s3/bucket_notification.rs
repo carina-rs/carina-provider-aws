@@ -364,6 +364,9 @@ fn build_events(
             .iter()
             .map(|v| match v {
                 Value::Concrete(ConcreteValue::String(s)) => Ok(Event::from(s.expose_plaintext())),
+                Value::Concrete(ConcreteValue::CanonicalEnum(event)) => {
+                    Ok(Event::from(event.api_value()))
+                }
                 _ => Err(ProviderError::invalid_input(format!(
                     "{parent}.events must be a list of strings"
                 ))
@@ -533,6 +536,53 @@ fn filter_to_value(f: &NotificationConfigurationFilter) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_events_keep_wire_punctuation_for_every_destination() {
+        let schema = crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema.validate().unwrap();
+        let events = [
+            "s3:ObjectCreated:*",
+            "s3:ObjectCreated:Put",
+            "s3:ObjectAnnotation:Delete",
+            "s3:ObjectRetention:Put",
+        ];
+        let id =
+            ResourceId::with_identity("s3.BucketNotificationConfiguration", "canonical-events");
+        for parent in [
+            "topic_configurations",
+            "queue_configurations",
+            "lambda_function_configurations",
+        ] {
+            let configurations = Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(IndexMap::from([(
+                    "events".to_string(),
+                    Value::Concrete(ConcreteValue::List(
+                        events
+                            .iter()
+                            .map(|event| Value::Concrete(ConcreteValue::String((*event).into())))
+                            .collect(),
+                    )),
+                )])),
+            )]));
+            let canonical = schema
+                .effective_attribute(parent)
+                .unwrap()
+                .canonicalize_state(configurations)
+                .into_present()
+                .unwrap();
+            let Value::Concrete(ConcreteValue::List(configurations)) = canonical else {
+                panic!("notification list")
+            };
+            let Value::Concrete(ConcreteValue::Map(configuration)) = &configurations[0] else {
+                panic!("notification map")
+            };
+            let sdk_events = build_events(&id, configuration, parent).unwrap();
+            assert_eq!(
+                sdk_events.iter().map(Event::as_str).collect::<Vec<_>>(),
+                events
+            );
+        }
+    }
 
     #[test]
     fn legacy_filter_rule_case_is_normalized() {

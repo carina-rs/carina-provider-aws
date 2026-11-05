@@ -39,15 +39,18 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::provider_populated("bucket_domain_name", AttributeType::string())
-                    .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`).")
-                    .with_provider_name("")
-                    .build(),
+                AttributeSchema::provider_populated(
+                    "bucket_domain_name",
+                    carina_aws_types::route53_dns_name(),
+                )
+                .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`).")
+                .with_provider_name("")
+                .build(),
             )
             .attribute(
                 AttributeSchema::provider_populated(
                     "bucket_regional_domain_name",
-                    AttributeType::string(),
+                    carina_aws_types::route53_dns_name(),
                 )
                 .with_description(
                     "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",

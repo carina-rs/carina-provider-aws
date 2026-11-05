@@ -373,7 +373,7 @@ fn build_expiration(id: &ResourceId, value: &Value) -> ProviderResult<LifecycleE
     };
     let mut builder = LifecycleExpiration::builder();
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
-        builder = builder.days(*d as i32);
+        builder = builder.days(crate::helpers::sdk_i32(id, "expiration.days", *d)?);
     }
     if let Some(Value::Concrete(ConcreteValue::String(date))) = map.get("date") {
         builder = builder.date(parse_lifecycle_date(
@@ -412,7 +412,7 @@ fn build_transition(
     let mut builder = Transition::builder()
         .storage_class(TransitionStorageClass::from(storage_class.api_value()));
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days") {
-        builder = builder.days(*d as i32);
+        builder = builder.days(crate::helpers::sdk_i32(id, "transition.days", *d)?);
     }
     if let Some(Value::Concrete(ConcreteValue::String(date))) = map.get("date") {
         builder = builder.date(parse_lifecycle_date(
@@ -455,10 +455,18 @@ fn build_ncv_expiration(
     };
     let mut builder = NoncurrentVersionExpiration::builder();
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("noncurrent_days") {
-        builder = builder.noncurrent_days(*d as i32);
+        builder = builder.noncurrent_days(crate::helpers::sdk_i32(
+            id,
+            "noncurrent_version_expiration.noncurrent_days",
+            *d,
+        )?);
     }
     if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("newer_noncurrent_versions") {
-        builder = builder.newer_noncurrent_versions(*n as i32);
+        builder = builder.newer_noncurrent_versions(crate::helpers::sdk_i32(
+            id,
+            "noncurrent_version_expiration.newer_noncurrent_versions",
+            *n,
+        )?);
     }
     Ok(builder.build())
 }
@@ -488,10 +496,18 @@ fn build_ncv_transition(
     let mut builder = NoncurrentVersionTransition::builder()
         .storage_class(TransitionStorageClass::from(storage_class.api_value()));
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("noncurrent_days") {
-        builder = builder.noncurrent_days(*d as i32);
+        builder = builder.noncurrent_days(crate::helpers::sdk_i32(
+            id,
+            "noncurrent_version_transition.noncurrent_days",
+            *d,
+        )?);
     }
     if let Some(Value::Concrete(ConcreteValue::Int(n))) = map.get("newer_noncurrent_versions") {
-        builder = builder.newer_noncurrent_versions(*n as i32);
+        builder = builder.newer_noncurrent_versions(crate::helpers::sdk_i32(
+            id,
+            "noncurrent_version_transition.newer_noncurrent_versions",
+            *n,
+        )?);
     }
     Ok(builder.build())
 }
@@ -508,7 +524,11 @@ fn build_abort_multipart(
     };
     let mut builder = AbortIncompleteMultipartUpload::builder();
     if let Some(Value::Concrete(ConcreteValue::Int(d))) = map.get("days_after_initiation") {
-        builder = builder.days_after_initiation(*d as i32);
+        builder = builder.days_after_initiation(crate::helpers::sdk_i32(
+            id,
+            "abort_incomplete_multipart_upload.days_after_initiation",
+            *d,
+        )?);
     }
     Ok(builder.build())
 }
@@ -727,6 +747,17 @@ fn ncv_transition_to_value(t: &NoncurrentVersionTransition) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lifecycle_expiration_send_rejects_integer_overflow_instead_of_wrapping() {
+        for days in [2_147_483_648, 4_294_967_297, i64::MAX, i64::MIN] {
+            let value = map_val(vec![("days", Value::Concrete(ConcreteValue::Int(days)))]);
+            let error = build_expiration(&rid(), &value)
+                .expect_err("out-of-range days must not wrap into a valid expiration");
+            assert!(matches!(error, ProviderError::InvalidInput(_)), "{error:?}");
+            assert!(error.to_string().contains("days"), "{error}");
+        }
+    }
+
     use super::*;
 
     fn rid() -> ResourceId {

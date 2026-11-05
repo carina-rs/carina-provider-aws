@@ -170,7 +170,7 @@ impl AwsProvider {
             &resource.id,
             cidr_block.as_deref(),
             ipv4_ipam_pool_id.as_deref(),
-            ipv4_netmask_length,
+            ipv4_netmask_length.map(i64::from),
         ) {
             return Err(attempt.not_created(error));
         }
@@ -190,17 +190,6 @@ impl AwsProvider {
             create_vpc_builder = create_vpc_builder.ipv4_ipam_pool_id(ipv4_ipam_pool_id);
         }
         if let Some(ipv4_netmask_length) = ipv4_netmask_length {
-            let ipv4_netmask_length = match i32::try_from(ipv4_netmask_length) {
-                Ok(value) => value,
-                Err(_) => {
-                    return Err(attempt.not_created(
-                        ProviderError::invalid_input(
-                            "ipv4_netmask_length is outside the EC2 integer range",
-                        )
-                        .for_resource(resource.id.clone()),
-                    ));
-                }
-            };
             create_vpc_builder = create_vpc_builder.ipv4_netmask_length(ipv4_netmask_length);
         }
 

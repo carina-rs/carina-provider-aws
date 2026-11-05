@@ -125,10 +125,10 @@ fn s3_replication_rule() -> AttributeType {
     AttributeType::struct_(
         "ReplicationRule".to_string(),
         vec![
-            StructField::optional("id", AttributeType::string())
+            StructField::optional("id", super::rule_id())
                 .with_provider_name("ID")
                 .build(),
-            StructField::optional("priority", AttributeType::int())
+            StructField::optional("priority", crate::smithy_integer())
                 .with_provider_name("Priority")
                 .build(),
             StructField::optional("filter", s3_replication_rule_filter())
@@ -154,6 +154,8 @@ fn s3_replication_rule() -> AttributeType {
     )
 }
 
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationConfiguration.html
+// https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html
 pub fn bucket_replication_rules() -> AttributeType {
-    AttributeType::list(s3_replication_rule())
+    super::rule_list(s3_replication_rule(), 1, 1000)
 }

@@ -787,6 +787,10 @@ fn focused_resource(
     set_sample(&mut resource, schema, target.name);
 
     match contract.resource_type {
+        "s3.BucketWebsiteConfiguration" if target.name != "redirect_all_requests_to" => {
+            // PutBucketWebsite requires an index document unless redirecting all requests.
+            set_sample(&mut resource, schema, "index_document");
+        }
         "ec2.FlowLog" => {
             // Keep capture requests valid under CreateFlowLogs' conditional
             // requirements. Each target's sent value is still checked below.
@@ -1200,6 +1204,337 @@ async fn prepare_create_for_capture(
         },
     )
     .await
+}
+
+#[tokio::test]
+async fn logs_create_integer_overflow_returns_invalid_input_without_guard_panic() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let resource = Resource::with_provider("aws", "logs.LogGroup", "overflow", None)
+        .with_attribute("log_group_name", string("/carina/overflow"))
+        .with_attribute(
+            "retention_in_days",
+            Value::Concrete(ConcreteValue::Int(2_147_483_648)),
+        )
+        .with_attribute(
+            "tags",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "Environment".into(),
+                string("test"),
+            )]))),
+        );
+    let result = provider
+        .create_logs_log_group(
+            &resource,
+            crate::test_resource_schema("logs.LogGroup"),
+            CaptureAttempt,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ProviderError::InvalidInput(_))),
+        "{result:?}"
+    );
+    assert!(
+        service.snapshot().is_empty(),
+        "overflow must fail before any request"
+    );
+}
+
+#[test]
+fn checked_integer_inputs_fail_before_any_send_parts_are_created() {
+    use crate::send_models_generated::*;
+
+    fn set_integer(value: &mut Value, path: &[&str], integer: i64) {
+        let Some((head, tail)) = path.split_first() else {
+            *value = Value::Concrete(ConcreteValue::Int(integer));
+            return;
+        };
+        if *head == "[]" {
+            if !matches!(value, Value::Concrete(ConcreteValue::List(_))) {
+                *value = Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::Map(IndexMap::new()),
+                )]));
+            }
+            let Value::Concrete(ConcreteValue::List(items)) = value else {
+                unreachable!()
+            };
+            set_integer(items.first_mut().unwrap(), tail, integer);
+        } else {
+            if !matches!(value, Value::Concrete(ConcreteValue::Map(_))) {
+                *value = Value::Concrete(ConcreteValue::Map(IndexMap::new()));
+            }
+            let Value::Concrete(ConcreteValue::Map(fields)) = value else {
+                unreachable!()
+            };
+            let child = fields
+                .entry(head.to_string())
+                .or_insert_with(|| Value::Concrete(ConcreteValue::Map(IndexMap::new())));
+            set_integer(child, tail, integer);
+        }
+    }
+
+    let schemas = crate::schemas::all_schemas();
+    for (resource_type, path) in [
+        ("logs.LogGroup", "retention_in_days"),
+        ("iam.Role", "max_session_duration"),
+        ("ec2.Subnet", "ipv4_netmask_length"),
+        ("ec2.Subnet", "ipv6_netmask_length"),
+        ("ec2.FlowLog", "max_aggregation_interval"),
+        ("ec2.SecurityGroupIngress", "from_port"),
+        ("ec2.SecurityGroupIngress", "to_port"),
+        ("ec2.SecurityGroupEgress", "from_port"),
+        ("ec2.SecurityGroupEgress", "to_port"),
+        ("s3.BucketCorsConfiguration", "cors_rules[].max_age_seconds"),
+        ("s3.BucketLifecycleConfiguration", "rules[].expiration.days"),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].transitions[].days",
+        ),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].noncurrent_version_expiration.noncurrent_days",
+        ),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].noncurrent_version_expiration.newer_noncurrent_versions",
+        ),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].noncurrent_version_transitions[].noncurrent_days",
+        ),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].noncurrent_version_transitions[].newer_noncurrent_versions",
+        ),
+        (
+            "s3.BucketLifecycleConfiguration",
+            "rules[].abort_incomplete_multipart_upload.days_after_initiation",
+        ),
+        ("s3.BucketReplicationConfiguration", "rules[].priority"),
+    ] {
+        let schema = schemas
+            .iter()
+            .find(|schema| {
+                schema.parts().resource_type == resource_type
+                    && schema.as_schema().kind() == SchemaKind::Resource
+            })
+            .unwrap();
+        let contract = capture_contracts()
+            .iter()
+            .find(|contract| contract.resource_type == resource_type)
+            .unwrap();
+        let mut segments = Vec::new();
+        for segment in path.split('.') {
+            segments.push(segment.trim_end_matches("[]"));
+            if segment.ends_with("[]") {
+                segments.push("[]");
+            }
+        }
+        let top = segments.remove(0);
+        let attribute = contract
+            .create_attributes
+            .iter()
+            .find(|attribute| attribute.name == top)
+            .unwrap();
+        for overflow in [2_147_483_648, 4_294_967_297, i64::MIN] {
+            let mut resource = focused_resource(schema, contract, attribute);
+            let value = resource
+                .attributes
+                .entry(top.to_string())
+                .or_insert_with(|| Value::Concrete(ConcreteValue::Map(IndexMap::new())));
+            set_integer(value, &segments, overflow);
+            let result = match resource_type {
+                "logs.LogGroup" => {
+                    LogsLogGroupCreateInput::decode(&resource, schema.as_schema()).map(|_| ())
+                }
+                "iam.Role" => IamRoleCreateInput::decode(&resource).map(|_| ()),
+                "ec2.Subnet" => {
+                    Ec2SubnetCreateInput::decode(&resource, schema.as_schema()).map(|_| ())
+                }
+                "ec2.FlowLog" => {
+                    Ec2FlowLogCreateInput::decode(&resource, schema.as_schema()).map(|_| ())
+                }
+                "ec2.SecurityGroupIngress" => {
+                    Ec2SecurityGroupIngressCreateInput::decode(&resource, schema.as_schema())
+                        .map(|_| ())
+                }
+                "ec2.SecurityGroupEgress" => {
+                    Ec2SecurityGroupEgressCreateInput::decode(&resource, schema.as_schema())
+                        .map(|_| ())
+                }
+                "s3.BucketCorsConfiguration" => {
+                    S3BucketCorsConfigurationCreateInput::decode(&resource).map(|_| ())
+                }
+                "s3.BucketLifecycleConfiguration" => {
+                    S3BucketLifecycleConfigurationCreateInput::decode(&resource).map(|_| ())
+                }
+                "s3.BucketReplicationConfiguration" => {
+                    S3BucketReplicationConfigurationCreateInput::decode(&resource).map(|_| ())
+                }
+                _ => unreachable!(),
+            };
+            let error =
+                result.expect_err("integer overflow must fail in decode, before into_parts");
+            assert!(
+                matches!(error, ProviderError::InvalidInput(_)),
+                "{resource_type}.{path}: {error:?}"
+            );
+            assert!(
+                error.to_string().contains(path),
+                "{resource_type}.{path}: {error}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn logs_update_integer_overflow_returns_invalid_input_without_guard_panic() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let resource = Resource::with_provider("aws", "logs.LogGroup", "overflow", None)
+        .with_attribute("log_group_name", string("/carina/overflow"));
+    let from = existing_state_without(&resource, None).to_snapshot();
+    let to = crate::UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![
+                PatchOp::Add {
+                    key: "retention_in_days".into(),
+                    value: Value::Concrete(ConcreteValue::Int(2_147_483_648)),
+                },
+                PatchOp::Add {
+                    key: "tags".into(),
+                    value: Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                        "Environment".into(),
+                        string("test"),
+                    )]))),
+                },
+            ],
+        },
+    );
+    let identifier = AppliedIdentifier::new("/carina/overflow").unwrap();
+    let result = provider
+        .update_logs_log_group(
+            resource.id.clone(),
+            &identifier,
+            &from,
+            &to,
+            crate::test_resource_schema("logs.LogGroup"),
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ProviderError::InvalidInput(_))),
+        "{result:?}"
+    );
+    assert!(
+        service.snapshot().is_empty(),
+        "overflow must fail before any request"
+    );
+}
+
+#[test]
+fn nested_integer_preflight_preserves_long_values_and_deferred_fields() {
+    use carina_core::resource::DeferredValue;
+    let resource = Resource::with_provider("aws", "s3.BucketLifecycleConfiguration", "wide", None)
+        .with_attribute("bucket", string("carina-wide"))
+        .with_attribute(
+            "rules",
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Map(IndexMap::from([
+                    (
+                        "filter".into(),
+                        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                            "object_size_less_than".into(),
+                            Value::Concrete(ConcreteValue::Int(i64::MAX)),
+                        )]))),
+                    ),
+                    (
+                        "expiration".into(),
+                        Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                            "days".into(),
+                            Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
+                                ConcreteValue::Int(i64::MAX),
+                            )))),
+                        )]))),
+                    ),
+                ])),
+            )])),
+        );
+    assert!(
+        crate::send_models_generated::S3BucketLifecycleConfigurationCreateInput::decode(&resource)
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn flow_log_invalid_tag_specifications_return_invalid_input_without_guard_panic() {
+    let service = Arc::new(CaptureService::default());
+    let mock = MockAws::builder()
+        .with_service(Arc::clone(&service))
+        .build();
+    let provider = AwsProvider::from_sdk_config(
+        REGION.to_string(),
+        vec![],
+        vec![],
+        &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
+    );
+    let schemas = crate::schemas::all_schemas();
+    let schema = schemas
+        .iter()
+        .find(|schema| schema.parts().resource_type == "ec2.FlowLog")
+        .unwrap();
+    let contract = crate::send_models_generated::capture_contracts()
+        .iter()
+        .find(|contract| contract.resource_type == "ec2.FlowLog")
+        .unwrap();
+    let attribute = contract
+        .create_attributes
+        .iter()
+        .find(|attribute| attribute.name == "tag_field_specifications")
+        .unwrap();
+    let resource = focused_resource(schema, contract, attribute)
+        .with_attribute(
+            "tag_field_specifications",
+            Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                ConcreteValue::Int(1),
+            )])),
+        )
+        .with_attribute(
+            "tags",
+            Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                "Environment".into(),
+                string("test"),
+            )]))),
+        );
+    let result = provider
+        .create_ec2_flow_log(
+            &resource,
+            schema.as_schema(),
+            &crate::ClientToken::new(),
+            CaptureAttempt,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ProviderError::InvalidInput(_))),
+        "{result:?}"
+    );
+    assert!(service.snapshot().is_empty());
 }
 
 #[tokio::test]

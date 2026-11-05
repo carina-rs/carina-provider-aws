@@ -18,20 +18,20 @@ pub(crate) struct SecurityGroupRuleSendInput {
     pub(crate) cidr_ip: Option<String>,
     pub(crate) cidr_ipv6: Option<String>,
     pub(crate) description: Option<String>,
-    pub(crate) from_port: Option<i64>,
+    pub(crate) from_port: Option<i32>,
     pub(crate) group_id: Option<String>,
     pub(crate) ip_protocol: String,
     pub(crate) prefix_list_id: Option<String>,
     pub(crate) referenced_security_group_id: Option<String>,
     pub(crate) source_security_group_owner_id: Option<String>,
-    pub(crate) to_port: Option<i64>,
+    pub(crate) to_port: Option<i32>,
 }
 
 fn build_security_group_rule_permission(
     input: &SecurityGroupRuleSendInput,
 ) -> carina_aws_types::sdk::ec2::types::IpPermission {
-    let from_port = input.from_port.unwrap_or_default() as i32;
-    let to_port = input.to_port.unwrap_or_default() as i32;
+    let from_port = input.from_port.unwrap_or_default();
+    let to_port = input.to_port.unwrap_or_default();
 
     let mut permission_builder = carina_aws_types::sdk::ec2::types::IpPermission::builder()
         .ip_protocol(&input.ip_protocol)

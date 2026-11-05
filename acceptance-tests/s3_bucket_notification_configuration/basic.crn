@@ -38,7 +38,7 @@ aws.s3.BucketNotificationConfiguration {
     {
       id = 'object-created'
       queue_arn = queue.queue_arn
-      events = ['s3:ObjectCreated:*']
+      events = [s3_object_created]
     },
   ]
 }
