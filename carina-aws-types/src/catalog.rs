@@ -1555,7 +1555,7 @@ define_aws_type_catalog! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{BTreeSet, HashSet};
 
     use carina_core::schema::{CustomValidator, RawShape};
 
@@ -1969,17 +1969,55 @@ mod tests {
 
     #[test]
     fn arn_catalog_rows_accept_every_partition_and_reject_unknown_partitions() {
-        for &row in AwsType::ALL {
+        let expected_rows = BTreeSet::from([
+            AwsType::Arn,
+            AwsType::IamRoleArn,
+            AwsType::IamPolicyArn,
+            AwsType::IamOidcProviderArn,
+            AwsType::KmsKeyId,
+            AwsType::KmsKeyReference,
+            AwsType::KmsKeyArn,
+            AwsType::AcmCertificateArn,
+            AwsType::SqsQueueArn,
+            AwsType::SsoInstanceArn,
+            AwsType::SsoPermissionSetArn,
+            AwsType::S3BucketArn,
+            AwsType::StsCallerIdentityArn,
+            AwsType::OrganizationsAccountArn,
+            AwsType::OrganizationsOrganizationArn,
+        ]);
+        let selected_rows: BTreeSet<_> = AwsType::ALL
+            .iter()
+            .copied()
+            .filter(|row| {
+                let attr = row.attribute_type();
+                let pattern = match attr.raw_shape() {
+                    RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => {
+                        pattern
+                    }
+                    _ => return false,
+                };
+                if expected_rows.contains(row) {
+                    assert!(pattern.is_some(), "{row:?} must declare an ARN pattern");
+                }
+                // Include ARN alternatives in rows such as KMS IDs and references,
+                // even when their primary sample is an alias or a bare key ID.
+                row.identity().kind == "Arn" || pattern.is_some_and(|p| p.contains("arn:"))
+            })
+            .collect();
+        let missing: Vec<_> = expected_rows.difference(&selected_rows).copied().collect();
+        let extra: Vec<_> = selected_rows.difference(&expected_rows).copied().collect();
+        assert_eq!(
+            selected_rows, expected_rows,
+            "ARN-capable catalog row selection changed; missing: {missing:?}; extra: {extra:?}"
+        );
+
+        for row in selected_rows {
             let attr = row.attribute_type();
             let pattern = match attr.raw_shape() {
                 RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
-                _ => continue,
+                _ => panic!("{row:?} must be a String or Reference ARN row"),
             };
-            // Include ARN alternatives in rows such as KMS IDs and references,
-            // even when their primary sample is an alias or a bare key ID.
-            if row.identity().kind != "Arn" && !pattern.is_some_and(|p| p.contains("arn:")) {
-                continue;
-            }
             let regex = regex::Regex::new(pattern.expect("ARN row must declare a pattern"))
                 .expect("valid ARN row pattern");
             let sample = AwsType::ALL
