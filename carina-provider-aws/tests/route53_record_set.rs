@@ -399,6 +399,39 @@ async fn route53_record_type_checks_reject_known_invalid_values_at_plan() {
 }
 
 #[tokio::test]
+async fn route53_cname_and_ptr_rdata_accept_the_root_name_verbatim() {
+    let mut errors = Vec::new();
+    for record_type in ["CNAME", "PTR"] {
+        match normalize(record(record_type, &["."])).await {
+            Ok(normalized) => assert_eq!(
+                normalized.get_attr("resource_records"),
+                Some(&list(&["."])),
+                "{record_type} must preserve the root value"
+            ),
+            Err(error) => errors.push(format!("{record_type}: {error}")),
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+#[tokio::test]
+async fn route53_dns_rdata_keep_other_empty_labels_invalid() {
+    for record_type in ["CNAME", "NS", "PTR"] {
+        for value in ["", "..", "a..b", ".example.com", "a.example.com.."] {
+            let error = normalize(record(record_type, &[value])).await.unwrap_err();
+            assert!(error.contains("resource_records"), "{record_type}: {error}");
+        }
+    }
+    // AWS describes NS targets as nameserver domain names without explicitly
+    // documenting the bare root. Retain the existing NS behavior.
+    // https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-shared.html
+    assert!(normalize(record("NS", &["."])).await.is_err());
+    for alias in [false, true] {
+        assert!(normalize(dns_record(".", alias)).await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn route53_record_type_checks_accept_infra_values_and_documented_txt_chunks() {
     for (ty, values) in [
         (

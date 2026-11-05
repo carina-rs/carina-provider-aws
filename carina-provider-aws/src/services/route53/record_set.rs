@@ -406,6 +406,8 @@ fn validate_record_value(
             .parse::<std::net::Ipv6Addr>()
             .map(|_| ())
             .map_err(|_| "AAAA requires an IPv6 address"),
+        // AWS probe carina-test-004: CNAME/PTR "." values read back unchanged.
+        Some("CNAME" | "PTR") if value == "." => Ok(()),
         Some("CNAME" | "NS" | "PTR") => validate_dns_name(value),
         Some("TXT") => validate_txt_record(value),
         _ => Ok(()),
