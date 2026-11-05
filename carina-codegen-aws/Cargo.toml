@@ -24,4 +24,6 @@ heck = "0.5"
 html-escape = "0.2"
 
 [dev-dependencies]
+regex = "1"
+syn = { version = "2", default-features = false, features = ["parsing"] }
 tempfile = "3"

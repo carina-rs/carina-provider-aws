@@ -1,29 +1,14 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use carina_aws_types::Partition;
 use serde_json::Value;
 
 fn locked_s3_endpoint_source() -> PathBuf {
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = Command::new(&cargo)
-        .args(["metadata", "--format-version", "1", "--offline", "--locked"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .unwrap_or_else(|error| panic!("could not run {cargo:?} metadata offline: {error}"));
-    assert!(
-        output.status.success(),
-        "cargo metadata --offline --locked failed ({}):\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let metadata: Value = serde_json::from_slice(&output.stdout)
-        .expect("cargo metadata must return a valid JSON document");
-    let workspace_root = metadata["workspace_root"]
-        .as_str()
-        .expect("cargo metadata must include workspace_root");
-    let lock_path = Path::new(workspace_root).join("Cargo.lock");
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("carina-aws-types must be inside the workspace directory");
+    let lock_path = workspace_root.join("Cargo.lock");
     let lock_source = std::fs::read_to_string(&lock_path)
         .unwrap_or_else(|error| panic!("could not read {}: {error}", lock_path.display()));
     let lock: toml::Value = toml::from_str(&lock_source)
@@ -48,28 +33,41 @@ fn locked_s3_endpoint_source() -> PathBuf {
         lock_path.display()
     );
     let version = versions.first().expect("one locked aws-sdk-s3 version");
-    let packages: Vec<_> = metadata["packages"]
-        .as_array()
-        .expect("cargo metadata must include a packages array")
-        .iter()
-        .filter(|package| {
-            package["name"].as_str() == Some("aws-sdk-s3")
-                && package["version"].as_str() == Some(*version)
-        })
-        .collect();
-    let [package] = packages.as_slice() else {
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").expect(
+                "set CARGO_HOME or HOME to search registry/src/*/aws-sdk-s3-<version>/src/endpoint_lib.rs",
+            ))
+            .join(".cargo")
+        });
+    let registry_sources = cargo_home.join("registry/src");
+    let sdk_source = Path::new(&format!("aws-sdk-s3-{version}")).join("src/endpoint_lib.rs");
+    let search_pattern = registry_sources.join("*").join(&sdk_source);
+    let entries = std::fs::read_dir(&registry_sources)
+        .unwrap_or_else(|error| panic!("could not search {}: {error}", search_pattern.display()));
+    let mut searched = Vec::new();
+    let mut matches = Vec::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|error| {
+            panic!("could not search {}: {error}", search_pattern.display())
+        });
+        let candidate = entry.path().join(&sdk_source);
+        if candidate.is_file() {
+            matches.push(candidate.clone());
+        }
+        searched.push(candidate);
+    }
+    searched.sort();
+    matches.sort();
+    let [source] = matches.as_slice() else {
         panic!(
-            "expected one aws-sdk-s3 {version} package in offline cargo metadata, found {}",
-            packages.len()
+            "expected exactly one aws-sdk-s3 {version} source matching {}; found {}: {matches:#?}\nsearched: {searched:#?}",
+            search_pattern.display(),
+            matches.len()
         );
     };
-    let manifest = package["manifest_path"]
-        .as_str()
-        .expect("aws-sdk-s3 metadata must include manifest_path");
-    Path::new(manifest)
-        .parent()
-        .expect("aws-sdk-s3 manifest_path must have a package directory")
-        .join("src/endpoint_lib.rs")
+    source.clone()
 }
 
 fn embedded_partitions(path: &Path) -> Value {
