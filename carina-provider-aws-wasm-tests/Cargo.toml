@@ -11,7 +11,7 @@ name = "desired_normalization_wasm"
 path = "tests/desired_normalization_wasm.rs"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-carina-core = { workspace = true, features = ["test-support", "test-utils"] }
+carina-core = { workspace = true, features = ["test-utils"] }
 carina-plugin-host = { workspace = true, features = ["test-utils"] }
 carina-provider-resolver = { workspace = true, features = ["test-utils"] }
 indexmap = "2"

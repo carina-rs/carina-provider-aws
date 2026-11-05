@@ -574,9 +574,13 @@ fn validate_source(source: &str, registry: SchemaRegistry) {
         snapshot.schema_registry(),
         context,
     );
-    carina_core::validation::validate_resource_ref_types(
+    let configuration = carina_core::config_loader::load_buffer_configuration(
         &parsed,
         snapshot.schema_registry(),
+        context,
+    );
+    carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
         &HashSet::new(),
         &bindings,
     )
@@ -657,8 +661,13 @@ fn route53_acm_dns_references_validate_indexed_and_expanded_for_loop_shapes() {
                     &signatures,
                     session,
                 );
+            let configuration = carina_core::config_loader::load_buffer_configuration(
+                &expanded,
+                schemas,
+                session.catalog(),
+            );
             if let Err(error) =
-                validate_resource_ref_types(&expanded, schemas, &HashSet::new(), &bindings)
+                validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
             {
                 diagnostics.push(format!("{shape}: {error}"));
             }
@@ -1046,8 +1055,13 @@ fn directory_module_diagnostics(
                 session,
             );
         // Check the authored template before the caller's literal is substituted.
+        let configuration = carina_core::config_loader::load_buffer_configuration(
+            &template,
+            schemas,
+            session.catalog(),
+        );
         let diagnostics =
-            validate_resource_ref_types(&template, schemas, &HashSet::new(), &bindings)
+            validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
                 .err()
                 .map(|e| e.to_string().lines().map(str::to_string).collect())
                 .unwrap_or_default();
@@ -1062,7 +1076,12 @@ fn directory_module_diagnostics(
                 &signatures,
                 session,
             );
-        validate_resource_ref_types(&expanded, schemas, &HashSet::new(), &bindings).unwrap();
+        let configuration = carina_core::config_loader::load_buffer_configuration(
+            &expanded,
+            schemas,
+            session.catalog(),
+        );
+        validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings).unwrap();
         diagnostics
     })
     .publish(&mut deferred);
@@ -1089,24 +1108,29 @@ fn route53_directory_module_accepts_plain_string_and_acm_domain_annotations() {
             ),
             "{diagnostics:?}"
         );
+        // carina#4268: single-reference interpolation retains the argument's type.
+        let diagnostics =
+            directory_module_diagnostics(domain_type, "String", r#""${parent_zone_id}""#);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert!(
-            directory_module_diagnostics(domain_type, "String", r#""${parent_zone_id}""#)
-                .is_empty()
+            diagnostics[0].contains(
+                "cannot assign String to 'hosted_zone_id': expected aws.route53.HostedZone.Id"
+            ),
+            "{diagnostics:?}"
         );
     }
 }
 
 #[test]
-fn route53_infra_foreign_zone_ids_require_an_explicit_string_boundary() {
-    // Exact record reference shapes from infra. Foreign IDs intentionally
-    // retain their own provider identity; string interpolation makes a new
-    // AWS input value which will be checked after its references resolve.
+fn route53_infra_foreign_zone_ids_are_rejected_with_or_without_interpolation() {
+    // carina#4268: foreign IDs retain their provider identity with or without
+    // single-reference interpolation, so both forms are rejected.
     for (zone_expression, alb_expression, valid) in [
         ("zone.id", "alb.canonical_hosted_zone_id", false),
         (
             r#""${zone.id}""#,
             r#""${alb.canonical_hosted_zone_id}""#,
-            true,
+            false,
         ),
     ] {
         let foreign_id = AttributeType::refined_string(
@@ -1225,9 +1249,13 @@ fn route53_infra_foreign_zone_ids_require_an_explicit_string_boundary() {
             snapshot.schema_registry(),
             context,
         );
-        let result = carina_core::validation::validate_resource_ref_types(
+        let configuration = carina_core::config_loader::load_buffer_configuration(
             &parsed,
             snapshot.schema_registry(),
+            context,
+        );
+        let result = carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
             &HashSet::new(),
             &bindings,
         );

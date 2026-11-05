@@ -387,9 +387,13 @@ fn sqs_arn_sinks_reject_plain_string_references_and_accept_explicit_annotations(
                 snapshot.schema_registry(),
                 context,
             );
-            let result = carina_core::validation::validate_resource_ref_types(
+            let configuration = carina_core::config_loader::load_buffer_configuration(
                 &parsed,
                 snapshot.schema_registry(),
+                context,
+            );
+            let result = carina_core::validation::validate_resource_ref_types(
+                configuration.judged(),
                 &HashSet::new(),
                 &bindings,
             );
