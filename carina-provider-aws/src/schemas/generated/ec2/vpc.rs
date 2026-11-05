@@ -6,7 +6,7 @@
 
 use super::AwsSchemaConfig;
 use super::tags_type;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
 const VALID_INSTANCE_TENANCY: &[&str] = &["dedicated", "default", "host"];
@@ -22,7 +22,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("cidr_block", types::ipv4_cidr())
+            AttributeSchema::optional("cidr_block", carina_aws_types::ec2_vpc_cidr_block())
                 .create_only()
                 .with_description("The IPv4 network range for the VPC, in CIDR notation. For example, 10.0.0.0/16. We modify the specified CIDR block to its canonical form; for example,...")
                 .with_provider_name("CidrBlock")
@@ -63,10 +63,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(
-                None,
-                Some((Some(0), Some(32))),
-            ))
+            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(None, Some((Some(16), Some(28)))))
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")
                 .with_provider_name("Ipv4NetmaskLength")

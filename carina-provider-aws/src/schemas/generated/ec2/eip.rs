@@ -22,7 +22,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("address", AttributeType::string())
+            AttributeSchema::optional("address", types::ipv4_address())
                 .create_only()
                 .with_description("The Elastic IP address to recover or an IPv4 address from an address pool.")
                 .with_provider_name("Address")

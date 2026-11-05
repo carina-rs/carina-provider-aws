@@ -22,9 +22,17 @@ pub fn all_schemas() -> Vec<ValidatedResourceSchema> {
 }
 
 /// Return the provider-wide identity edges shared by native and WASM schemas.
-/// AWS declares no cross-identity assignments yet.
 pub fn assignability_edges() -> Vec<AssignabilityEdge> {
-    Vec::new()
+    // Every VPC IPv4 CIDR satisfies the Subnet IPv4 CIDR validator: both
+    // preserve core's parser and require /16..=/28, while VPC alone excludes
+    // reserved ranges. The reverse direction does not have containment.
+    vec![
+        AssignabilityEdge::new(
+            carina_aws_types::AwsType::Ec2VpcCidrBlock.identity(),
+            carina_aws_types::AwsType::Ec2SubnetIpv4CidrBlock.identity(),
+        )
+        .expect("VPC and Subnet CIDR identities must be distinct"),
+    ]
 }
 
 /// Return the provider's one aggregate schema witness. Reference forms are

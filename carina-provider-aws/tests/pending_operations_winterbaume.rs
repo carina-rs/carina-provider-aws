@@ -1150,6 +1150,10 @@ fn flow_log_resource() -> Resource {
     );
     resource.set_attr("resource_type", string("VPC"));
     resource.set_attr("traffic_type", string("ALL"));
+    resource.set_attr(
+        "deliver_logs_permission_arn",
+        string("arn:aws:iam::123456789012:role/PartialFlowLogDelivery"),
+    );
     resource
 }
 
@@ -2287,7 +2291,11 @@ async fn partial_flow_log_create_excludes_resource_ids_from_sent_when_read_back_
     ));
     assert_eq!(
         reported.sent,
-        Sent::only(["resource_type", "traffic_type"]),
+        Sent::only([
+            "deliver_logs_permission_arn",
+            "resource_type",
+            "traffic_type"
+        ]),
         "the rejected resource_ids value must not be recorded as applied"
     );
 }

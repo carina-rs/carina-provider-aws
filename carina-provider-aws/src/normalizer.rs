@@ -1,10 +1,11 @@
 //! AWS Provider normalizer
 
 use carina_core::provider::{
-    BoxFuture, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap, ready_noop,
+    BoxFuture, ProviderError, ProviderNormalizer, ProviderResult, SavedAttrs, StateTransformMap,
+    ready_noop,
 };
 use carina_core::resource::{ProviderResource, ResourceId};
-use carina_plugin_sdk::{DesiredView, NativeDesiredNormalization};
+use carina_plugin_sdk::{DesiredScalar, DesiredValue, DesiredView, NativeDesiredNormalization};
 
 type DesiredNormalizer = fn(&mut DesiredView<'_>) -> ProviderResult<()>;
 
@@ -21,7 +22,9 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
         "s3.BucketReplicationConfiguration" => {
             Some(crate::services::s3::bucket_replication::normalize_delete_marker_replication)
         }
-        "ec2.Subnet" => Some(crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks),
+        "ec2.Subnet" => Some(normalize_subnet_view),
+        "ec2.FlowLog" => Some(validate_flow_log_view),
+        "ec2.Vpc" => Some(validate_vpc_view),
         "ec2.NatGateway" => Some(validate_nat_gateway_view),
         "sqs.Queue" => Some(validate_sqs_queue_view),
         _ => None,
@@ -31,6 +34,114 @@ fn desired_normalizer(id: &ResourceId) -> Option<DesiredNormalizer> {
 fn validate_route53_record_set_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
     crate::services::route53::record_set::validate_record_set_inputs(&view.inputs())?;
     crate::services::route53::record_set::normalize_record_set_dns_names(view)
+}
+
+fn known_string(value: Option<&DesiredValue>) -> Option<&str> {
+    match value {
+        Some(DesiredValue::Known(value)) => value.as_str(),
+        _ => None,
+    }
+}
+
+fn validate_flow_log_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    let inputs = view.inputs();
+    let invalid = |message| ProviderError::invalid_input(message).for_resource(inputs.id().clone());
+    // ec2.json CreateFlowLogsRequest: all predicates below use only the
+    // written config. Opaque secrets, references, and parents remain deferred.
+    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
+    let resource_type = known_string(inputs.attribute("resource_type"));
+    let transit = match resource_type {
+        Some("TransitGateway" | "TransitGatewayAttachment") => Some(true),
+        Some("VPC" | "Subnet" | "NetworkInterface" | "RegionalNatGateway") => Some(false),
+        _ => None,
+    };
+    if let Some(transit) = transit {
+        if transit {
+            if matches!(inputs.attribute("max_aggregation_interval"), Some(DesiredValue::Known(DesiredScalar::Int(value))) if *value != 60)
+            {
+                return Err(invalid(
+                    "ec2.FlowLog max_aggregation_interval must be 60 for transit gateway resource types",
+                ));
+            }
+            if known_string(inputs.attribute("traffic_type")).is_some() {
+                return Err(invalid(
+                    "ec2.FlowLog traffic_type is not supported for transit gateway resource types",
+                ));
+            }
+        } else if inputs.attribute("traffic_type").is_none() {
+            return Err(invalid(
+                "ec2.FlowLog traffic_type is required for non-transit-gateway resource types",
+            ));
+        }
+        if let Some(DesiredValue::List(values)) = inputs.attribute("resource_ids") {
+            let maximum = if transit { 25 } else { 300 };
+            if values.iter().count() > maximum {
+                return Err(invalid(
+                    "ec2.FlowLog resource_ids exceeds the resource type's limit (25 for transit gateways, 300 otherwise)",
+                ));
+            }
+        }
+    }
+    let destination = match inputs.attribute("log_destination_type") {
+        None => Some("cloud-watch-logs"),
+        value => known_string(value),
+    };
+    if destination == Some("cloud-watch-logs") {
+        if inputs.attribute("deliver_logs_permission_arn").is_none() {
+            return Err(invalid(
+                "ec2.FlowLog deliver_logs_permission_arn is required for cloud-watch-logs",
+            ));
+        }
+    } else if matches!(destination, Some("s3" | "kinesis-data-firehose"))
+        && known_string(inputs.attribute("log_group_name")).is_some()
+    {
+        return Err(invalid(
+            "ec2.FlowLog log_group_name is supported only for cloud-watch-logs",
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_subnet_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    let inputs = view.inputs();
+    // CreateSubnetRequest$CidrBlock excludes IPv6-only subnets. Apply the
+    // same exclusion to explicit IPv4 IPAM allocation inputs.
+    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateSubnet.html
+    if matches!(
+        inputs.attribute("ipv6_native"),
+        Some(DesiredValue::Known(DesiredScalar::Bool(true)))
+    ) {
+        for field in ["cidr_block", "ipv4_ipam_pool_id", "ipv4_netmask_length"] {
+            if matches!(inputs.attribute(field), Some(DesiredValue::Known(_))) {
+                return Err(ProviderError::invalid_input(format!(
+                    "ec2.Subnet {field} is not supported when ipv6_native = true"
+                ))
+                .for_resource(inputs.id().clone()));
+            }
+        }
+        // The request API permits resource-name for IPv4-only as well as
+        // dual-stack subnets, unlike PrivateDnsNameOptionsOnLaunch's prose.
+        // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ModifySubnetAttribute.html
+        if let Some(DesiredValue::Map(options)) =
+            inputs.attribute("private_dns_name_options_on_launch")
+            && known_string(options.get("hostname_type")) == Some("ip-name")
+        {
+            return Err(ProviderError::invalid_input("ec2.Subnet private_dns_name_options_on_launch.hostname_type must be resource-name when ipv6_native = true")
+                .for_resource(inputs.id().clone()));
+        }
+    }
+    crate::services::ec2::subnet::normalize_subnet_ipv6_cidr_blocks(view)
+}
+
+fn validate_vpc_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
+    // Tenancy is a shared Smithy enum. Keep its read domain while enforcing
+    // CreateVpcRequest$InstanceTenancy's narrower documented request domain.
+    // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateVpc.html
+    if known_string(view.inputs().attribute("instance_tenancy")) == Some("host") {
+        return Err(ProviderError::invalid_input("ec2.Vpc instance_tenancy must be default or dedicated; host is not supported by CreateVpc")
+            .for_resource(view.id().clone()));
+    }
+    Ok(())
 }
 
 fn validate_nat_gateway_view(view: &mut DesiredView<'_>) -> ProviderResult<()> {
