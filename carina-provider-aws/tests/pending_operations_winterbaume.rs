@@ -16,6 +16,7 @@ use carina_core::provider::{
     AppliedIdentifier, AppliedState, CreateFailure, CreateRequest, DeleteRequest, Observation,
     PatchOp, ProviderDirectiveSchema, ProviderError, ReadOutcome, Sent, UpdatePatch,
 };
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
     ConcreteValue, Directives, Resource, ResourceId, SnapshotState, Value,
 };
@@ -1278,11 +1279,11 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 
 async fn create_state_for_test(
     provider: &AwsProvider,
-    id: &ResourceId,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
-    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    let (create, _cancellation) =
+        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
     create
         .await
         .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
@@ -2727,10 +2728,9 @@ async fn nat_gateway_delete_steps_issue_once_and_poll_to_gone() {
 async fn native_provider_create_drives_nat_gateway_to_read_back_state() {
     let (provider, service) = provider_with_ec2(&["pending", "pending", "available"]).await;
     let resource = nat_gateway_resource();
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = create_state_for_test(&provider, &id, request)
+    let state = create_state_for_test(&provider, request)
         .await
         .expect("drive native NAT gateway create");
 

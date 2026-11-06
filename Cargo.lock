@@ -1293,7 +1293,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
@@ -1341,7 +1341,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "carina-plugin-bindings-aws-credentials",
  "wasi 0.14.7+wasi-0.2.4",
@@ -1351,7 +1351,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws-credentials"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -1359,7 +1359,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-http"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "wasi 0.14.7+wasi-0.2.4",
  "wit-bindgen 0.54.0",
@@ -1368,7 +1368,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-provider"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -1376,7 +1376,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-host"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "carina-core",
  "carina-provider-protocol",
@@ -1405,7 +1405,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -1469,7 +1469,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "psl",
  "serde",
@@ -1479,7 +1479,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-resolver"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "base64 0.22.1",
  "carina-core",
@@ -1506,7 +1506,7 @@ dependencies = [
 [[package]]
 name = "carina-sigstore-tlog"
 version = "0.11.0"
-source = "git+https://github.com/carina-rs/carina?rev=4311557b6f2408ab3108151a931fcf418f72fbb5#4311557b6f2408ab3108151a931fcf418f72fbb5"
+source = "git+https://github.com/carina-rs/carina?rev=3142ca6c57b93d648e4ca170aedaf660eea23f06#3142ca6c57b93d648e4ca170aedaf660eea23f06"
 dependencies = [
  "base64 0.22.1",
  "p256",

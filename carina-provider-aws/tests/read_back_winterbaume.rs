@@ -24,6 +24,7 @@ use carina_core::provider::{
     ReadRequest, ResumeCreateRequest, ResumeFailure, ResumeOutcome, Sent, UpdateOutcome,
     UpdateRequest,
 };
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResourceId, Resource, ResourceId, State, Value,
     absolute_binding_address_for_test,
@@ -320,6 +321,7 @@ async fn execute(
     }
     let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
         vec![Box::new(AwsProviderFactory)];
+    let plan = plan.admit(&schemas).expect("admit fixture plan");
     let input = LiveExecutionInput {
         provider_context: carina_core::parser::ProviderContext::clone(
             &carina_core::parser::LoadedProviderContext::empty_for_test(),
@@ -621,7 +623,8 @@ async fn native_read_back_transient_failure_preserves_continuation() {
     provider.suspend_create = true;
     let resource = certificate();
     let request = checked_create(resource.clone()).await;
-    let (call, _cancellation) = executor::dispatch_create(&provider, &resource.id, request);
+    let (call, _cancellation) =
+        executor::dispatch_create(&provider, create_permit_for_test(request));
     let CreateFailureKind::InFlight { pending, error } = call.await.unwrap_err().into_kind() else {
         panic!("a transient poll failure must preserve read-back")
     };
@@ -652,9 +655,8 @@ async fn native_resume_read_back_uses_schema_budget_without_replaying_create() {
     let (mut first, _) = fixture(&[false], 1).await;
     first.suspend_create = true;
     let resource = certificate();
-    let id = resource.id.clone();
     let request = checked_create(resource.clone()).await;
-    let (call, _cancellation) = executor::dispatch_create(&first, &id, request);
+    let (call, _cancellation) = executor::dispatch_create(&first, create_permit_for_test(request));
     let error = call.await.unwrap_err();
     let carina_core::provider::CreateFailureKind::InFlight { pending, .. } = error.into_kind()
     else {

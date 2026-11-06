@@ -12,6 +12,7 @@ use carina_core::provider::{
     UpdateRequest,
 };
 use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
     ConcreteValue, DataSource, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
     Value,
@@ -358,20 +359,19 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
 
 async fn create_outcome_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
-    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    let (create, _cancellation) =
+        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
-    create_outcome_for_test(provider, id, request)
+    create_outcome_for_test(provider, request)
         .await
         .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
@@ -481,10 +481,9 @@ async fn create_bucket_ignores_supplied_read_only_region_for_placement() {
     // The provider region controls placement. Supplying this read-only value pins
     // the regression where create previously treated it as a placement override.
     resource.set_attr("region", string(supplied_read_only_region));
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let state = create_state_for_test(&provider, &id, request)
+    let state = create_state_for_test(&provider, request)
         .await
         .expect("create S3 bucket");
 
@@ -519,10 +518,9 @@ async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
     desired.set_attr("bucket", string(bucket));
     desired.set_attr("bucket_namespace", string("global"));
     desired.set_attr("tags", Value::Concrete(ConcreteValue::Map(IndexMap::new())));
-    let id = desired.id.clone();
     let request = create_request_without_schema_for_test(desired.clone()).await;
 
-    let current = create_state_for_test(&provider, &id, request)
+    let current = create_state_for_test(&provider, request)
         .await
         .expect("create namespaced S3 bucket");
 
@@ -557,10 +555,9 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
     let bucket = "carina-bucket-create-read-back-not-found";
     let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create", None);
     resource.set_attr("bucket", string(bucket));
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = create_outcome_for_test(&provider, &id, request)
+    let outcome = create_outcome_for_test(&provider, request)
         .await
         .expect("the create API succeeded, so a missing read-back must stay successful");
 
@@ -633,10 +630,9 @@ async fn create_bucket_permanent_read_back_error_finishes_partial_immediately() 
     let bucket = "carina-bucket-create-read-back-error";
     let mut resource = Resource::with_provider("aws", RESOURCE_TYPE, "partial-create-error", None);
     resource.set_attr("bucket", string(bucket));
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let outcome = create_outcome_for_test(&provider, &id, request)
+    let outcome = create_outcome_for_test(&provider, request)
         .await
         .expect("the create API succeeded, so a failed read-back must stay successful");
 

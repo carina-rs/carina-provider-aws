@@ -13,6 +13,7 @@ use carina_core::provider::{
     AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, DeleteRequest, NoopNormalizer,
     Provider, ProviderDirectiveSchema, ProviderError, ReadRequest, UpdateRequest,
 };
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
     ConcreteValue, Directives, Resource, ResourceIdentity, ResourceIdentityError, SnapshotState,
     Value,
@@ -140,20 +141,19 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 
 async fn create_outcome_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
-    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    let (create, _cancellation) =
+        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
-    create_outcome_for_test(provider, id, request)
+    create_outcome_for_test(provider, request)
         .await
         .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
@@ -248,9 +248,8 @@ async fn create_object_lock(
     rule: Option<Value>,
 ) -> SnapshotState {
     let resource = object_lock_resource(bucket, rule);
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    create_state_for_test(provider, &id, request)
+    create_state_for_test(provider, request)
         .await
         .expect("create Object Lock configuration")
 }
@@ -360,10 +359,9 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
         &registry,
     )
     .expect("host should resolve authored enum identifiers");
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let _state = create_state_for_test(&provider, &id, request)
+    let _state = create_state_for_test(&provider, request)
         .await
         .expect("create Object Lock configuration from DSL enum identifiers");
 
@@ -468,10 +466,9 @@ async fn create_requires_versioning_with_actionable_bucket_error() {
     let bucket = "carina-object-lock-versioning-required";
     create_bucket(&client, bucket).await;
     let resource = object_lock_resource(bucket, None);
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
 
-    let error = create_outcome_for_test(&provider, &id, request)
+    let error = create_outcome_for_test(&provider, request)
         .await
         .expect_err("Object Lock create must reject a bucket without versioning");
     let message = error.provider_error().to_string();
@@ -561,9 +558,8 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
 
     for (case, rule, expected_message) in cases {
         let resource = object_lock_resource(bucket, Some(rule));
-        let id = resource.id.clone();
         let request = create_request_for_test(resource).await;
-        let result = create_outcome_for_test(&provider, &id, request).await;
+        let result = create_outcome_for_test(&provider, request).await;
         let error = match result {
             Ok(_) => panic!("{case}: provider.create must reject the value"),
             Err(error) => error,
@@ -637,9 +633,8 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
         .await
         .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
-    let id = resource.id.clone();
     let request = create_request_for_test(resource).await;
-    let recreate = create_outcome_for_test(&provider, &id, request).await;
+    let recreate = create_outcome_for_test(&provider, request).await;
 
     let stored = client
         .inner()
