@@ -29,7 +29,9 @@ use crate::send_models_generated::{SqsQueueCreateInput, SqsQueueUpdateInput};
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
-use crate::services::iam::role::{json_to_policy_doc, policy_doc_to_json};
+use crate::services::iam::role::{
+    IamPolicyDecodeError, iam_policy_json_to_value, policy_doc_to_json,
+};
 
 /// Classification of how a `QueueAttributeName` value moves between
 /// the DSL `Value` layer and the SQS wire format (strings).
@@ -251,43 +253,88 @@ fn optional_string_value(value: Option<String>) -> Option<Value> {
 
 /// Reverse of `pack_attr`: deserialise the SQS wire string into a
 /// `Value` of the kind we declared in `QUEUE_ATTRS`.
-fn unpack_attr(raw: &str, kind: AttrKind) -> Option<Value> {
-    match kind {
-        AttrKind::Int => raw
-            .parse::<i64>()
-            .ok()
-            .map(|n| Value::Concrete(ConcreteValue::Int(n))),
-        AttrKind::Bool => match raw {
-            "true" => Some(Value::Concrete(ConcreteValue::Bool(true))),
-            "false" => Some(Value::Concrete(ConcreteValue::Bool(false))),
-            _ => None,
-        },
+fn unpack_attr(raw: &str, kind: AttrKind) -> Result<Option<Value>, SqsAttributeValueError> {
+    Ok(match kind {
+        AttrKind::Int => Some(Value::Concrete(ConcreteValue::Int(
+            raw.parse().map_err(SqsAttributeValueError::Int)?,
+        ))),
+        AttrKind::Bool => Some(Value::Concrete(ConcreteValue::Bool(
+            raw.parse().map_err(SqsAttributeValueError::Bool)?,
+        ))),
         AttrKind::String => Some(Value::Concrete(ConcreteValue::String(
             raw.to_string().into(),
         ))),
+        AttrKind::IamPolicy if raw.is_empty() => None,
         AttrKind::IamPolicy => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            Some(json_to_policy_doc(&json))
+            Some(iam_policy_json_to_value(raw).map_err(SqsAttributeValueError::Policy)?)
         }
+        AttrKind::RedrivePolicyStruct if raw.is_empty() => None,
         AttrKind::RedrivePolicyStruct => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            json_to_redrive_policy(&json)
+            let json = serde_json::from_str(raw).map_err(SqsAttributeValueError::RedriveJson)?;
+            Some(json_to_redrive_policy(&json).map_err(SqsAttributeValueError::RedriveShape)?)
         }
+        AttrKind::RedriveAllowPolicyStruct if raw.is_empty() => None,
         AttrKind::RedriveAllowPolicyStruct => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            json_to_redrive_allow_policy(&json)
+            let json = serde_json::from_str(raw).map_err(SqsAttributeValueError::RedriveJson)?;
+            Some(
+                json_to_redrive_allow_policy(&json)
+                    .map_err(SqsAttributeValueError::RedriveShape)?,
+            )
         }
-    }
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SqsAttributeValueError {
+    #[error("invalid integer")]
+    Int(#[source] std::num::ParseIntError),
+    #[error("invalid boolean")]
+    Bool(#[source] std::str::ParseBoolError),
+    #[error("invalid IAM policy")]
+    Policy(#[source] IamPolicyDecodeError),
+    #[error("invalid redrive JSON")]
+    RedriveJson(#[source] serde_json::Error),
+    #[error("invalid redrive policy shape")]
+    RedriveShape(#[source] SqsRedriveShapeError),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SqsRedriveShapeError {
+    #[error("{0}")]
+    Expected(&'static str),
+    #[error("invalid maxReceiveCount")]
+    MaxReceiveCount(#[source] std::num::ParseIntError),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to decode SQS queue attribute {attribute}", attribute = .attribute.as_str())]
+struct SqsAttributeDecodeError {
+    attribute: QueueAttributeName,
+    #[source]
+    source: SqsAttributeValueError,
 }
 
 fn queue_attribute(
+    id: &ResourceId,
     attributes: Option<&HashMap<QueueAttributeName, String>>,
     key: &QueueAttributeName,
     kind: AttrKind,
-) -> Option<Value> {
+) -> ProviderResult<Option<Value>> {
     attributes
         .and_then(|attributes| attributes.get(key))
-        .and_then(|raw| unpack_attr(raw, kind))
+        .map(|raw| unpack_attr(raw, kind))
+        .transpose()
+        .map(Option::flatten)
+        .map_err(|source| {
+            ProviderError::api_error_caused_by(
+                "Failed to decode SQS queue attribute",
+                SqsAttributeDecodeError {
+                    attribute: key.clone(),
+                    source,
+                },
+            )
+            .for_resource(id.clone())
+        })
 }
 
 fn required_queue_attribute(
@@ -297,7 +344,7 @@ fn required_queue_attribute(
     key: &QueueAttributeName,
     kind: AttrKind,
 ) -> ProviderResult<Value> {
-    queue_attribute(attributes, key, kind).ok_or_else(|| {
+    queue_attribute(id, attributes, key, kind)?.ok_or_else(|| {
         ProviderError::api_error(format!(
             "GetQueueAttributes(All) omitted required SQS attribute {dsl_name}"
         ))
@@ -558,13 +605,29 @@ fn redrive_policy_to_json_string(value: &Value) -> Option<String> {
 
 /// Parse the `{deadLetterTargetArn, maxReceiveCount}` JSON document
 /// SQS returns into a `Value::Map` with the DSL-side snake_case keys.
-fn json_to_redrive_policy(json: &serde_json::Value) -> Option<Value> {
-    let obj = json.as_object()?;
-    let arn = obj.get("deadLetterTargetArn")?.as_str()?;
-    let count = match obj.get("maxReceiveCount")? {
-        serde_json::Value::Number(number) => number.as_i64()?,
-        serde_json::Value::String(value) => value.parse::<i64>().ok()?,
-        _ => return None,
+fn json_to_redrive_policy(json: &serde_json::Value) -> Result<Value, SqsRedriveShapeError> {
+    let obj = json
+        .as_object()
+        .ok_or(SqsRedriveShapeError::Expected("expected a JSON object"))?;
+    let arn = obj
+        .get("deadLetterTargetArn")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(SqsRedriveShapeError::Expected(
+            "deadLetterTargetArn must be a string",
+        ))?;
+    // AWS uses both integer strings and JSON integers for maxReceiveCount.
+    let count = match obj.get("maxReceiveCount") {
+        Some(serde_json::Value::Number(number)) => number.as_i64().ok_or(
+            SqsRedriveShapeError::Expected("maxReceiveCount must be an i64 integer"),
+        )?,
+        Some(serde_json::Value::String(value)) => value
+            .parse::<i64>()
+            .map_err(SqsRedriveShapeError::MaxReceiveCount)?,
+        _ => {
+            return Err(SqsRedriveShapeError::Expected(
+                "maxReceiveCount must be an integer or integer string",
+            ));
+        }
     };
     let mut out = IndexMap::new();
     out.insert(
@@ -575,7 +638,7 @@ fn json_to_redrive_policy(json: &serde_json::Value) -> Option<Value> {
         "max_receive_count".to_string(),
         Value::Concrete(ConcreteValue::Int(count)),
     );
-    Some(Value::Concrete(ConcreteValue::Map(out)))
+    Ok(Value::Concrete(ConcreteValue::Map(out)))
 }
 
 /// Serialise a `Value::Map { redrive_permission, source_queue_arns? }`
@@ -620,9 +683,16 @@ fn redrive_allow_policy_to_json_string(value: &Value) -> Option<String> {
 
 /// Parse the `{redrivePermission, sourceQueueArns?}` JSON document
 /// SQS returns into a `Value::Map` with the DSL-side snake_case keys.
-fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Option<Value> {
-    let obj = json.as_object()?;
-    let permission_raw = obj.get("redrivePermission")?.as_str()?;
+fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Result<Value, SqsRedriveShapeError> {
+    let obj = json
+        .as_object()
+        .ok_or(SqsRedriveShapeError::Expected("expected a JSON object"))?;
+    let permission_raw = obj
+        .get("redrivePermission")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(SqsRedriveShapeError::Expected(
+            "redrivePermission must be a string",
+        ))?;
     // Emit the raw AWS-canonical value (`"allowAll"`) directly as a
     // plain `String`. The alias↔canonical reconciliation against the
     // parsed-desired side is owned by carina-core (the saved-state
@@ -634,22 +704,27 @@ fn json_to_redrive_allow_policy(json: &serde_json::Value) -> Option<Value> {
         "redrive_permission".to_string(),
         Value::Concrete(ConcreteValue::String(permission_raw.to_string().into())),
     );
-    if let Some(arns_json) = obj.get("sourceQueueArns")
-        && let Some(arr) = arns_json.as_array()
-    {
+    // sourceQueueArns is optional (allowAll / denyAll), but must decode if present.
+    if let Some(arns_json) = obj.get("sourceQueueArns") {
+        let arr = arns_json.as_array().ok_or(SqsRedriveShapeError::Expected(
+            "sourceQueueArns must be an array of strings",
+        ))?;
         let arns: Vec<Value> = arr
             .iter()
-            .filter_map(|v| {
+            .map(|v| {
                 v.as_str()
                     .map(|s| Value::Concrete(ConcreteValue::String(s.to_string().into())))
+                    .ok_or(SqsRedriveShapeError::Expected(
+                        "sourceQueueArns must contain only strings",
+                    ))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         out.insert(
             "source_queue_arns".to_string(),
             Value::Concrete(ConcreteValue::List(arns)),
         );
     }
-    Some(Value::Concrete(ConcreteValue::Map(out)))
+    Ok(Value::Concrete(ConcreteValue::Map(out)))
 }
 
 impl AwsProvider {
@@ -729,7 +804,12 @@ impl AwsProvider {
         // measurement omits KmsDataKeyReusePeriodSeconds when no KMS key is set.
         let model = SqsQueueReadModel {
             queue_name: Value::Concrete(ConcreteValue::String(name.to_string().into())),
-            policy: queue_attribute(attributes, &QueueAttributeName::Policy, AttrKind::IamPolicy),
+            policy: queue_attribute(
+                id,
+                attributes,
+                &QueueAttributeName::Policy,
+                AttrKind::IamPolicy,
+            )?,
             visibility_timeout: required_queue_attribute(
                 id,
                 attributes,
@@ -766,48 +846,61 @@ impl AwsProvider {
                 AttrKind::Int,
             )?,
             redrive_policy: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::RedrivePolicy,
                 AttrKind::RedrivePolicyStruct,
-            ),
+            )?,
             redrive_allow_policy: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::RedriveAllowPolicy,
                 AttrKind::RedriveAllowPolicyStruct,
-            ),
-            fifo_queue: queue_attribute(attributes, &QueueAttributeName::FifoQueue, AttrKind::Bool)
-                .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
+            )?,
+            fifo_queue: queue_attribute(
+                id,
+                attributes,
+                &QueueAttributeName::FifoQueue,
+                AttrKind::Bool,
+            )?
+            .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
             content_based_deduplication: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ContentBasedDeduplication,
                 AttrKind::Bool,
-            )
+            )?
             .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
             deduplication_scope: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::DeduplicationScope,
                 AttrKind::String,
-            ),
+            )?,
             fifo_throughput_limit: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::FifoThroughputLimit,
                 AttrKind::String,
-            ),
+            )?,
             kms_master_key_id: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::KmsMasterKeyId,
                 AttrKind::String,
-            ),
+            )?,
             kms_data_key_reuse_period_seconds: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::KmsDataKeyReusePeriodSeconds,
                 AttrKind::Int,
-            ),
+            )?,
             sqs_managed_sse_enabled: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::SqsManagedSseEnabled,
                 AttrKind::Bool,
-            ),
+            )?,
             queue_arn: required_queue_attribute(
                 id,
                 attributes,
@@ -816,20 +909,23 @@ impl AwsProvider {
                 AttrKind::String,
             )?,
             approximate_number_of_messages: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessages,
                 AttrKind::Int,
-            ),
+            )?,
             approximate_number_of_messages_delayed: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessagesDelayed,
                 AttrKind::Int,
-            ),
+            )?,
             approximate_number_of_messages_not_visible: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessagesNotVisible,
                 AttrKind::Int,
-            ),
+            )?,
             created_timestamp: required_queue_attribute(
                 id,
                 attributes,
@@ -1223,8 +1319,265 @@ fn tags_map(tags: Option<&Value>) -> Option<HashMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::provider::UpdatePatch;
+    use carina_core::provider::{ProviderErrorKind, UpdatePatch};
     use carina_core::resource::DeferredValue;
+    use std::error::Error;
+
+    fn assert_attribute_decode_failure(
+        raw: &str,
+        key: QueueAttributeName,
+        kind: AttrKind,
+        check: impl FnOnce(&SqsAttributeValueError),
+    ) {
+        let id = queue_resource().id;
+        let attributes = HashMap::from([(key.clone(), raw.to_string())]);
+        let error = queue_attribute(&id, Some(&attributes), &key, kind)
+            .expect_err("a malformed attribute must fail the read");
+        assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+        let decode = error
+            .detail()
+            .cause()
+            .unwrap()
+            .downcast_ref::<SqsAttributeDecodeError>()
+            .expect("typed SQS attribute decode error");
+        assert_eq!(decode.attribute, key);
+        check(
+            decode
+                .source()
+                .unwrap()
+                .downcast_ref::<SqsAttributeValueError>()
+                .expect("typed SQS attribute value error"),
+        );
+    }
+
+    #[test]
+    fn sqs_integer_decode_failure_keeps_its_typed_cause() {
+        for raw in [
+            "",
+            "not-an-int",
+            "9223372036854775808",
+            "-9223372036854775809",
+        ] {
+            assert_attribute_decode_failure(
+                raw,
+                QueueAttributeName::VisibilityTimeout,
+                AttrKind::Int,
+                |error| {
+                    assert!(matches!(error, SqsAttributeValueError::Int(_)));
+                    assert!(error.source().unwrap().is::<std::num::ParseIntError>());
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_boolean_decode_failure_keeps_its_typed_cause() {
+        for raw in ["", "TRUE", "1"] {
+            assert_attribute_decode_failure(
+                raw,
+                QueueAttributeName::FifoQueue,
+                AttrKind::Bool,
+                |error| {
+                    assert!(matches!(error, SqsAttributeValueError::Bool(_)));
+                    assert!(error.source().unwrap().is::<std::str::ParseBoolError>());
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_redrive_json_failure_keeps_its_typed_cause() {
+        for (key, kind) in [
+            (
+                QueueAttributeName::RedrivePolicy,
+                AttrKind::RedrivePolicyStruct,
+            ),
+            (
+                QueueAttributeName::RedriveAllowPolicy,
+                AttrKind::RedriveAllowPolicyStruct,
+            ),
+        ] {
+            for raw in ["{", "1e999"] {
+                assert_attribute_decode_failure(raw, key.clone(), kind, |error| {
+                    assert!(matches!(error, SqsAttributeValueError::RedriveJson(_)));
+                    assert!(error.source().unwrap().is::<serde_json::Error>());
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn sqs_redrive_shape_failure_keeps_its_typed_cause() {
+        for (key, kind, inputs) in [
+            (
+                QueueAttributeName::RedrivePolicy,
+                AttrKind::RedrivePolicyStruct,
+                &[
+                    "null",
+                    "[]",
+                    "{}",
+                    r#"{"deadLetterTargetArn":"arn"}"#,
+                    r#"{"deadLetterTargetArn":null,"maxReceiveCount":5}"#,
+                    r#"{"deadLetterTargetArn":"arn","maxReceiveCount":null}"#,
+                    r#"{"deadLetterTargetArn":"arn","maxReceiveCount":1.5}"#,
+                    r#"{"deadLetterTargetArn":"arn","maxReceiveCount":9223372036854775808}"#,
+                ][..],
+            ),
+            (
+                QueueAttributeName::RedriveAllowPolicy,
+                AttrKind::RedriveAllowPolicyStruct,
+                &[
+                    "null",
+                    "[]",
+                    "{}",
+                    r#"{"redrivePermission":false}"#,
+                    r#"{"redrivePermission":"byQueue","sourceQueueArns":null}"#,
+                    r#"{"redrivePermission":"byQueue","sourceQueueArns":"arn"}"#,
+                    r#"{"redrivePermission":"byQueue","sourceQueueArns":["arn",1]}"#,
+                ][..],
+            ),
+        ] {
+            for raw in inputs {
+                assert_attribute_decode_failure(raw, key.clone(), kind, |error| {
+                    assert!(matches!(error, SqsAttributeValueError::RedriveShape(_)));
+                    assert!(error.source().unwrap().is::<SqsRedriveShapeError>());
+                });
+            }
+        }
+        for count in ["not-an-int", "9223372036854775808"] {
+            let raw = format!(r#"{{"deadLetterTargetArn":"arn","maxReceiveCount":"{count}"}}"#);
+            assert_attribute_decode_failure(
+                &raw,
+                QueueAttributeName::RedrivePolicy,
+                AttrKind::RedrivePolicyStruct,
+                |error| {
+                    let SqsAttributeValueError::RedriveShape(shape) = error else {
+                        panic!("expected a redrive shape error");
+                    };
+                    assert!(matches!(shape, SqsRedriveShapeError::MaxReceiveCount(_)));
+                    assert!(shape.source().unwrap().is::<std::num::ParseIntError>());
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_missing_attributes_stay_absent() {
+        let id = queue_resource().id;
+        let empty_attributes = HashMap::new();
+        for (_, key, kind, _) in QUEUE_ATTRS {
+            for attributes in [None, Some(&empty_attributes)] {
+                assert_eq!(queue_attribute(&id, attributes, key, *kind).unwrap(), None);
+            }
+        }
+    }
+
+    #[test]
+    fn sqs_redrive_policy_accepts_string_and_integer_counts() {
+        let arn = "arn:aws:sqs:us-east-1:123456789012:dead-letter";
+        for count in ["5", r#""5""#] {
+            let raw = format!(r#"{{"deadLetterTargetArn":"{arn}","maxReceiveCount":{count}}}"#);
+            assert_eq!(
+                unpack_attr(&raw, AttrKind::RedrivePolicyStruct).unwrap(),
+                Some(map([
+                    ("dead_letter_target_arn", string(arn)),
+                    ("max_receive_count", Value::Concrete(ConcreteValue::Int(5))),
+                ])),
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_redrive_allow_policy_preserves_optional_arns() {
+        for permission in ["allowAll", "denyAll"] {
+            let raw = format!(r#"{{"redrivePermission":"{permission}"}}"#);
+            assert_eq!(
+                unpack_attr(&raw, AttrKind::RedriveAllowPolicyStruct).unwrap(),
+                Some(map([("redrive_permission", string(permission))])),
+            );
+        }
+        for arns in [
+            vec![],
+            vec![
+                "arn:aws:sqs:us-east-1:123456789012:source-0",
+                "arn:aws:sqs:us-east-1:123456789012:source-1",
+            ],
+        ] {
+            let expected = map([
+                ("redrive_permission", string("byQueue")),
+                (
+                    "source_queue_arns",
+                    Value::Concrete(ConcreteValue::List(
+                        arns.iter().map(|arn| string(arn)).collect(),
+                    )),
+                ),
+            ]);
+            let raw = serde_json::json!({"redrivePermission": "byQueue", "sourceQueueArns": arns});
+            assert_eq!(
+                unpack_attr(&raw.to_string(), AttrKind::RedriveAllowPolicyStruct).unwrap(),
+                Some(expected),
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_empty_policy_is_absent() {
+        for kind in [
+            AttrKind::IamPolicy,
+            AttrKind::RedrivePolicyStruct,
+            AttrKind::RedriveAllowPolicyStruct,
+        ] {
+            assert_eq!(
+                unpack_attr("", kind).expect("an empty policy must be treated as absent"),
+                None,
+            );
+        }
+    }
+
+    #[test]
+    fn sqs_policy_decode_failure_keeps_its_typed_cause() {
+        let id = queue_resource().id;
+        for raw in [
+            " ",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let attributes = HashMap::from([(QueueAttributeName::Policy, raw.to_string())]);
+            let error = queue_attribute(
+                &id,
+                Some(&attributes),
+                &QueueAttributeName::Policy,
+                AttrKind::IamPolicy,
+            )
+            .expect_err("an invalid policy must fail the read");
+            assert_eq!(
+                error.detail().context(),
+                "Failed to decode SQS queue attribute"
+            );
+            let cause = error.detail().cause().expect("policy decode cause");
+            let decode = cause
+                .downcast_ref::<SqsAttributeDecodeError>()
+                .expect("typed SQS attribute decode error");
+            assert_eq!(decode.attribute, QueueAttributeName::Policy);
+            assert_eq!(
+                decode.to_string(),
+                "failed to decode SQS queue attribute Policy"
+            );
+            let value_decode = decode
+                .source()
+                .expect("attribute value decode source")
+                .downcast_ref::<SqsAttributeValueError>()
+                .expect("typed attribute value decode error");
+            assert!(matches!(value_decode, SqsAttributeValueError::Policy(_)));
+            let policy_decode = value_decode
+                .source()
+                .expect("policy decode source")
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed policy decode error");
+            assert!(matches!(policy_decode, IamPolicyDecodeError::Json(_)));
+            assert!(policy_decode.source().unwrap().is::<serde_json::Error>());
+        }
+    }
 
     fn queue_resource() -> Resource {
         Resource::with_provider("aws", "sqs.Queue", "test", None)
@@ -1236,7 +1589,7 @@ mod tests {
 
     fn secret_snapshot() -> SnapshotValue {
         carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
-            Box::new(Value::Concrete(ConcreteValue::String("historical".into()))),
+            Box::new(Value::Concrete(ConcreteValue::String("historical".into()))).into(),
         )))
         .expect("secret fixture should redact")
     }
@@ -1480,7 +1833,7 @@ mod tests {
     #[test]
     fn sqs_cross_field_validation_accepts_unknown_and_deferred_values() {
         let unknown = plan_time_unknown();
-        let deferred = Value::Deferred(DeferredValue::Secret(Box::new(string("opaque"))));
+        let deferred = Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")).into()));
         for opaque in [unknown, deferred] {
             for fifo in [false, true] {
                 assert_valid_cross_field_inputs(vec![
@@ -1549,7 +1902,7 @@ mod tests {
                 ("redrive_permission", string("byQueue")),
                 (
                     "source_queue_arns",
-                    Value::Deferred(DeferredValue::Secret(Box::new(source_queue_arns(0)))),
+                    Value::Deferred(DeferredValue::Secret(Box::new(source_queue_arns(0)).into())),
                 ),
             ]),
         )]);

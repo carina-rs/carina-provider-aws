@@ -1192,7 +1192,11 @@ mod tests {
                 }
             }
             RawShape::List { element_type, .. } => collect_callbacks(element_type, bindings),
-            RawShape::Map { key, value } => {
+            RawShape::Map {
+                key,
+                value,
+                constraints: _,
+            } => {
                 collect_callbacks(key, bindings);
                 collect_callbacks(value, bindings);
             }
@@ -1224,7 +1228,8 @@ mod tests {
                 text.parse().expect("integer bridge probe"),
             )),
             CallbackScalar::Float => CoreValue::Concrete(ConcreteValue::Float(
-                text.parse().expect("float bridge probe"),
+                carina_core::FiniteF64::new(text.parse().expect("float bridge probe"))
+                    .expect("finite float bridge probe"),
             )),
         }
     }
@@ -1281,67 +1286,74 @@ mod tests {
         }
     }
 
-    fn non_finite_attributes() -> HashMap<String, CoreValue> {
+    fn out_of_range_duration_attributes() -> HashMap<String, CoreValue> {
         HashMap::from([(
             "value".to_string(),
-            CoreValue::Concrete(ConcreteValue::Float(f64::NAN)),
+            CoreValue::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                u64::MAX,
+            ))),
         )])
     }
 
-    fn non_finite_state() -> CoreAppliedState {
-        carina_provider_aws::non_finite_applied_state_for_protocol_test()
+    fn out_of_range_duration_state() -> CoreAppliedState {
+        carina_provider_aws::out_of_range_duration_applied_state_for_protocol_test()
     }
 
     fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {
+        assert!(
+            error
+                .detail()
+                .cause()
+                .is_some_and(|cause| cause.is::<protocol_convert::ProtocolConvertError>()),
+            "typed protocol-conversion cause must be retained: {error:?}"
+        );
         let error = error.to_wire();
         assert_eq!(error.kind, proto::ProviderErrorKind::Internal);
         assert_eq!(error.message, message);
         assert!(
-            error
-                .cause
-                .as_deref()
-                .is_some_and(|cause| cause.contains("non-finite float")),
-            "typed protocol-conversion cause must be retained: {error:?}"
+            error.cause.as_deref().is_some_and(|cause| cause
+                .contains("duration in seconds does not fit the provider protocol integer domain")),
+            "protocol-conversion cause must name the out-of-range duration: {error:?}"
         );
     }
 
     #[test]
-    fn non_finite_read_output_surfaces_as_a_provider_error() {
+    fn out_of_range_duration_read_output_surfaces_as_a_provider_error() {
         let error = read_outcome_to_proto(&CoreReadOutcome::Found {
-            state: non_finite_state(),
+            state: out_of_range_duration_state(),
         })
-        .expect_err("non-finite provider output must be rejected without panicking");
+        .expect_err("out-of-range duration in provider output must be rejected without panicking");
         assert_typed_conversion_error(error, "failed to encode read result");
     }
 
     #[test]
-    fn non_finite_issued_create_output_surfaces_as_a_provider_error() {
-        let error = issued_create_attributes_to_proto(&non_finite_attributes());
+    fn out_of_range_duration_issued_create_output_surfaces_as_a_provider_error() {
+        let error = issued_create_attributes_to_proto(&out_of_range_duration_attributes());
         assert_typed_conversion_error(
-            error.expect_err("non-finite issued-create output must be rejected"),
+            error.expect_err("out-of-range duration in issued-create output must be rejected"),
             "failed to encode create result",
         );
     }
 
     #[test]
-    fn non_finite_partial_create_output_surfaces_as_a_provider_error() {
-        let error = partial_create_attributes_to_proto(&non_finite_attributes());
+    fn out_of_range_duration_partial_create_output_surfaces_as_a_provider_error() {
+        let error = partial_create_attributes_to_proto(&out_of_range_duration_attributes());
         assert_typed_conversion_error(
-            error.expect_err("non-finite partial-create output must be rejected"),
+            error.expect_err("out-of-range duration in partial-create output must be rejected"),
             "failed to encode partial create result",
         );
     }
 
     #[test]
-    fn non_finite_resumed_create_output_surfaces_as_a_provider_error() {
-        let error = resumed_state_to_proto(&non_finite_state())
-            .expect_err("non-finite resumed-create output must be rejected");
+    fn out_of_range_duration_resumed_create_output_surfaces_as_a_provider_error() {
+        let error = resumed_state_to_proto(&out_of_range_duration_state())
+            .expect_err("out-of-range duration in resumed-create output must be rejected");
         assert_typed_conversion_error(error, "failed to encode resumed create result");
     }
 
     #[test]
-    fn non_finite_update_output_surfaces_as_a_provider_error() {
-        let state = non_finite_state();
+    fn out_of_range_duration_update_output_surfaces_as_a_provider_error() {
+        let state = out_of_range_duration_state();
         let id = state.id().clone();
         let outcome = carina_core::provider::UpdateOutcome::success(state);
         let state_after_patch = proto::PersistedState {
@@ -1351,7 +1363,7 @@ mod tests {
             exists: true,
         };
         let error = update_outcome_to_proto(&outcome, state_after_patch, &id)
-            .expect_err("non-finite update output must be rejected");
+            .expect_err("out-of-range duration in update output must be rejected");
         assert_typed_conversion_error(error, "failed to encode update result");
     }
 

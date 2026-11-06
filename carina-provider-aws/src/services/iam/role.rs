@@ -16,6 +16,21 @@ use crate::read_model::found_managed_read;
 use crate::read_models_generated::IamRoleReadModelSupplement;
 use crate::send_models_generated::{IamRoleCreateInput, IamRoleUpdateInput};
 
+fn decode_assume_role_policy_document(
+    id: &ResourceId,
+    raw: Option<&str>,
+) -> ProviderResult<Option<Value>> {
+    raw.map(|raw| {
+        let decoded = urlencoding::decode(raw).map_err(IamPolicyDecodeError::UrlDecode)?;
+        iam_policy_json_to_value(&decoded)
+    })
+    .transpose()
+    .map_err(|error| {
+        ProviderError::api_error_caused_by("Failed to decode assume role policy document", error)
+            .for_resource(id.clone())
+    })
+}
+
 impl AwsProvider {
     /// Read an IAM Role
     pub(crate) async fn read_iam_role(
@@ -36,21 +51,10 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(role) = output.role() {
+                    let policy =
+                        decode_assume_role_policy_document(id, role.assume_role_policy_document())?;
                     let fields = Self::extract_iam_role_attributes(role)
-                        .map_assume_role_policy_document(|document| {
-                            document.map(|value| match value {
-                                Value::Concrete(ConcreteValue::String(raw)) => {
-                                    let decoded = urlencoding::decode(raw.expose_plaintext())
-                                        .unwrap_or_else(|_| raw.expose_plaintext().into());
-                                    iam_policy_json_to_value(&decoded).unwrap_or_else(|_| {
-                                        Value::Concrete(ConcreteValue::String(
-                                            decoded.into_owned().into(),
-                                        ))
-                                    })
-                                }
-                                value => value,
-                            })
-                        });
+                        .map_assume_role_policy_document(|_| policy);
 
                     let mut tag_map = IndexMap::new();
                     for tag in role.tags() {
@@ -549,7 +553,7 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
             serde_json::Value::String(s.expose_plaintext().to_string())
         }
         Value::Concrete(ConcreteValue::Int(n)) => serde_json::Value::Number((*n).into()),
-        Value::Concrete(ConcreteValue::Float(f)) => serde_json::json!(*f),
+        Value::Concrete(ConcreteValue::Float(f)) => serde_json::Value::Number(f.to_json_number()),
         Value::Concrete(ConcreteValue::Bool(b)) => serde_json::Value::Bool(*b),
         Value::Concrete(ConcreteValue::CanonicalEnum(c)) => {
             serde_json::Value::String(c.api_value().to_string())
@@ -577,19 +581,32 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
+/// A policy decode failure with its original parse or numeric cause.
+#[derive(Debug, thiserror::Error)]
+pub enum IamPolicyDecodeError {
+    #[error("URL decode failed")]
+    UrlDecode(#[source] std::string::FromUtf8Error),
+    #[error("JSON parse failed")]
+    Json(#[source] serde_json::Error),
+    #[error("invalid JSON number")]
+    Number(#[source] std::num::ParseFloatError),
+    #[error("non-finite JSON number")]
+    NonFiniteFloat(#[source] carina_core::NonFiniteFloatError),
+}
+
 /// Convert an IAM policy JSON string (PascalCase keys) to a Carina Value::Map (snake_case keys).
 ///
 /// Mirrors `value_to_iam_policy_json`'s position-aware case conversion:
 /// only IAM standard fields and condition operators are mapped to
 /// snake_case; condition variable keys, ARN values, and Action / Resource
 /// literals are preserved verbatim.
-pub fn iam_policy_json_to_value(json_str: &str) -> Result<Value, String> {
+pub fn iam_policy_json_to_value(json_str: &str) -> Result<Value, IamPolicyDecodeError> {
     let json: serde_json::Value =
-        serde_json::from_str(json_str).map_err(|e| format!("JSON parse failed: {}", e))?;
-    Ok(json_to_policy_doc(&json))
+        serde_json::from_str(json_str).map_err(IamPolicyDecodeError::Json)?;
+    json_to_policy_doc(&json)
 }
 
-pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
+pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
     let serde_json::Value::Object(obj) = json else {
         return json_scalar_to_value(json);
     };
@@ -602,10 +619,13 @@ pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
         let value = match snake_key {
             "statement" => match v {
                 serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
-                    items.iter().map(json_to_policy_statement).collect(),
+                    items
+                        .iter()
+                        .map(json_to_policy_statement)
+                        .collect::<Result<_, _>>()?,
                 )),
-                serde_json::Value::Object(_) => json_to_policy_statement(v),
-                _ => json_scalar_to_value(v),
+                serde_json::Value::Object(_) => json_to_policy_statement(v)?,
+                _ => json_scalar_to_value(v)?,
             },
             // `version` is a StringEnum but needs no special arm: emit
             // the raw AWS-canonical value (`"2012-10-17"`) directly as
@@ -615,14 +635,14 @@ pub(crate) fn json_to_policy_doc(json: &serde_json::Value) -> Value {
             // lift + the differ's spelling-agnostic `StringEnum` arm),
             // not by this read path emitting a pre-down-converted alias
             // (aws#326).
-            _ => json_scalar_or_passthrough_to_value(v),
+            _ => json_scalar_or_passthrough_to_value(v)?,
         };
         map.insert(snake_key.to_string(), value);
     }
-    Value::Concrete(ConcreteValue::Map(map))
+    Ok(Value::Concrete(ConcreteValue::Map(map)))
 }
 
-fn json_to_policy_statement(json: &serde_json::Value) -> Value {
+fn json_to_policy_statement(json: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
     let serde_json::Value::Object(obj) = json else {
         return json_scalar_to_value(json);
     };
@@ -633,8 +653,8 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
         }
         let snake_key = lookup_snake(STATEMENT_FIELDS, k).unwrap_or(k.as_str());
         let value = match snake_key {
-            "principal" | "not_principal" => json_to_principal(v),
-            "condition" => json_to_condition(v),
+            "principal" | "not_principal" => json_to_principal(v)?,
+            "condition" => json_to_condition(v)?,
             // `effect` is a StringEnum. Emit the raw AWS-canonical
             // value (`"Allow"`) directly as a plain `String` via the
             // catch-all; carina-core's saved-state lift + the differ's
@@ -647,29 +667,32 @@ fn json_to_policy_statement(json: &serde_json::Value) -> Value {
             // plan-verify churn we normalize scalars to a single-element
             // list (the typical DSL spelling).
             "action" | "not_action" | "resource" | "not_resource" => {
-                json_scalar_to_singleton_list(v)
+                json_scalar_to_singleton_list(v)?
             }
-            _ => json_scalar_or_passthrough_to_value(v),
+            _ => json_scalar_or_passthrough_to_value(v)?,
         };
         map.insert(snake_key.to_string(), value);
     }
-    Value::Concrete(ConcreteValue::Map(map))
+    Ok(Value::Concrete(ConcreteValue::Map(map)))
 }
 
 /// AWS returns `Principal: {"AWS": "*"}` (scalar) for single-element
 /// principals; the DSL schema declares `aws: List<String>`. Wrap the
 /// scalar into a single-element list so post-apply plan-verify does
 /// not see a shape mismatch.
-fn json_scalar_to_singleton_list(v: &serde_json::Value) -> Value {
-    match v {
+fn json_scalar_to_singleton_list(v: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
+    Ok(match v {
         serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
-            items.iter().map(json_scalar_to_value).collect(),
+            items
+                .iter()
+                .map(json_scalar_to_value)
+                .collect::<Result<_, _>>()?,
         )),
-        _ => Value::Concrete(ConcreteValue::List(vec![json_scalar_to_value(v)])),
-    }
+        _ => Value::Concrete(ConcreteValue::List(vec![json_scalar_to_value(v)?])),
+    })
 }
 
-fn json_to_principal(json: &serde_json::Value) -> Value {
+fn json_to_principal(json: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
     match json {
         serde_json::Value::Object(obj) => {
             let mut map = IndexMap::new();
@@ -683,15 +706,15 @@ fn json_to_principal(json: &serde_json::Value) -> Value {
                 // `List<String>` in the schema; normalize scalar JSON
                 // (which AWS returns when there is only one entry)
                 // into a singleton list.
-                map.insert(key.to_string(), json_scalar_to_singleton_list(v));
+                map.insert(key.to_string(), json_scalar_to_singleton_list(v)?);
             }
-            Value::Concrete(ConcreteValue::Map(map))
+            Ok(Value::Concrete(ConcreteValue::Map(map)))
         }
         _ => json_scalar_to_value(json),
     }
 }
 
-fn json_to_condition(json: &serde_json::Value) -> Value {
+fn json_to_condition(json: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
     let serde_json::Value::Object(obj) = json else {
         return json_scalar_to_value(json);
     };
@@ -710,46 +733,57 @@ fn json_to_condition(json: &serde_json::Value) -> Value {
                     if val.is_null() {
                         continue;
                     }
-                    m.insert(var.clone(), json_scalar_or_passthrough_to_value(val));
+                    m.insert(var.clone(), json_scalar_or_passthrough_to_value(val)?);
                 }
                 Value::Concrete(ConcreteValue::Map(m))
             }
-            _ => json_scalar_to_value(kv_value),
+            _ => json_scalar_to_value(kv_value)?,
         };
         map.insert(op_snake, kv);
     }
-    Value::Concrete(ConcreteValue::Map(map))
+    Ok(Value::Concrete(ConcreteValue::Map(map)))
 }
 
-fn json_scalar_or_passthrough_to_value(json: &serde_json::Value) -> Value {
+fn json_scalar_or_passthrough_to_value(
+    json: &serde_json::Value,
+) -> Result<Value, IamPolicyDecodeError> {
     match json {
-        serde_json::Value::Array(items) => Value::Concrete(ConcreteValue::List(
+        serde_json::Value::Array(items) => Ok(Value::Concrete(ConcreteValue::List(
             items
                 .iter()
                 .map(json_scalar_or_passthrough_to_value)
-                .collect(),
-        )),
+                .collect::<Result<_, _>>()?,
+        ))),
         serde_json::Value::Object(obj) => {
             let mut map = IndexMap::new();
             for (k, v) in obj {
-                map.insert(k.clone(), json_scalar_or_passthrough_to_value(v));
+                map.insert(k.clone(), json_scalar_or_passthrough_to_value(v)?);
             }
-            Value::Concrete(ConcreteValue::Map(map))
+            Ok(Value::Concrete(ConcreteValue::Map(map)))
         }
         _ => json_scalar_to_value(json),
     }
 }
 
-fn json_scalar_to_value(json: &serde_json::Value) -> Value {
-    match json {
+fn json_scalar_to_value(json: &serde_json::Value) -> Result<Value, IamPolicyDecodeError> {
+    Ok(match json {
         serde_json::Value::String(s) => Value::Concrete(ConcreteValue::String(s.clone().into())),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Value::Concrete(ConcreteValue::Int(i))
-            } else if let Some(f) = n.as_f64() {
-                Value::Concrete(ConcreteValue::Float(f))
             } else {
-                Value::Concrete(ConcreteValue::String(n.to_string().into()))
+                let raw = match n.as_f64() {
+                    Some(value) => value,
+                    // Reachable only if feature unification enables serde_json's
+                    // arbitrary_precision; keep decoding checked at this trust boundary.
+                    None => n
+                        .to_string()
+                        .parse()
+                        .map_err(IamPolicyDecodeError::Number)?,
+                };
+                let finite = carina_core::FiniteF64::new(raw)
+                    .map_err(IamPolicyDecodeError::NonFiniteFloat)?;
+                Value::Concrete(ConcreteValue::Float(finite))
             }
         }
         serde_json::Value::Bool(b) => Value::Concrete(ConcreteValue::Bool(*b)),
@@ -759,15 +793,115 @@ fn json_scalar_to_value(json: &serde_json::Value) -> Value {
         // null fields as absent.
         serde_json::Value::Null => Value::Concrete(ConcreteValue::String(String::new().into())),
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            json_scalar_or_passthrough_to_value(json)
+            json_scalar_or_passthrough_to_value(json)?
         }
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::provider::ProviderErrorKind;
     use indexmap::IndexMap;
+
+    #[test]
+    fn role_read_policy_url_decode_failure_keeps_its_typed_cause() {
+        use std::error::Error;
+
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        for raw in ["%FF", r#"{"Version":"%FF","Statement":[]}"#] {
+            let error = decode_assume_role_policy_document(&id, Some(raw))
+                .expect_err("invalid percent-encoded UTF-8 must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::UrlDecode(_)));
+            assert!(decode.source().unwrap().is::<std::string::FromUtf8Error>());
+        }
+    }
+
+    #[test]
+    fn role_read_policy_json_failure_keeps_its_typed_cause() {
+        use std::error::Error;
+
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        for raw in [
+            "",
+            "{",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let encoded = urlencoding::encode(raw);
+            let error = decode_assume_role_policy_document(&id, Some(&encoded))
+                .expect_err("a malformed policy must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(decode.source().unwrap().is::<serde_json::Error>());
+        }
+    }
+
+    #[test]
+    fn role_read_policy_preserves_absence_and_decodes_url_encoded_json() {
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        assert_eq!(decode_assume_role_policy_document(&id, None).unwrap(), None);
+        let raw = r#"{"Statement":[]}"#;
+        for policy in [raw.to_string(), urlencoding::encode(raw).into_owned()] {
+            assert_eq!(
+                decode_assume_role_policy_document(&id, Some(&policy)).unwrap(),
+                Some(Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                    "statement".to_string(),
+                    Value::Concrete(ConcreteValue::List(vec![])),
+                )])))),
+            );
+        }
+    }
+
+    #[test]
+    fn policy_json_preserves_finite_float_values() {
+        for (json, expected) in [
+            ("1.5", 1.5_f64),
+            ("-0.0", -0.0_f64),
+            ("1.7976931348623157e308", f64::MAX),
+            ("18446744073709551615", u64::MAX as f64),
+        ] {
+            let value = iam_policy_json_to_value(json).expect("finite JSON number");
+            let Value::Concrete(ConcreteValue::Float(number)) = &value else {
+                panic!("expected a finite float for {json}, got {value:?}");
+            };
+            assert_eq!(number.get().to_bits(), expected.to_bits(), "{json}");
+            assert_eq!(scalar_to_json(&value), serde_json::json!(expected));
+        }
+        assert_eq!(
+            iam_policy_json_to_value("9223372036854775807").unwrap(),
+            Value::Concrete(ConcreteValue::Int(i64::MAX)),
+        );
+    }
+
+    #[test]
+    fn policy_json_rejects_out_of_range_numbers_with_a_typed_source() {
+        use std::error::Error;
+
+        for json in [
+            "1e999",
+            "-1e999",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+        ] {
+            let error = iam_policy_json_to_value(json).expect_err("out-of-range JSON number");
+            assert!(matches!(error, IamPolicyDecodeError::Json(_)));
+            let source = error.source().expect("JSON parse error must be retained");
+            assert!(source.is::<serde_json::Error>());
+        }
+    }
 
     #[test]
     #[should_panic(expected = "unresolved enum identifier must not reach IAM JSON serialization")]

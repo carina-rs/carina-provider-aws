@@ -302,7 +302,7 @@ pub(crate) fn optional_float(
     name: &str,
 ) -> ProviderResult<Option<f64>> {
     match resource.get_attr(name)? {
-        Some(Value::Concrete(ConcreteValue::Float(value))) => Ok(Some(*value)),
+        Some(Value::Concrete(ConcreteValue::Float(value))) => Ok(Some(value.get())),
         None => Ok(None),
         Some(_) => Err(invalid_shape(resource, name, "a floating-point number")),
     }

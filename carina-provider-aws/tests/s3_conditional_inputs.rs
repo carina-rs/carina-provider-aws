@@ -200,7 +200,7 @@ async fn s3_website_redirect_excludes_documents_and_otherwise_needs_index() {
 async fn s3_conditional_rules_defer_unknown_parents_and_leaves() {
     for opaque in [
         Value::resource_ref("peer", "value", vec![]).resolve_root_for_test(),
-        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")))),
+        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")).into())),
     ] {
         for (resource, field) in [
             ("BucketLifecycleConfiguration", "rules"),
@@ -407,7 +407,7 @@ async fn s3_notification_overlap_compares_events_and_both_prefix_and_suffix_acro
     }
     for opaque in [
         Value::resource_ref("peer", "value", vec![]).resolve_root_for_test(),
-        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")))),
+        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")).into())),
     ] {
         for second in [
             notification(opaque.clone(), string("images/"), ".jpg"),

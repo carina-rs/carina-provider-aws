@@ -51,7 +51,7 @@ pub use provider::{
 pub use read_back::{NonEmptyAttributeNames, ReadBackContinuation, ReadBackRequirements};
 #[doc(hidden)]
 #[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
-pub use read_model::non_finite_applied_state_for_protocol_test;
+pub use read_model::out_of_range_duration_applied_state_for_protocol_test;
 #[doc(hidden)]
 #[cfg(debug_assertions)]
 pub use read_model::test_existing_state;

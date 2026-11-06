@@ -139,18 +139,20 @@ pub(crate) fn test_applied_state(
     AppliedState::from_identifier(id, identifier, attributes)
 }
 
-/// Build the deliberately invalid state used to verify protocol-boundary
-/// handling of non-finite provider output without exposing a general raw-map
+/// Build a state with a duration outside the protocol's integer domain to
+/// verify protocol-boundary error handling without exposing a general raw-map
 /// constructor outside this module.
 #[doc(hidden)]
 #[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
-pub fn non_finite_applied_state_for_protocol_test() -> AppliedState {
+pub fn out_of_range_duration_applied_state_for_protocol_test() -> AppliedState {
     AppliedState::from_identifier(
-        ResourceId::with_provider_identity("aws", "test.NonFiniteOutput", "fixture", None),
+        ResourceId::with_provider_identity("aws", "test.OutOfRangeDurationOutput", "fixture", None),
         AppliedIdentifier::new("provider-id").expect("fixture identifier must be non-empty"),
         HashMap::from([(
             "value".to_string(),
-            Value::Concrete(ConcreteValue::Float(f64::NAN)),
+            Value::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                u64::MAX,
+            ))),
         )]),
     )
 }

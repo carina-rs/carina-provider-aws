@@ -3097,7 +3097,9 @@ async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_p
             from.attributes.insert(
                 "domain_name".into(),
                 carina_core::value::redact_secrets_in_value(&Value::Deferred(
-                    carina_core::resource::DeferredValue::Secret(Box::new(string("example.com"))),
+                    carina_core::resource::DeferredValue::Secret(
+                        Box::new(string("example.com")).into(),
+                    ),
                 ))
                 .expect("persisted secret domain name"),
             );
@@ -3414,7 +3416,9 @@ async fn update_read_back_recovers_or_finishes_partial_without_replaying_mutatio
             from.attributes.insert(
                 "domain_name".into(),
                 carina_core::value::redact_secrets_in_value(&Value::Deferred(
-                    carina_core::resource::DeferredValue::Secret(Box::new(string("example.com"))),
+                    carina_core::resource::DeferredValue::Secret(
+                        Box::new(string("example.com")).into(),
+                    ),
                 ))
                 .expect("persisted secret domain name"),
             );

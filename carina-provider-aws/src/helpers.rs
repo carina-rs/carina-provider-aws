@@ -785,7 +785,7 @@ mod tests {
         from.attributes.insert(
             "token".into(),
             carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
-                Box::new(Value::Concrete(ConcreteValue::String("old-secret".into()))),
+                Box::new(Value::Concrete(ConcreteValue::String("old-secret".into()))).into(),
             )))
             .expect("secret fixture should redact"),
         );

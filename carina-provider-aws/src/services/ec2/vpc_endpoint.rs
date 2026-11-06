@@ -17,6 +17,15 @@ use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcEndpointReadModelSupplement;
 use crate::send_models_generated::{Ec2VpcEndpointCreateInput, Ec2VpcEndpointUpdateInput};
 
+fn decode_endpoint_policy(id: &ResourceId, raw: Option<&str>) -> ProviderResult<Option<Value>> {
+    raw.map(crate::services::iam::role::iam_policy_json_to_value)
+        .transpose()
+        .map_err(|error| {
+            ProviderError::api_error_caused_by("Failed to decode endpoint policy", error)
+                .for_resource(id.clone())
+        })
+}
+
 impl AwsProvider {
     /// Read an EC2 VPC Endpoint
     pub(crate) async fn read_ec2_vpc_endpoint(
@@ -43,19 +52,9 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let fields = Self::extract_ec2_vpc_endpoint_attributes(endpoint).map_policy_document(
-                |policy_document| {
-                    policy_document.map(|value| match value {
-                        Value::Concrete(ConcreteValue::String(raw)) => {
-                            crate::services::iam::role::iam_policy_json_to_value(
-                                raw.expose_plaintext(),
-                            )
-                            .unwrap_or(Value::Concrete(ConcreteValue::String(raw)))
-                        }
-                        value => value,
-                    })
-                },
-            );
+            let policy = decode_endpoint_policy(id, endpoint.policy_document())?;
+            let fields =
+                Self::extract_ec2_vpc_endpoint_attributes(endpoint).map_policy_document(|_| policy);
             let empty_list = || Value::Concrete(ConcreteValue::List(Vec::new()));
             let fields = fields
                 .map_route_table_ids(|value| Some(value.unwrap_or_else(empty_list)))
@@ -286,5 +285,46 @@ impl AwsProvider {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::iam::role::IamPolicyDecodeError;
+    use carina_core::provider::ProviderErrorKind;
+    use std::error::Error;
+
+    #[test]
+    fn endpoint_read_policy_decode_failure_keeps_its_typed_cause() {
+        let id = ResourceId::with_provider_identity("aws", "ec2.VpcEndpoint", "test", None);
+        for raw in [
+            "",
+            "{",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let error = decode_endpoint_policy(&id, Some(raw))
+                .expect_err("a malformed policy must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(decode.source().unwrap().is::<serde_json::Error>());
+        }
+    }
+
+    #[test]
+    fn endpoint_read_policy_preserves_absence_and_decodes_json() {
+        let id = ResourceId::with_provider_identity("aws", "ec2.VpcEndpoint", "test", None);
+        assert_eq!(decode_endpoint_policy(&id, None).unwrap(), None);
+        assert_eq!(
+            decode_endpoint_policy(&id, Some("{}")).unwrap(),
+            Some(empty_map_value()),
+        );
     }
 }

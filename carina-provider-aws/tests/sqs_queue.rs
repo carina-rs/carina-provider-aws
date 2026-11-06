@@ -54,7 +54,7 @@ macro_rules! bound_test {
                 }
                 for invalid in [
                     ConcreteValue::String($min.to_string().into()),
-                    ConcreteValue::Float($min as f64),
+                    ConcreteValue::Float(carina_core::FiniteF64::new($min as f64).unwrap()),
                     ConcreteValue::Bool(true),
                 ] {
                     let input: Value = Value::Concrete(invalid);
