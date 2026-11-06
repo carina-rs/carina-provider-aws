@@ -5,8 +5,8 @@ pub mod example;
 mod type_display;
 
 pub use attribute_type::{
-    Bounds, Declaration, DeclarationKind, DocLink, ListConstraints, MapConstraints, NamedKind,
-    Resolved, ScalarDoc, TypeDocHooks, TypeEdge, list_display, map_display, named_display,
+    Bounds, Declaration, DeclarationKind, DocLink, ListConstraints, MapConstraints, Resolved,
+    ScalarDoc, TypeDocHooks, TypeEdge, TypeRegistry, ValidationNote, list_display, map_display,
     render_attribute_type, render_field_groups, scalar_display,
 };
 pub use type_display::TypeDisplay;
@@ -868,3 +868,6 @@ pub fn heading_slug(text: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod type_display_tests;

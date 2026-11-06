@@ -5,11 +5,11 @@ use anyhow::{Context, Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
     AttributeType, DslTransform, FieldGroup, ListElements, PatternAttributeType, PatternForm,
-    RawShape, TypeIdentity, ValidatedConfigSchema,
+    RawShape, StructField, TypeIdentity, ValidatedConfigSchema,
 };
 use carina_docgen::{
     Declaration, DeclarationKind, DocLink, Heading, PageBuilder, Resolved, TypeDocHooks, TypeEdge,
-    render_attribute_type, render_field_groups,
+    TypeRegistry, render_attribute_type, render_field_groups,
 };
 
 struct Hooks<'a, R: PatternForm> {
@@ -72,7 +72,13 @@ impl<'a, R: PatternForm> TypeDocHooks<'a, R> for Hooks<'a, R> {
             DeclarationKind::Enum { identity, .. } => identity.kind.clone(),
             DeclarationKind::Struct { name, .. } => name.to_string(),
             DeclarationKind::Union { .. } => "Choice".into(),
-            DeclarationKind::Recursive => "Loop".into(),
+            DeclarationKind::Recursive => self
+                .defs
+                .iter()
+                .find(|(_, ty)| std::ptr::eq(**ty, declaration.ty))
+                .expect("recursive fixture has a canonical alias")
+                .0
+                .clone(),
         };
         self.declarations.push(declaration);
         Ok(DocLink {
@@ -86,7 +92,13 @@ fn page<'a, R: PatternForm>(
     ty: &'a PatternAttributeType<R>,
     hooks: &mut Hooks<'a, R>,
 ) -> Result<String> {
-    let display = render_attribute_type(ty, &"Root".into(), hooks)?;
+    let display = render_attribute_type(
+        ty,
+        &"Root".into(),
+        hooks,
+        &mut TypeRegistry::default(),
+        None,
+    )?;
     let mut page = PageBuilder::new();
     display.write_to(&mut page);
     page.push_str("\n\n");
@@ -159,6 +171,85 @@ fn recursive_list_through_alias_uses_a_typed_recursive_link() {
         "{markdown}"
     );
     assert_eq!(hooks.declarations.len(), 1);
+}
+
+#[test]
+fn self_referencing_struct_fields_reuse_the_target_across_render_calls() {
+    let ty = AttributeType::struct_(
+        "X",
+        vec![StructField::optional("next", AttributeType::ref_("X")).build()],
+    );
+    let mut hooks = Hooks::default();
+    hooks.defs.insert("X".into(), &ty);
+    let mut page = PageBuilder::new();
+    let mut registry = TypeRegistry::default();
+    render_attribute_type(&ty, &"Root".into(), &mut hooks, &mut registry, None)
+        .unwrap()
+        .write_to(&mut page);
+    page.push_str("\n\n");
+    // The hook only queues definitions. It deliberately has no target cache.
+    let mut index = 0;
+    while index < hooks.declarations.len() {
+        assert!(
+            index < 4,
+            "registration must terminate for a self reference"
+        );
+        let DeclarationKind::Struct { fields, .. } = &hooks.declarations[index].kind else {
+            panic!("struct definition");
+        };
+        let field_type = fields[0].field_type();
+        render_attribute_type(
+            field_type,
+            &"Root.next".into(),
+            &mut hooks,
+            &mut registry,
+            None,
+        )
+        .unwrap()
+        .write_to(&mut page);
+        page.push_str("\n\n");
+        index += 1;
+    }
+    assert_eq!(hooks.declarations.len(), 1);
+    page.target_heading("Root".to_string(), Heading::plain(2, "X"))
+        .unwrap();
+    assert_eq!(
+        page.finish().unwrap(),
+        "[Struct(X)](#x)\n\n[Struct(X)](#x)\n\n## X\n\n"
+    );
+}
+
+#[test]
+fn inline_alias_cycles_keep_recursive_wording_across_render_calls() {
+    let ty = AttributeType::list(AttributeType::ref_("X"));
+    let mut hooks = Hooks::default();
+    hooks.defs.insert("X".into(), &ty);
+    let mut registry = TypeRegistry::default();
+    let mut page = PageBuilder::new();
+    for scope in ["Root", "Other"] {
+        render_attribute_type(&ty, &scope.into(), &mut hooks, &mut registry, None)
+            .unwrap()
+            .write_to(&mut page);
+        page.push_str("\n\n");
+    }
+    assert_eq!(hooks.declarations.len(), 1);
+    page.target_heading("Root[]".to_string(), Heading::plain(2, "X"))
+        .unwrap();
+    assert_eq!(
+        page.finish().unwrap(),
+        "List\\<[Recursive type (X)](#x)\\> (ordered)\n\n".repeat(2) + "## X\n\n"
+    );
+}
+
+#[test]
+fn numeric_ranges_without_bounds_are_not_constraints() {
+    for ty in [
+        AttributeType::refined_int(None, Some((None, None))),
+        AttributeType::refined_float(None, Some((None, None))),
+    ] {
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        assert!(!markdown.contains("range:"), "{markdown}");
+    }
 }
 
 #[test]
@@ -313,7 +404,7 @@ fn enum_registration_preserves_closed_values_base_aliases_validator_and_transfor
     };
     assert_eq!(identity.kind, "E");
     assert!(matches!(base.raw_shape(), RawShape::Int { .. }));
-    assert_eq!(*values, Some(["a-b".to_string()].as_slice()));
+    assert_eq!(*values, ["a-b".to_string()].as_slice());
     assert_eq!(dsl_aliases[0], ("a-b".into(), "a_b".into()));
     assert!(validate.is_some());
     assert_eq!(*to_dsl, Some(&transform));

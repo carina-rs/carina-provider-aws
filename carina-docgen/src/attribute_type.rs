@@ -1,10 +1,10 @@
 //! Provider-independent attribute type wording and exhaustive shape traversal.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
     CustomValidator, DslTransform, FieldGroup, FieldGroupKind, ListElements, PatternAttributeType,
@@ -22,6 +22,7 @@ pub struct Resolved<'a, R: PatternForm, N> {
 }
 
 /// A provider-owned target and an unprefixed, literal label (never Markdown).
+#[derive(Clone)]
 pub struct DocLink<K> {
     pub target: K,
     pub label: String,
@@ -42,7 +43,7 @@ pub enum DeclarationKind<'a, R: PatternForm> {
     Enum {
         identity: &'a TypeIdentity,
         base: &'a PatternAttributeType<R>,
-        values: Option<&'a [String]>,
+        values: &'a [String],
         dsl_aliases: &'a [(String, String)],
         validate: Option<&'a CustomValidator>,
         to_dsl: Option<&'a DslTransform>,
@@ -74,9 +75,9 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
     fn resolve(&self, ty: &'a PatternAttributeType<R>) -> Result<Resolved<'a, R, Self::NodeId>>;
     fn scalar_name(&self, identity: &TypeIdentity) -> String;
     fn child_scope(&self, parent: &Self::Scope, edge: TypeEdge<'_>) -> Self::Scope;
-    /// Reserve a target before processing its children. Implementations may
-    /// queue declarations or render them immediately after reserving the target.
-    /// Repeated registration must reuse the declaration's existing target.
+    /// Reserve a target and queue its declaration. The page registry caches the
+    /// returned link before the caller renders the queued declaration's children.
+    /// The page registry calls this hook at most once per canonical NodeId.
     fn register(
         &mut self,
         scope: &Self::Scope,
@@ -85,21 +86,23 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
 }
 
 /// Semantic scalar data shared by schema trees and discovery-only providers.
+/// `name: None` selects the variant's builtin name; `Some` names a declared
+/// identity. Providers never supply builtin spelling.
 pub enum ScalarDoc<'a> {
     String {
-        name: &'a str,
+        name: Option<&'a str>,
         pattern: Option<&'a str>,
         length: Bounds<u64>,
         validate: bool,
         to_dsl: Option<&'a DslTransform>,
     },
     Int {
-        name: &'a str,
+        name: Option<&'a str>,
         range: Bounds<i64>,
         validate: bool,
     },
     Float {
-        name: &'a str,
+        name: Option<&'a str>,
         range: Bounds<FiniteF64>,
         validate: bool,
     },
@@ -136,14 +139,32 @@ impl From<carina_core::schema::MapConstraints> for MapConstraints {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum NamedKind {
+enum NamedKind {
     Enum,
     Struct,
     Union,
     Recursive,
 }
 
-pub fn scalar_display<K>(scalar: ScalarDoc<'_>) -> TypeDisplay<K> {
+/// Supplemental provider validation prose. Shared compositors own its placement
+/// and literal escaping; it cannot be appended to an arbitrary type display.
+#[derive(Clone, Copy, Debug)]
+pub struct ValidationNote<'a>(&'a str);
+
+impl<'a> ValidationNote<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self(text)
+    }
+
+    pub(crate) fn text(self) -> &'a str {
+        self.0
+    }
+}
+
+pub fn scalar_display<K>(
+    scalar: ScalarDoc<'_>,
+    note: Option<ValidationNote<'_>>,
+) -> TypeDisplay<K> {
     let (name, constraints) = match scalar {
         ScalarDoc::String {
             name,
@@ -159,18 +180,18 @@ pub fn scalar_display<K>(scalar: ScalarDoc<'_>) -> TypeDisplay<K> {
             if let Some(transform) = to_dsl {
                 constraints.push(format!("DSL transform: {transform:?}"));
             }
-            (name, constraints)
+            (name.unwrap_or("String"), constraints)
         }
         ScalarDoc::Int {
             name,
             range,
             validate,
-        } => (name, number_constraints(range, validate)),
+        } => (name.unwrap_or("Int"), number_constraints(range, validate)),
         ScalarDoc::Float {
             name,
             range,
             validate,
-        } => (name, number_constraints(range, validate)),
+        } => (name.unwrap_or("Float"), number_constraints(range, validate)),
         ScalarDoc::Bool => ("Bool", Vec::new()),
         ScalarDoc::Duration => ("Duration", Vec::new()),
     };
@@ -179,12 +200,14 @@ pub fn scalar_display<K>(scalar: ScalarDoc<'_>) -> TypeDisplay<K> {
     } else {
         format!("{name} ({})", constraints.join(", "))
     })
+    .with_note(note)
 }
 
 pub fn list_display<K>(
     item: TypeDisplay<K>,
     ordered: bool,
     constraints: ListConstraints,
+    note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
     let mut refinements = Vec::new();
     if let Some(length) = constraints.length {
@@ -199,12 +222,14 @@ pub fn list_display<K>(
         item,
         TypeDisplay::text(format!("> ({})", refinements.join(", "))),
     ])
+    .with_note(note)
 }
 
 pub fn map_display<K>(
     key: TypeDisplay<K>,
     value: TypeDisplay<K>,
     constraints: MapConstraints,
+    note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
     let map = TypeDisplay::sequence([
         TypeDisplay::text("Map<"),
@@ -213,23 +238,81 @@ pub fn map_display<K>(
         value,
         TypeDisplay::text(">"),
     ]);
-    match constraints.length {
+    let display = match constraints.length {
         Some(length) => TypeDisplay::sequence([
             map,
             TypeDisplay::text(format!(" (entries: {})", bounds(length))),
         ]),
         None => map,
+    };
+    display.with_note(note)
+}
+
+#[derive(Clone)]
+struct RegisteredLink<K> {
+    kind: NamedKind,
+    link: DocLink<K>,
+}
+
+fn named_display<K>(registered: RegisteredLink<K>) -> TypeDisplay<K> {
+    let DocLink { target, label } = registered.link;
+    let label = match registered.kind {
+        NamedKind::Enum => label,
+        NamedKind::Struct => format!("Struct({label})"),
+        NamedKind::Union => format!("Union({label})"),
+        NamedKind::Recursive => format!("Recursive type ({label})"),
+    };
+    TypeDisplay::link(target, label)
+}
+
+/// Declaration registration state for one page. Keep this registry for every
+/// render call on that page, including calls made to render declaration fields.
+/// Node IDs must remain canonical and must not be reused for different nodes.
+///
+/// The registry fixes each link's wording from the declaration kind passed to
+/// the hook and memoizes it before any queued children are rendered. Providers
+/// cannot select a different kind when reusing a registered target.
+/// Named wording cannot be selected separately from its declaration:
+///
+/// ```compile_fail
+/// use carina_docgen::{NamedKind, named_display};
+/// ```
+pub struct TypeRegistry<N, K> {
+    links: HashMap<N, RegisteredLink<K>>,
+}
+
+impl<N, K> Default for TypeRegistry<N, K> {
+    fn default() -> Self {
+        Self {
+            links: HashMap::new(),
+        }
     }
 }
 
-pub fn named_display<K>(kind: NamedKind, link: DocLink<K>) -> TypeDisplay<K> {
-    let label = match kind {
-        NamedKind::Enum => link.label,
-        NamedKind::Struct => format!("Struct({})", link.label),
-        NamedKind::Union => format!("Union({})", link.label),
-        NamedKind::Recursive => format!("Recursive type ({})", link.label),
-    };
-    TypeDisplay::link(link.target, label)
+impl<N: Clone + Eq + Hash, K: Clone> TypeRegistry<N, K> {
+    fn register<'a, R: PatternForm, H: TypeDocHooks<'a, R, NodeId = N, Target = K>>(
+        &mut self,
+        scope: &H::Scope,
+        declaration: Declaration<'a, R, N>,
+        hooks: &mut H,
+    ) -> Result<TypeDisplay<K>> {
+        if let Some(link) = self.links.get(&declaration.id) {
+            return Ok(named_display(link.clone()));
+        }
+        let kind = match &declaration.kind {
+            DeclarationKind::Enum { .. } => NamedKind::Enum,
+            DeclarationKind::Struct { .. } => NamedKind::Struct,
+            DeclarationKind::Union { .. } => NamedKind::Union,
+            DeclarationKind::Recursive => NamedKind::Recursive,
+        };
+        let id = declaration.id.clone();
+        let link = RegisteredLink {
+            kind,
+            link: hooks.register(scope, declaration)?,
+        };
+        self.links.insert(id, link.clone());
+        Ok(named_display(link))
+    }
 }
 
 /// Compose a type description without rendering any Markdown. Closed enums
@@ -239,29 +322,30 @@ pub fn render_attribute_type<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
     scope: &H::Scope,
     hooks: &mut H,
+    registry: &mut TypeRegistry<H::NodeId, H::Target>,
+    note: Option<ValidationNote<'_>>,
 ) -> Result<TypeDisplay<H::Target>> {
-    walk(ty, scope, hooks, &mut HashSet::new())
+    Ok(walk(ty, scope, hooks, registry, &mut HashSet::new())?.with_note(note))
 }
 
 fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
     scope: &H::Scope,
     hooks: &mut H,
+    registry: &mut TypeRegistry<H::NodeId, H::Target>,
     active: &mut HashSet<H::NodeId>,
 ) -> Result<TypeDisplay<H::Target>> {
     let Resolved { id, ty } = hooks.resolve(ty)?;
     if active.contains(&id) {
-        return Ok(named_display(
-            NamedKind::Recursive,
-            hooks.register(
-                scope,
-                Declaration {
-                    id,
-                    ty,
-                    kind: DeclarationKind::Recursive,
-                },
-            )?,
-        ));
+        return registry.register(
+            scope,
+            Declaration {
+                id,
+                ty,
+                kind: DeclarationKind::Recursive,
+            },
+            hooks,
+        );
     }
     if active.len() >= 64 {
         bail!("type nesting exceeds documentation limit (64)");
@@ -273,52 +357,64 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             identity,
             pattern,
             length,
-        } => scalar_display(ScalarDoc::String {
-            name: &hooks.scalar_name(identity),
-            pattern,
-            length,
-            validate: false,
-            to_dsl: None,
-        }),
+        } => scalar_display(
+            ScalarDoc::String {
+                name: Some(&hooks.scalar_name(identity)),
+                pattern,
+                length,
+                validate: false,
+                to_dsl: None,
+            },
+            None,
+        ),
         RawShape::String {
             identity,
             pattern,
             length,
             validate,
             to_dsl,
-        } => scalar_display(ScalarDoc::String {
-            name: &identity
-                .map(|identity| hooks.scalar_name(identity))
-                .unwrap_or_else(|| "String".into()),
-            pattern,
-            length,
-            validate: validate.is_some(),
-            to_dsl,
-        }),
+        } => scalar_display(
+            ScalarDoc::String {
+                name: identity
+                    .map(|identity| hooks.scalar_name(identity))
+                    .as_deref(),
+                pattern,
+                length,
+                validate: validate.is_some(),
+                to_dsl,
+            },
+            None,
+        ),
         RawShape::Int {
             identity,
             range,
             validate,
-        } => scalar_display(ScalarDoc::Int {
-            name: &identity
-                .map(|identity| hooks.scalar_name(identity))
-                .unwrap_or_else(|| "Int".into()),
-            range,
-            validate: validate.is_some(),
-        }),
+        } => scalar_display(
+            ScalarDoc::Int {
+                name: identity
+                    .map(|identity| hooks.scalar_name(identity))
+                    .as_deref(),
+                range,
+                validate: validate.is_some(),
+            },
+            None,
+        ),
         RawShape::Float {
             identity,
             range,
             validate,
-        } => scalar_display(ScalarDoc::Float {
-            name: &identity
-                .map(|identity| hooks.scalar_name(identity))
-                .unwrap_or_else(|| "Float".into()),
-            range,
-            validate: validate.is_some(),
-        }),
-        RawShape::Bool => scalar_display(ScalarDoc::Bool),
-        RawShape::Duration => scalar_display(ScalarDoc::Duration),
+        } => scalar_display(
+            ScalarDoc::Float {
+                name: identity
+                    .map(|identity| hooks.scalar_name(identity))
+                    .as_deref(),
+                range,
+                validate: validate.is_some(),
+            },
+            None,
+        ),
+        RawShape::Bool => scalar_display(ScalarDoc::Bool, None),
+        RawShape::Duration => scalar_display(ScalarDoc::Duration, None),
         RawShape::Enum {
             identity,
             base,
@@ -328,55 +424,49 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             to_dsl,
         } => match values {
             None => TypeDisplay::code(hooks.scalar_name(identity)),
-            Some(values) => named_display(
-                NamedKind::Enum,
-                hooks.register(
-                    scope,
-                    Declaration {
-                        id: id.clone(),
-                        ty,
-                        kind: DeclarationKind::Enum {
-                            identity,
-                            base,
-                            values: Some(values),
-                            dsl_aliases,
-                            validate,
-                            to_dsl,
-                        },
+            Some(values) => registry.register(
+                scope,
+                Declaration {
+                    id: id.clone(),
+                    ty,
+                    kind: DeclarationKind::Enum {
+                        identity,
+                        base,
+                        values,
+                        dsl_aliases,
+                        validate,
+                        to_dsl,
                     },
-                )?,
-            ),
+                },
+                hooks,
+            )?,
         },
         RawShape::Struct {
             name,
             fields,
             field_groups,
-        } => named_display(
-            NamedKind::Struct,
-            hooks.register(
-                scope,
-                Declaration {
-                    id: id.clone(),
-                    ty,
-                    kind: DeclarationKind::Struct {
-                        name,
-                        fields,
-                        field_groups,
-                    },
+        } => registry.register(
+            scope,
+            Declaration {
+                id: id.clone(),
+                ty,
+                kind: DeclarationKind::Struct {
+                    name,
+                    fields,
+                    field_groups,
                 },
-            )?,
-        ),
-        RawShape::Union(members) => named_display(
-            NamedKind::Union,
-            hooks.register(
-                scope,
-                Declaration {
-                    id: id.clone(),
-                    ty,
-                    kind: DeclarationKind::Union { members },
-                },
-            )?,
-        ),
+            },
+            hooks,
+        )?,
+        RawShape::Union(members) => registry.register(
+            scope,
+            Declaration {
+                id: id.clone(),
+                ty,
+                kind: DeclarationKind::Union { members },
+            },
+            hooks,
+        )?,
         RawShape::List {
             element_type,
             ordered,
@@ -384,9 +474,10 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
         } => {
             let child = hooks.child_scope(scope, TypeEdge::Item);
             list_display(
-                walk(element_type, &child, hooks, active)?,
+                walk(element_type, &child, hooks, registry, active)?,
                 ordered,
                 constraints.into(),
+                None,
             )
         }
         RawShape::Map {
@@ -397,9 +488,10 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             let key_scope = hooks.child_scope(scope, TypeEdge::Key);
             let value_scope = hooks.child_scope(scope, TypeEdge::Value);
             map_display(
-                walk(key, &key_scope, hooks, active)?,
-                walk(value, &value_scope, hooks, active)?,
+                walk(key, &key_scope, hooks, registry, active)?,
+                walk(value, &value_scope, hooks, registry, active)?,
                 constraints.into(),
+                None,
             )
         }
         RawShape::UnloadedSchemaType(unloaded) => bail!("unloaded schema type: {unloaded:?}"),
@@ -458,7 +550,7 @@ fn string_constraints(pattern: Option<&str>, length: Bounds<u64>) -> Vec<String>
 
 fn number_constraints<T: Display>(range: Bounds<T>, validate: bool) -> Vec<String> {
     let mut constraints = Vec::new();
-    if let Some(range) = range {
+    if let Some(range) = range.filter(|(min, max)| min.is_some() || max.is_some()) {
         constraints.push(format!("range: {}", bounds(range)));
     }
     if validate {
@@ -513,8 +605,7 @@ pub(crate) fn code_span(literal: &str, table: bool) -> Result<String> {
         };
     }
     markdown.push_str(&span(&code));
-    crate::check_page(&markdown)
-        .with_context(|| format!("literal {literal:?} rejected by carina-docgen"))?;
+    crate::check_page(&markdown)?;
     Ok(markdown)
 }
 

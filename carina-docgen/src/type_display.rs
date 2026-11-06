@@ -11,9 +11,29 @@ use crate::{PageBuilder, TableCell};
 /// Displays cannot be interpolated into already-rendered Markdown:
 ///
 /// ```compile_fail
-/// use carina_docgen::TypeDisplay;
-/// let link = TypeDisplay::link((), "Struct(X)");
-/// let wrapped = format!("`List<{}>`", link);
+/// use carina_docgen::{ScalarDoc, TypeDisplay, scalar_display};
+/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, None);
+/// let wrapped = format!("`List<{}>`", display);
+/// ```
+///
+/// Providers can create displays only through shared semantic compositors:
+///
+/// ```compile_fail
+/// carina_docgen::TypeDisplay::<()>::text("provider wording");
+/// ```
+/// ```compile_fail
+/// carina_docgen::TypeDisplay::<()>::code("provider wording");
+/// ```
+/// ```compile_fail
+/// carina_docgen::TypeDisplay::link((), "Enum(X)");
+/// ```
+/// ```compile_fail
+/// carina_docgen::TypeDisplay::<()>::sequence([]);
+/// ```
+/// ```compile_fail
+/// use carina_docgen::{ScalarDoc, TypeDisplay, scalar_display};
+/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, None);
+/// display.with_note(None);
 /// ```
 #[derive(Clone, Debug)]
 pub struct TypeDisplay<K> {
@@ -31,7 +51,7 @@ enum DisplayKind<K> {
 
 impl<K> TypeDisplay<K> {
     /// Write literal text, escaping inline Markdown syntax when rendered.
-    pub fn text(literal: impl Into<String>) -> Self {
+    pub(crate) fn text(literal: impl Into<String>) -> Self {
         Self {
             kind: DisplayKind::Text(literal.into()),
             note: None,
@@ -40,21 +60,14 @@ impl<K> TypeDisplay<K> {
 
     /// Style literal text as code, choosing delimiters that preserve backticks.
     ///
-    /// A link display cannot be passed to this literal constructor:
-    ///
-    /// ```compile_fail
-    /// use carina_docgen::TypeDisplay;
-    /// let link = TypeDisplay::link((), "Struct(X)");
-    /// let code = TypeDisplay::<()>::code(link);
-    /// ```
-    pub fn code(literal: impl Into<String>) -> Self {
+    pub(crate) fn code(literal: impl Into<String>) -> Self {
         Self {
             kind: DisplayKind::Code(literal.into()),
             note: None,
         }
     }
 
-    pub fn link(target: K, label: impl Into<String>) -> Self {
+    pub(crate) fn link(target: K, label: impl Into<String>) -> Self {
         Self {
             kind: DisplayKind::Link {
                 target,
@@ -66,7 +79,7 @@ impl<K> TypeDisplay<K> {
 
     /// Compose inline parts. The page writer coalesces consecutive code literals
     /// before choosing delimiters, including across nested sequences.
-    pub fn sequence(parts: impl IntoIterator<Item = Self>) -> Self {
+    pub(crate) fn sequence(parts: impl IntoIterator<Item = Self>) -> Self {
         Self {
             kind: DisplayKind::Sequence(parts.into_iter().collect()),
             note: None,
@@ -75,8 +88,8 @@ impl<K> TypeDisplay<K> {
 
     /// Attach supplemental validation information as literal text. The shared
     /// renderer owns its suffix and Markdown escaping in every type position.
-    pub fn with_note(mut self, note: Option<String>) -> Self {
-        self.note = note;
+    pub(crate) fn with_note(mut self, note: Option<crate::ValidationNote<'_>>) -> Self {
+        self.note = note.map(|note| note.text().to_owned());
         self
     }
 }
