@@ -205,7 +205,16 @@ fn scalar_display_with_name<K>(
     name: Option<String>,
     note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
-    let (builtin_name, constraints) = match scalar {
+    scalar_display_with_constraints(scalar, name, Vec::new(), note)
+}
+
+fn scalar_display_with_constraints<K>(
+    scalar: ScalarDoc<'_>,
+    name: Option<String>,
+    mut constraints: Vec<String>,
+    note: Option<ValidationNote<'_>>,
+) -> TypeDisplay<K> {
+    let (builtin_name, refinements) = match scalar {
         ScalarDoc::String {
             pattern,
             length,
@@ -226,6 +235,7 @@ fn scalar_display_with_name<K>(
         ScalarDoc::Bool => ("Bool", Vec::new()),
         ScalarDoc::Duration => ("Duration", Vec::new()),
     };
+    constraints.extend(refinements);
     let name = name.unwrap_or_else(|| builtin_name.to_string());
     TypeDisplay::code(if constraints.is_empty() {
         name
@@ -348,7 +358,8 @@ impl<N: Clone + Eq + Hash, K: Clone> TypeRegistry<N, K> {
 }
 
 /// Compose a type description without rendering any Markdown. Closed enums
-/// and compound declarations register definitions; open enums use scalar names.
+/// and compound declarations register definitions; open enums use scalar names
+/// and constraints.
 /// Inline nodes recurse here with a shared active set.
 pub fn render_attribute_type<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
@@ -449,7 +460,77 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             validate,
             to_dsl,
         } => match values {
-            None => TypeDisplay::code(hooks.scalar_name(identity)),
+            None => {
+                let constraints = match base.raw_shape() {
+                    // The enum owns the name, validator, and DSL transform;
+                    // its base contributes only structural refinements.
+                    RawShape::String {
+                        identity: _,
+                        pattern,
+                        length,
+                        validate: _,
+                        to_dsl: _,
+                    }
+                    | RawShape::Reference {
+                        identity: _,
+                        pattern,
+                        length,
+                    } => string_constraints(pattern, length),
+                    RawShape::Int {
+                        identity: _,
+                        range,
+                        validate: _,
+                    } => number_constraints(range, false),
+                    RawShape::Float {
+                        identity: _,
+                        range,
+                        validate: _,
+                    } => number_constraints(range, false),
+                    // Bool/Duration are not refinable scalars in schema admission.
+                    // Unsupported bases are rejected without rendering their metadata.
+                    RawShape::Bool
+                    | RawShape::Duration
+                    | RawShape::Struct {
+                        name: _,
+                        fields: _,
+                        field_groups: _,
+                    }
+                    | RawShape::List {
+                        element_type: _,
+                        ordered: _,
+                        constraints: _,
+                    }
+                    | RawShape::Map {
+                        key: _,
+                        value: _,
+                        constraints: _,
+                    }
+                    | RawShape::Union(_)
+                    | RawShape::Enum {
+                        identity: _,
+                        base: _,
+                        values: _,
+                        dsl_aliases: _,
+                        validate: _,
+                        to_dsl: _,
+                    }
+                    | RawShape::Ref(_)
+                    | RawShape::UnloadedSchemaType(_) => bail!(
+                        "open enum `{identity}` must have a direct String, Reference, Int, or Float base"
+                    ),
+                };
+                scalar_display_with_constraints(
+                    ScalarDoc::String {
+                        pattern: None,
+                        length: None,
+                        validate: validate.is_some(),
+                        to_dsl,
+                    },
+                    Some(hooks.scalar_name(identity)),
+                    constraints,
+                    None,
+                )
+            }
             Some(values) => registry.register(
                 scope,
                 Declaration {

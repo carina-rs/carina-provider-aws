@@ -10757,10 +10757,18 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown.contains("List\\<`ZoneName`\\> (unordered)"),
+            markdown.contains(
+                "List\\<`ZoneName (custom validator, DSL transform: HyphenToUnderscore)`\\> (unordered)"
+            ),
             "{markdown}"
         );
-        assert_eq!(markdown.matches("`ZoneName`").count(), 2, "{markdown}");
+        assert_eq!(
+            markdown
+                .matches("`ZoneName (custom validator, DSL transform: HyphenToUnderscore)`")
+                .count(),
+            2,
+            "{markdown}"
+        );
         let ids = carina_docgen::heading_ids(&markdown);
         assert!(ids.iter().any(|id| id == "names"));
         assert!(ids.iter().any(|id| id == "names-1"));
