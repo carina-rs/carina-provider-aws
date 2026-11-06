@@ -278,6 +278,14 @@ fn unpack_attr(raw: &str, kind: AttrKind) -> Result<Option<Value>, IamPolicyDeco
     })
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("failed to decode SQS queue attribute {attribute}", attribute = .attribute.as_str())]
+struct SqsAttributeDecodeError {
+    attribute: QueueAttributeName,
+    #[source]
+    source: IamPolicyDecodeError,
+}
+
 fn queue_attribute(
     id: &ResourceId,
     attributes: Option<&HashMap<QueueAttributeName, String>>,
@@ -289,9 +297,15 @@ fn queue_attribute(
         .map(|raw| unpack_attr(raw, kind))
         .transpose()
         .map(Option::flatten)
-        .map_err(|error| {
-            ProviderError::api_error_caused_by("Failed to decode SQS queue attribute Policy", error)
-                .for_resource(id.clone())
+        .map_err(|source| {
+            ProviderError::api_error_caused_by(
+                "Failed to decode SQS queue attribute",
+                SqsAttributeDecodeError {
+                    attribute: key.clone(),
+                    source,
+                },
+            )
+            .for_resource(id.clone())
         })
 }
 
@@ -1281,14 +1295,24 @@ mod tests {
             .expect_err("an invalid policy must fail the read");
             assert_eq!(
                 error.detail().context(),
-                "Failed to decode SQS queue attribute Policy"
+                "Failed to decode SQS queue attribute"
             );
             let cause = error.detail().cause().expect("policy decode cause");
             let decode = cause
+                .downcast_ref::<SqsAttributeDecodeError>()
+                .expect("typed SQS attribute decode error");
+            assert_eq!(decode.attribute, QueueAttributeName::Policy);
+            assert_eq!(
+                decode.to_string(),
+                "failed to decode SQS queue attribute Policy"
+            );
+            let policy_decode = decode
+                .source()
+                .expect("policy decode source")
                 .downcast_ref::<IamPolicyDecodeError>()
                 .expect("typed policy decode error");
-            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
-            assert!(decode.source().unwrap().is::<serde_json::Error>());
+            assert!(matches!(policy_decode, IamPolicyDecodeError::Json(_)));
+            assert!(policy_decode.source().unwrap().is::<serde_json::Error>());
         }
     }
 
