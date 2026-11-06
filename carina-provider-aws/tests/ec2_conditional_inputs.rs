@@ -196,7 +196,7 @@ async fn ec2_rules_preserve_and_defer_unknown_secrets_references_and_nested_pare
     let reference = Value::resource_ref("peer", "attribute", vec![]).resolve_root_for_test();
     for unknown in [
         reference,
-        Value::Deferred(DeferredValue::Secret(Box::new(string("unresolved")))),
+        Value::Deferred(DeferredValue::Secret(Box::new(string("unresolved")).into())),
     ] {
         let mut attrs = flow(unknown.clone());
         attrs.push(("max_aggregation_interval", int(600)));

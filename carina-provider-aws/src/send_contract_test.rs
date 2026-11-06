@@ -10,6 +10,7 @@ use std::str;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use carina_core::FiniteF64;
 use carina_core::provider::{
     AppliedIdentifier, Observation, PatchOp, ProviderError, Sent, UpdatePatch,
 };
@@ -26,6 +27,10 @@ use crate::send_models_generated::{SendCaptureAttribute, SendCaptureContract};
 use crate::{AwsProvider, BoundedSdkConfig};
 
 const REGION: &str = "us-east-1";
+
+fn finite(value: f64) -> FiniteF64 {
+    FiniteF64::new(value).expect("finite test value")
+}
 
 #[test]
 fn every_managed_resource_has_a_generated_capture_contract() {
@@ -552,9 +557,13 @@ fn sample_value(
             Value::Concrete(ConcreteValue::Int(preferred.clamp(minimum, maximum)))
         }
         Shape::Float { range, .. } => {
-            let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1.0);
-            let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(f64::MAX);
-            Value::Concrete(ConcreteValue::Float(1.0_f64.clamp(minimum, maximum)))
+            let minimum = range
+                .and_then(|(minimum, _)| minimum)
+                .unwrap_or_else(|| finite(1.0));
+            let maximum = range
+                .and_then(|(_, maximum)| maximum)
+                .unwrap_or_else(|| finite(f64::MAX));
+            Value::Concrete(ConcreteValue::Float(finite(1.0).clamp(minimum, maximum)))
         }
         Shape::Bool => Value::Concrete(ConcreteValue::Bool(
             path.last()
@@ -1468,9 +1477,9 @@ fn nested_integer_preflight_preserves_long_values_and_deferred_fields() {
                         "expiration".into(),
                         Value::Concrete(ConcreteValue::Map(IndexMap::from([(
                             "days".into(),
-                            Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
-                                ConcreteValue::Int(i64::MAX),
-                            )))),
+                            Value::Deferred(DeferredValue::Secret(
+                                Box::new(Value::Concrete(ConcreteValue::Int(i64::MAX))).into(),
+                            )),
                         )]))),
                     ),
                 ])),
@@ -1737,7 +1746,7 @@ async fn sqs_tags_only_update_preserves_unconsumed_fifo_secret_hashes() {
         from.attributes.insert(
             attribute.into(),
             carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
-                Box::new(resource.get_attr(attribute).unwrap().clone()),
+                Box::new(resource.get_attr(attribute).unwrap().clone()).into(),
             )))
             .expect("FIFO create-only secret should persist as a hash"),
         );
@@ -1796,9 +1805,9 @@ async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_
 
     for fifo in [
         Value::resource_ref("settings", "fifo_queue", vec![]).resolve_root_for_test(),
-        Value::Deferred(DeferredValue::Secret(Box::new(Value::Concrete(
-            ConcreteValue::Bool(false),
-        )))),
+        Value::Deferred(DeferredValue::Secret(
+            Box::new(Value::Concrete(ConcreteValue::Bool(false))).into(),
+        )),
     ] {
         let desired = Resource::with_provider("aws", "sqs.Queue", "resolved-queue", None)
             .with_attribute("queue_name", string("resolved-queue"))
@@ -1916,7 +1925,8 @@ async fn acm_tag_update_does_not_restore_outputs_omitted_by_final_read_back() {
             Box::new(Value::Concrete(ConcreteValue::Map(IndexMap::from([(
                 "certificate_transparency_logging_preference".into(),
                 string("ENABLED"),
-            )])))),
+            )]))))
+            .into(),
         )))
         .expect("persisted create-only options");
     from.attributes
@@ -2011,7 +2021,7 @@ async fn organizations_account_tag_update_preserves_unused_secret_role_snapshot(
     )
     .to_snapshot();
     let role_snapshot = carina_core::value::redact_secrets_in_value(&Value::Deferred(
-        DeferredValue::Secret(Box::new(string("Role"))),
+        DeferredValue::Secret(Box::new(string("Role")).into()),
     ))
     .expect("persisted secret role name");
     from.attributes

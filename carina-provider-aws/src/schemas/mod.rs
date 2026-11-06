@@ -569,7 +569,11 @@ mod tests {
             Shape::List { element_type, .. } => {
                 collect_enum_identities(element_type, &format!("{path}[]"), identities)
             }
-            Shape::Map { key, value } => {
+            Shape::Map {
+                key,
+                value,
+                constraints: _,
+            } => {
                 collect_enum_identities(key, &format!("{path}.<key>"), identities);
                 collect_enum_identities(value, &format!("{path}.<value>"), identities);
             }

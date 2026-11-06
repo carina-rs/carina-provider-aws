@@ -490,7 +490,7 @@ mod tests {
     }
 
     fn secret(value: Value) -> Value {
-        Value::Deferred(DeferredValue::Secret(Box::new(value)))
+        Value::Deferred(DeferredValue::Secret(Box::new(value).into()))
     }
 
     fn reference(attribute: &str) -> Value {

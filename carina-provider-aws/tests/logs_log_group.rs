@@ -157,7 +157,7 @@ fn logs_log_group_retention_accepts_only_documented_integers() {
     }
     for invalid in [
         ConcreteValue::String("30".into()),
-        ConcreteValue::Float(30.0),
+        ConcreteValue::Float(carina_core::FiniteF64::new(30.0).unwrap()),
         ConcreteValue::Bool(true),
     ] {
         let value: Value = Value::Concrete(invalid);

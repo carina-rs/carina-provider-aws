@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use carina_aws_types::{AwsType, elbv2_target_group_grpc_code, elbv2_target_group_http_code};
+use carina_core::provider::CustomTypeDispatchError;
 use carina_core::schema::{
     AssignabilityEdge, AttributeSchema, ReferenceForms, ResourceSchema, ValidatedConfigSchema,
     ValidatedResourceSchema,
@@ -177,12 +178,15 @@ fn assert_dispatch(
     for text in invalid {
         let error = dispatch_custom_type_validation(cache, &wire_identity, text)
             .expect_err("invalid matcher codes must fail SDK dispatch");
+        let CustomTypeDispatchError::Validation(message) = error else {
+            panic!("{text:?}: expected a validation error, got {error:?}");
+        };
         assert!(
-            error.contains("comma-separated items N or N-N"),
-            "{text:?}: {error}"
+            message.contains("comma-separated items N or N-N"),
+            "{text:?}: {message}"
         );
-        assert!(error.contains(range), "{text:?}: {error}");
-        assert!(error.contains("no leading zeros"), "{text:?}: {error}");
+        assert!(message.contains(range), "{text:?}: {message}");
+        assert!(message.contains("no leading zeros"), "{text:?}: {message}");
     }
 }
 

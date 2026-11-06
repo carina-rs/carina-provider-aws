@@ -532,7 +532,7 @@ async fn route53_aliases_accept_aws_endpoints_and_validate_decoded_dns_names() {
 async fn route53_unknown_and_deferred_leaves_remain_opaque() {
     for opaque in [
         Value::resource_ref("peer", "value", vec![]).resolve_root_for_test(),
-        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")))),
+        Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")).into())),
     ] {
         normalize(record("A", &["not-yet-typed-rdata"]).with_attribute("type", opaque.clone()))
             .await

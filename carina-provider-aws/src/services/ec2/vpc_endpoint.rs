@@ -43,19 +43,16 @@ impl AwsProvider {
                 return Ok(ReadOutcome::not_found(id.clone()));
             }
 
-            let fields = Self::extract_ec2_vpc_endpoint_attributes(endpoint).map_policy_document(
-                |policy_document| {
-                    policy_document.map(|value| match value {
-                        Value::Concrete(ConcreteValue::String(raw)) => {
-                            crate::services::iam::role::iam_policy_json_to_value(
-                                raw.expose_plaintext(),
-                            )
-                            .unwrap_or(Value::Concrete(ConcreteValue::String(raw)))
-                        }
-                        value => value,
-                    })
-                },
-            );
+            let policy = endpoint
+                .policy_document()
+                .map(crate::services::iam::role::iam_policy_json_to_value)
+                .transpose()
+                .map_err(|error| {
+                    ProviderError::api_error_caused_by("Failed to decode endpoint policy", error)
+                        .for_resource(id.clone())
+                })?;
+            let fields =
+                Self::extract_ec2_vpc_endpoint_attributes(endpoint).map_policy_document(|_| policy);
             let empty_list = || Value::Concrete(ConcreteValue::List(Vec::new()));
             let fields = fields
                 .map_route_table_ids(|value| Some(value.unwrap_or_else(empty_list)))

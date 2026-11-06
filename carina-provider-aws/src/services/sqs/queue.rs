@@ -29,7 +29,9 @@ use crate::send_models_generated::{SqsQueueCreateInput, SqsQueueUpdateInput};
 // IAM policy doc Struct↔JSON converters are borrowed via pub(crate)
 // from services/iam/role.rs until aws#286 extracts them into a shared
 // module. SQS's Policy and RedriveAllowPolicy are IAM-shaped.
-use crate::services::iam::role::{json_to_policy_doc, policy_doc_to_json};
+use crate::services::iam::role::{
+    IamPolicyDecodeError, iam_policy_json_to_value, policy_doc_to_json,
+};
 
 /// Classification of how a `QueueAttributeName` value moves between
 /// the DSL `Value` layer and the SQS wire format (strings).
@@ -251,8 +253,8 @@ fn optional_string_value(value: Option<String>) -> Option<Value> {
 
 /// Reverse of `pack_attr`: deserialise the SQS wire string into a
 /// `Value` of the kind we declared in `QUEUE_ATTRS`.
-fn unpack_attr(raw: &str, kind: AttrKind) -> Option<Value> {
-    match kind {
+fn unpack_attr(raw: &str, kind: AttrKind) -> Result<Option<Value>, IamPolicyDecodeError> {
+    Ok(match kind {
         AttrKind::Int => raw
             .parse::<i64>()
             .ok()
@@ -265,29 +267,31 @@ fn unpack_attr(raw: &str, kind: AttrKind) -> Option<Value> {
         AttrKind::String => Some(Value::Concrete(ConcreteValue::String(
             raw.to_string().into(),
         ))),
-        AttrKind::IamPolicy => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            Some(json_to_policy_doc(&json))
-        }
-        AttrKind::RedrivePolicyStruct => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            json_to_redrive_policy(&json)
-        }
-        AttrKind::RedriveAllowPolicyStruct => {
-            let json: serde_json::Value = serde_json::from_str(raw).ok()?;
-            json_to_redrive_allow_policy(&json)
-        }
-    }
+        AttrKind::IamPolicy => Some(iam_policy_json_to_value(raw)?),
+        AttrKind::RedrivePolicyStruct => serde_json::from_str(raw)
+            .ok()
+            .and_then(|json| json_to_redrive_policy(&json)),
+        AttrKind::RedriveAllowPolicyStruct => serde_json::from_str(raw)
+            .ok()
+            .and_then(|json| json_to_redrive_allow_policy(&json)),
+    })
 }
 
 fn queue_attribute(
+    id: &ResourceId,
     attributes: Option<&HashMap<QueueAttributeName, String>>,
     key: &QueueAttributeName,
     kind: AttrKind,
-) -> Option<Value> {
+) -> ProviderResult<Option<Value>> {
     attributes
         .and_then(|attributes| attributes.get(key))
-        .and_then(|raw| unpack_attr(raw, kind))
+        .map(|raw| unpack_attr(raw, kind))
+        .transpose()
+        .map(Option::flatten)
+        .map_err(|error| {
+            ProviderError::api_error_caused_by("Failed to decode SQS queue attribute", error)
+                .for_resource(id.clone())
+        })
 }
 
 fn required_queue_attribute(
@@ -297,7 +301,7 @@ fn required_queue_attribute(
     key: &QueueAttributeName,
     kind: AttrKind,
 ) -> ProviderResult<Value> {
-    queue_attribute(attributes, key, kind).ok_or_else(|| {
+    queue_attribute(id, attributes, key, kind)?.ok_or_else(|| {
         ProviderError::api_error(format!(
             "GetQueueAttributes(All) omitted required SQS attribute {dsl_name}"
         ))
@@ -729,7 +733,12 @@ impl AwsProvider {
         // measurement omits KmsDataKeyReusePeriodSeconds when no KMS key is set.
         let model = SqsQueueReadModel {
             queue_name: Value::Concrete(ConcreteValue::String(name.to_string().into())),
-            policy: queue_attribute(attributes, &QueueAttributeName::Policy, AttrKind::IamPolicy),
+            policy: queue_attribute(
+                id,
+                attributes,
+                &QueueAttributeName::Policy,
+                AttrKind::IamPolicy,
+            )?,
             visibility_timeout: required_queue_attribute(
                 id,
                 attributes,
@@ -766,48 +775,61 @@ impl AwsProvider {
                 AttrKind::Int,
             )?,
             redrive_policy: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::RedrivePolicy,
                 AttrKind::RedrivePolicyStruct,
-            ),
+            )?,
             redrive_allow_policy: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::RedriveAllowPolicy,
                 AttrKind::RedriveAllowPolicyStruct,
-            ),
-            fifo_queue: queue_attribute(attributes, &QueueAttributeName::FifoQueue, AttrKind::Bool)
-                .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
+            )?,
+            fifo_queue: queue_attribute(
+                id,
+                attributes,
+                &QueueAttributeName::FifoQueue,
+                AttrKind::Bool,
+            )?
+            .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
             content_based_deduplication: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ContentBasedDeduplication,
                 AttrKind::Bool,
-            )
+            )?
             .unwrap_or_else(|| Value::Concrete(ConcreteValue::Bool(false))),
             deduplication_scope: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::DeduplicationScope,
                 AttrKind::String,
-            ),
+            )?,
             fifo_throughput_limit: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::FifoThroughputLimit,
                 AttrKind::String,
-            ),
+            )?,
             kms_master_key_id: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::KmsMasterKeyId,
                 AttrKind::String,
-            ),
+            )?,
             kms_data_key_reuse_period_seconds: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::KmsDataKeyReusePeriodSeconds,
                 AttrKind::Int,
-            ),
+            )?,
             sqs_managed_sse_enabled: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::SqsManagedSseEnabled,
                 AttrKind::Bool,
-            ),
+            )?,
             queue_arn: required_queue_attribute(
                 id,
                 attributes,
@@ -816,20 +838,23 @@ impl AwsProvider {
                 AttrKind::String,
             )?,
             approximate_number_of_messages: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessages,
                 AttrKind::Int,
-            ),
+            )?,
             approximate_number_of_messages_delayed: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessagesDelayed,
                 AttrKind::Int,
-            ),
+            )?,
             approximate_number_of_messages_not_visible: queue_attribute(
+                id,
                 attributes,
                 &QueueAttributeName::ApproximateNumberOfMessagesNotVisible,
                 AttrKind::Int,
-            ),
+            )?,
             created_timestamp: required_queue_attribute(
                 id,
                 attributes,
@@ -1226,6 +1251,32 @@ mod tests {
     use carina_core::provider::UpdatePatch;
     use carina_core::resource::DeferredValue;
 
+    #[test]
+    fn sqs_policy_decode_failure_keeps_its_typed_cause() {
+        use std::error::Error;
+
+        let id = queue_resource().id;
+        for raw in [
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let attributes = HashMap::from([(QueueAttributeName::Policy, raw.to_string())]);
+            let error = queue_attribute(
+                &id,
+                Some(&attributes),
+                &QueueAttributeName::Policy,
+                AttrKind::IamPolicy,
+            )
+            .expect_err("an invalid policy must fail the read");
+            let cause = error.detail().cause().expect("policy decode cause");
+            let decode = cause
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(decode.source().unwrap().is::<serde_json::Error>());
+        }
+    }
+
     fn queue_resource() -> Resource {
         Resource::with_provider("aws", "sqs.Queue", "test", None)
     }
@@ -1236,7 +1287,7 @@ mod tests {
 
     fn secret_snapshot() -> SnapshotValue {
         carina_core::value::redact_secrets_in_value(&Value::Deferred(DeferredValue::Secret(
-            Box::new(Value::Concrete(ConcreteValue::String("historical".into()))),
+            Box::new(Value::Concrete(ConcreteValue::String("historical".into()))).into(),
         )))
         .expect("secret fixture should redact")
     }
@@ -1480,7 +1531,7 @@ mod tests {
     #[test]
     fn sqs_cross_field_validation_accepts_unknown_and_deferred_values() {
         let unknown = plan_time_unknown();
-        let deferred = Value::Deferred(DeferredValue::Secret(Box::new(string("opaque"))));
+        let deferred = Value::Deferred(DeferredValue::Secret(Box::new(string("opaque")).into()));
         for opaque in [unknown, deferred] {
             for fifo in [false, true] {
                 assert_valid_cross_field_inputs(vec![
@@ -1549,7 +1600,7 @@ mod tests {
                 ("redrive_permission", string("byQueue")),
                 (
                     "source_queue_arns",
-                    Value::Deferred(DeferredValue::Secret(Box::new(source_queue_arns(0)))),
+                    Value::Deferred(DeferredValue::Secret(Box::new(source_queue_arns(0)).into())),
                 ),
             ]),
         )]);

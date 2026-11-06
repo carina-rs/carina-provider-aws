@@ -37,11 +37,11 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(policy_json) = output.policy() {
-                    let policy = iam_policy_json_to_value(policy_json).map_err(|e| {
-                        ProviderError::invalid_input(format!(
-                            "Failed to parse bucket policy: {}",
-                            e
-                        ))
+                    let policy = iam_policy_json_to_value(policy_json).map_err(|error| {
+                        ProviderError::invalid_input_caused_by(
+                            "Failed to parse bucket policy",
+                            error,
+                        )
                         .for_resource(id.clone())
                     })?;
                     let model = S3BucketPolicyReadModel {
