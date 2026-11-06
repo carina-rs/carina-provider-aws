@@ -25,7 +25,11 @@ use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{Heading, PageBuilder, TableCell, TypeDisplay};
 
+mod tag_types;
+use tag_types::{TagMapType, resource_tag_type};
+
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
+type LengthBounds = Option<(Option<u64>, Option<u64>)>;
 
 #[derive(Parser, Debug)]
 #[command(name = "smithy-codegen")]
@@ -155,6 +159,68 @@ fn pattern_display(prefix: impl Into<String>, pattern: &str) -> MarkdownType {
     ])
 }
 
+/// Read the Smithy length trait for strings and collections through one path.
+fn length_from_traits(traits: &carina_smithy::Traits) -> LengthBounds {
+    traits.get("smithy.api#length").map(|length| {
+        (
+            length.get("min").and_then(|value| value.as_u64()),
+            length.get("max").and_then(|value| value.as_u64()),
+        )
+    })
+}
+
+fn string_refinement_display(pattern: Option<&str>, length: LengthBounds) -> MarkdownType {
+    let prefix = match length {
+        Some((min, max)) => format!("String(length: {}", range_display_string(min, max)),
+        None => "String(".to_string(),
+    };
+    match pattern {
+        Some(pattern) => pattern_display(
+            format!(
+                "{prefix}{}pattern: ",
+                if length.is_some() { ", " } else { "" }
+            ),
+            pattern,
+        ),
+        None if length.is_some() => MarkdownType::text(format!("{prefix})")),
+        None => MarkdownType::text("String"),
+    }
+}
+
+/// Anonymous strings share their Rust literal encoding and schema metadata.
+fn string_refinement(pattern: Option<&str>, length: LengthBounds) -> ValueTypeOverride {
+    let pattern_code = pattern.map_or_else(
+        || "None".to_string(),
+        |pattern| format!("Some({pattern:?}.to_string())"),
+    );
+    let type_code = if pattern.is_none() && length.is_none() {
+        PLAIN_STRING_TYPE_CODE.to_string()
+    } else {
+        format!("AttributeType::refined_string(None, {pattern_code}, {length:?}, None)")
+    };
+    ValueTypeOverride {
+        type_code,
+        display: string_refinement_display(pattern, length),
+        attribute_type: AttributeType::refined_string(
+            None,
+            pattern.map(str::to_string),
+            length,
+            None,
+        ),
+    }
+}
+
+/// Ordinary maps and tag collections use the same constructor selection.
+fn map_type_code(key: &str, value: &str, length: LengthBounds) -> String {
+    if length.is_some() {
+        format!("AttributeType::refined_map({key}, {value}, {length:?})")
+    } else if key == PLAIN_STRING_TYPE_CODE {
+        format!("AttributeType::map({value})")
+    } else {
+        format!("AttributeType::map_with_key({key}, {value})")
+    }
+}
+
 /// Rust and documentation use the same exact resource/path lookup. Enum
 /// identities retain their separate Smithy-shape lookup in enum_identity_override.
 fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
@@ -166,39 +232,22 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
             MarkdownType::text(format!("Int({min}..={max})")),
             AttributeType::refined_int(None, Some((Some(*min), Some(*max)))),
         ),
-        TypeOverride::StringBounds { min, max } => (
-            format!(
-                "AttributeType::refined_string(None, None, Some((Some({min}), Some({max}))), None)"
-            ),
-            MarkdownType::text(format!("String(length: {min}..={max})")),
-            AttributeType::refined_string(None, None, Some((Some(*min), Some(*max))), None),
-        ),
+        TypeOverride::StringBounds { min, max } => {
+            return Some(string_refinement(None, Some((Some(*min), Some(*max)))));
+        }
         TypeOverride::RefinedString {
             pattern,
             min_length,
             max_length,
-        } => (
-            format!(
-                "AttributeType::refined_string(None, Some({pattern:?}.to_string()), Some((Some({min_length}), Some({max_length}))), None)"
-            ),
-            pattern_display(
-                format!("String(length: {min_length}..={max_length}, pattern: "),
-                pattern,
-            ),
-            AttributeType::refined_string(
-                None,
-                Some(pattern.to_string()),
+        } => {
+            return Some(string_refinement(
+                Some(pattern),
                 Some((Some(*min_length), Some(*max_length))),
-                None,
-            ),
-        ),
-        TypeOverride::StringPattern(pattern) => (
-            format!(
-                "AttributeType::refined_string(None, Some({pattern:?}.to_string()), None, None)"
-            ),
-            pattern_display("String(pattern: ", pattern),
-            AttributeType::refined_string(None, Some(pattern.to_string()), None, None),
-        ),
+            ));
+        }
+        TypeOverride::StringPattern(pattern) => {
+            return Some(string_refinement(Some(pattern), None));
+        }
         TypeOverride::AnonymousStringConstructor(constructor) => {
             let attr = attribute_type_from_code(constructor)
                 .expect("anonymous String constructor must resolve");
@@ -356,14 +405,10 @@ fn string_list_value_override(
     // source list's min=1 instead of silently dropping it during flattening.
     // Leave the existing unordered-list contracts (ACM SANs) unchanged.
     if ordered {
-        let length = match model.get_shape(target) {
-            Some(Shape::List(list)) => list.traits.get("smithy.api#length").map(|length| {
-                (
-                    length.get("min").and_then(|v| v.as_u64()),
-                    length.get("max").and_then(|v| v.as_u64()),
-                )
-            }),
-            _ => None,
+        let length = if let Some(Shape::List(list)) = model.get_shape(target) {
+            length_from_traits(&list.traits)
+        } else {
+            None
         };
         return Some(ValueTypeOverride {
             type_code: format!(
@@ -1037,6 +1082,9 @@ fn run(args: ResolvedArgs) -> Result<()> {
     }
     for res in &resources {
         validate_cross_service_update_operations(res, &models)?;
+        if res.has_tags {
+            resource_tag_type(res, &models[res.service_namespace])?;
+        }
     }
 
     match &args.output_mode {
@@ -2362,6 +2410,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let ns = res.service_namespace;
     let is_data_source = res.create_op.is_empty();
     let namespace = format!("aws.{}", res.name);
+    let tags_type_code = res
+        .has_tags
+        .then(|| resource_tag_type(res, model).map(|tags| tags.code()))
+        .transpose()?;
     let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
     for (attr, alias, canonical) in &res.enum_aliases {
         enum_alias_map
@@ -2382,7 +2434,6 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let needs_types = code_str
         .replace("carina_aws_types::", "")
         .contains("types::");
-    let needs_tags_type = res.has_tags;
     let needs_struct_field = code_str.contains("StructField::");
 
     // Build code
@@ -2399,7 +2450,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     let mut schema_imports = vec!["AttributeSchema", "ResourceSchema"];
     let needs_attribute_type = attrs
         .iter()
-        .any(|a| a.type_code.contains("AttributeType::") || a.enum_info.is_some());
+        .any(|a| a.type_code.contains("AttributeType::") || a.enum_info.is_some())
+        || tags_type_code.is_some();
     if needs_attribute_type {
         schema_imports.insert(1, "AttributeType");
     }
@@ -2432,8 +2484,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         resource_short, ns
     ));
 
-    if needs_tags_type {
-        code.push_str("use super::tags_type;\n");
+    if res.has_tags {
         code.push_str("use carina_provider_protocol::types::ValidatorType;\n");
     }
     code.push_str(&format!(
@@ -2623,7 +2674,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     }
 
     // Tags attribute
-    if res.has_tags {
+    if let Some(tags_type_code) = tags_type_code {
         if let Some(reason) = applied_send_contract
             .as_ref()
             .and_then(|contract| contract.tags_not_sent_reason.as_deref())
@@ -2635,7 +2686,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         }
         code.push_str(&format!(
             "\x20       .attribute(\n\
-             \x20           AttributeSchema::optional(\"tags\", tags_type())\n\
+             \x20           AttributeSchema::optional(\"tags\", {tags_type_code})\n\
              \x20               .with_description(\"{}\")\n\
              \x20               .with_provider_name(\"Tags\")\n\
              \x20               .build(),\n\
@@ -2948,10 +2999,6 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         ("ipv4_address()", carina_core::schema::types::ipv4_address),
         ("ipv6_address()", carina_core::schema::types::ipv6_address),
         ("email()", carina_core::schema::types::email),
-        (
-            "tags_type()",
-            || AttributeType::map(AttributeType::string()),
-        ),
     ];
     builtins
         .iter()
@@ -3174,7 +3221,12 @@ fn resolve_type_shape(
                     .as_ref()
                     .map(|info| enum_type_code(ctx, field_name, info))
                     .unwrap_or(value_type);
-                (format!("AttributeType::map({value_type})"), None)
+                let code = map_type_code(
+                    PLAIN_STRING_TYPE_CODE,
+                    &value_type,
+                    length_from_traits(&map_shape.traits),
+                );
+                (code, None)
             } else {
                 (
                     format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
@@ -3185,8 +3237,10 @@ fn resolve_type_shape(
         Some(ShapeKind::Structure) => {
             // Check if it's a TagList-like structure
             let shape_name = SmithyModel::shape_name(target);
-            if shape_name == "TagList" || shape_name == "Tag" {
-                return Ok(("tags_type()".to_string(), None));
+            if (shape_name == "TagList" || shape_name == "Tag")
+                && let Some(tags) = TagMapType::from_shape(ctx.model, target)?
+            {
+                return Ok((tags.code(), None));
             }
 
             // Unwrap EC2 AttributeBooleanValue wrapper → plain Bool
@@ -6102,13 +6156,24 @@ fn discover_markdown_attribute_type(
                 list
             }
         }
-        RawShape::Map { value, .. } => MarkdownType::map(discover_markdown_attribute_type(
+        RawShape::Map {
+            key,
             value,
-            heading_path,
-            namespace,
-            enums,
-            structs,
-        )?),
+            constraints,
+        } => {
+            let map = MarkdownType::map_with_key(
+                discover_markdown_attribute_type(key, heading_path, namespace, enums, structs)?,
+                discover_markdown_attribute_type(value, heading_path, namespace, enums, structs)?,
+            );
+            if let Some((min, max)) = constraints.length() {
+                MarkdownType::sequence([
+                    map,
+                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
+                ])
+            } else {
+                map
+            }
+        }
         RawShape::Union(members) => MarkdownType::union(
             members
                 .iter()
@@ -6163,23 +6228,7 @@ fn discover_markdown_attribute_type(
             if let Some(identity) = identity {
                 MarkdownType::text(declared_scalar_display_name(identity))
             } else {
-                let prefix = match length {
-                    Some((min, max)) => {
-                        format!("String(length: {}", range_display_string(min, max))
-                    }
-                    None => "String(".to_string(),
-                };
-                match pattern {
-                    Some(pattern) => pattern_display(
-                        format!(
-                            "{prefix}{}pattern: ",
-                            if length.is_some() { ", " } else { "" }
-                        ),
-                        pattern,
-                    ),
-                    None if length.is_some() => MarkdownType::text(format!("{prefix})")),
-                    None => MarkdownType::text("String".to_string()),
-                }
+                string_refinement_display(pattern, length)
             }
         }
         RawShape::Reference { identity, .. } => {
@@ -6624,7 +6673,16 @@ fn generate_markdown_resource(
     // Tags
     if res.has_tags {
         page.heading(Heading::code(3, "tags"))?;
-        page.push_str("- **Type:** Map\n");
+        page.push_str("- **Type:** ");
+        discover_markdown_attribute_type(
+            &resource_tag_type(res, model)?.attribute_type(),
+            &["tags".to_string()],
+            &namespace,
+            &mut all_enums,
+            &mut struct_defs,
+        )?
+        .write_to(&mut page);
+        page.push_str("\n");
         page.push_str("- **Required:** No\n\n");
         page.push_str(&format!(
             "{}\n\n",
@@ -7435,14 +7493,31 @@ fn discover_markdown_type(
             } else {
                 MarkdownType::text("String".to_string())
             };
-            MarkdownType::map(value)
+            let map = MarkdownType::map(value);
+            if let Some(Shape::Map(shape)) = model.get_shape(target)
+                && let Some((min, max)) = length_from_traits(&shape.traits)
+            {
+                MarkdownType::sequence([
+                    map,
+                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
+                ])
+            } else {
+                map
+            }
         }
         Some(ShapeKind::Structure | ShapeKind::Union) => {
             let shape_name = SmithyModel::shape_name(target).to_string();
             if kind == Some(ShapeKind::Structure)
                 && (shape_name == "TagList" || shape_name == "Tag")
+                && let Some(tags) = TagMapType::from_shape(model, target)?
             {
-                return Ok(MarkdownType::text("Map".to_string()));
+                return discover_markdown_attribute_type(
+                    &tags.attribute_type(),
+                    heading_path,
+                    enum_namespace,
+                    all_enums,
+                    struct_defs,
+                );
             }
             if kind == Some(ShapeKind::Structure) && shape_name == "AttributeBooleanValue" {
                 return Ok(MarkdownType::text("Bool".to_string()));
@@ -8744,6 +8819,362 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn map_length_tag_strings_preserve_literal_backslashes() {
+        let model = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "test#Tags":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"test#Value"}},
+                "test#Value":{"type":"string","traits":{"smithy.api#pattern":"^path\\\\[a-z]+$","smithy.api#length":{"min":2,"max":40}}}
+            }
+        }"##).unwrap();
+        let tags = TagMapType::from_shape(&model, "test#Tags")
+            .unwrap()
+            .unwrap();
+        let pattern = r"^path\\[a-z]+$";
+        assert!(
+            tags.code()
+                .contains(&format!("Some({pattern:?}.to_string())")),
+            "{}",
+            tags.code()
+        );
+        let schema = carina_core::schema::ResourceSchema::new("test.BackslashTags")
+            .attribute(
+                carina_core::schema::AttributeSchema::optional("tags", tags.attribute_type())
+                    .build(),
+            )
+            .validate()
+            .unwrap();
+        let value: carina_core::resource::Value =
+            carina_core::resource::Value::Concrete(carina_core::resource::ConcreteValue::Map(
+                [(
+                    "Name".to_string(),
+                    carina_core::resource::Value::Concrete(
+                        carina_core::resource::ConcreteValue::String(r"path\value".into()),
+                    ),
+                )]
+                .into_iter()
+                .collect(),
+            ));
+        schema
+            .effective_attribute("tags")
+            .unwrap()
+            .validate(&value)
+            .expect("a literal backslash must survive the model-to-schema path");
+    }
+
+    #[test]
+    fn map_length_complete_service_models_require_a_tag_source() {
+        let resource = resource_defs::logs_resources().remove(0);
+        let model = carina_smithy::parse(
+            r##"{
+            "smithy":"2.0", "shapes": {
+                "test#Service":{"type":"service","version":"2026-11-06"}
+            }
+        }"##,
+        )
+        .unwrap();
+        let error = resource_tag_type(&resource, &model)
+            .expect_err("complete models must not fall back to an unbounded map");
+        assert!(
+            error
+                .to_string()
+                .contains("logs.LogGroup has no tag source"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn map_length_codegen_preserves_modeled_non_tag_map_bounds() {
+        let model = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "com.amazonaws.cloudwatchlogs#EntityAttributes":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":0,"max":10}}},
+                "com.amazonaws.cloudwatchlogs#EntityKeyAttributes":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":2,"max":4}}},
+                "com.amazonaws.iam#mapStringReplacementValueEntry":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":0,"max":30}}},
+                "com.amazonaws.identitystore#Extensions":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":1,"max":10}}}
+            }
+        }"##).unwrap();
+        for (namespace, shape, minimum, maximum) in [
+            ("com.amazonaws.cloudwatchlogs", "EntityAttributes", 0, 10),
+            ("com.amazonaws.cloudwatchlogs", "EntityKeyAttributes", 2, 4),
+            ("com.amazonaws.iam", "mapStringReplacementValueEntry", 0, 30),
+            ("com.amazonaws.identitystore", "Extensions", 1, 10),
+        ] {
+            let code = map_length_fixture_type(&model, &format!("{namespace}#{shape}"));
+            assert!(
+                code.starts_with("AttributeType::refined_map(AttributeType::string(), "),
+                "{shape}: {code}"
+            );
+            assert!(
+                code.ends_with(&format!(", Some((Some({minimum}), Some({maximum}))))")),
+                "{shape}: {code}"
+            );
+        }
+    }
+
+    fn map_length_fixture_type(model: &SmithyModel, target: &str) -> String {
+        resolve_type(
+            &mut TypeResolutionContext {
+                model,
+                resource_name: "test.MapLength",
+                namespace: "aws.test.MapLength",
+                struct_path: Vec::new(),
+                resolving_shapes: Vec::new(),
+                property_path: "entries".to_string(),
+                type_overrides: &HashMap::new(),
+                enum_alias_map: &HashMap::new(),
+                to_dsl_overrides: &HashMap::new(),
+                all_enums: &mut BTreeMap::new(),
+                all_ranged_ints: &mut BTreeMap::new(),
+                current_root_attr: None,
+                deferred_populate_struct_fields: &HashSet::new(),
+                nested_write_only_struct_fields: &HashSet::new(),
+                nested_write_only_emissions: &mut HashMap::new(),
+                struct_field_type_overrides: &HashMap::new(),
+            },
+            target,
+            "Entries",
+        )
+        .expect("resolve map fixture")
+        .0
+    }
+
+    fn map_length_tag_fixture(resource_name: &str) -> (ResourceDef, SmithyModel) {
+        let (resource, mut model, member_name, target) = match resource_name {
+            "logs.LogGroup" => {
+                let (resource, model) = logs_log_group_value_fixture();
+                (resource, model, "tags", "com.amazonaws.cloudwatchlogs#Tags")
+            }
+            "iam.Role" => {
+                let (mut resource, model) = iam_role_value_fixture();
+                resource.has_tags = true;
+                (resource, model, "Tags", "com.amazonaws.iam#tagListType")
+            }
+            "acm.Certificate" => (
+                resource_defs::acm_resources().remove(0),
+                markdown_read_shape_override_model(),
+                "Tags",
+                "com.amazonaws.acm#TagList",
+            ),
+            "ec2.Vpc" => (
+                resource_defs::ec2_resources()
+                    .into_iter()
+                    .find(|resource| resource.name == "ec2.Vpc")
+                    .unwrap(),
+                carina_smithy::parse(r##"{
+                    "smithy":"2.0", "shapes": {
+                        "com.amazonaws.ec2#CreateVpc":{"type":"operation","input":{"target":"com.amazonaws.ec2#CreateVpcRequest"}},
+                        "com.amazonaws.ec2#CreateVpcRequest":{"type":"structure","members":{"CidrBlock":{"target":"smithy.api#String"},"InstanceTenancy":{"target":"smithy.api#String"},"Ipv4IpamPoolId":{"target":"smithy.api#String"},"Ipv4NetmaskLength":{"target":"smithy.api#Integer"}}},
+                        "com.amazonaws.ec2#ModifyVpcAttribute":{"type":"operation","input":{"target":"com.amazonaws.ec2#ModifyVpcAttributeRequest"}},
+                        "com.amazonaws.ec2#ModifyVpcAttributeRequest":{"type":"structure","members":{"EnableDnsHostnames":{"target":"smithy.api#Boolean"},"EnableDnsSupport":{"target":"smithy.api#Boolean"}}},
+                        "com.amazonaws.ec2#Vpc":{"type":"structure","members":{"CidrBlock":{"target":"smithy.api#String"},"InstanceTenancy":{"target":"smithy.api#String"},"VpcId":{"target":"smithy.api#String"},"Tags":{"target":"com.amazonaws.ec2#TagList"}}}
+                    }
+                }"##).unwrap(),
+                "TagSpecifications",
+                "com.amazonaws.ec2#TagSpecificationList",
+            ),
+            name => panic!("unknown tag fixture resource {name}"),
+        };
+        let tags = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "com.amazonaws.cloudwatchlogs#Tags":{"type":"map","key":{"target":"com.amazonaws.cloudwatchlogs#TagKey"},"value":{"target":"com.amazonaws.cloudwatchlogs#TagValue"},"traits":{"smithy.api#length":{"min":1,"max":50}}},
+                "com.amazonaws.cloudwatchlogs#TagKey":{"type":"string","traits":{"smithy.api#length":{"min":1,"max":128},"smithy.api#pattern":"^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+)$"}},
+                "com.amazonaws.cloudwatchlogs#TagValue":{"type":"string","traits":{"smithy.api#length":{"min":0,"max":256},"smithy.api#pattern":"^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"}},
+                "com.amazonaws.iam#tagListType":{"type":"list","member":{"target":"com.amazonaws.iam#Tag"},"traits":{"smithy.api#length":{"min":0,"max":50}}},
+                "com.amazonaws.iam#Tag":{"type":"structure","members":{"Key":{"target":"com.amazonaws.iam#tagKeyType"},"Value":{"target":"com.amazonaws.iam#tagValueType"}}},
+                "com.amazonaws.iam#tagKeyType":{"type":"string","traits":{"smithy.api#length":{"min":1,"max":128},"smithy.api#pattern":"^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$"}},
+                "com.amazonaws.iam#tagValueType":{"type":"string","traits":{"smithy.api#length":{"min":0,"max":256},"smithy.api#pattern":"^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*$"}},
+                "com.amazonaws.acm#TagList":{"type":"list","member":{"target":"com.amazonaws.acm#Tag"},"traits":{"smithy.api#length":{"min":1,"max":50}}},
+                "com.amazonaws.acm#Tag":{"type":"structure","members":{"Key":{"target":"com.amazonaws.acm#TagKey"},"Value":{"target":"com.amazonaws.acm#TagValue"}}},
+                "com.amazonaws.acm#TagKey":{"type":"string","traits":{"smithy.api#length":{"min":1,"max":128},"smithy.api#pattern":"^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"}},
+                "com.amazonaws.acm#TagValue":{"type":"string","traits":{"smithy.api#length":{"max":256},"smithy.api#pattern":"^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"}},
+                "com.amazonaws.ec2#TagSpecificationList":{"type":"list","member":{"target":"com.amazonaws.ec2#TagSpecification"}},
+                "com.amazonaws.ec2#TagSpecification":{"type":"structure","members":{"Tags":{"target":"com.amazonaws.ec2#TagList"}}},
+                "com.amazonaws.ec2#TagList":{"type":"list","member":{"target":"com.amazonaws.ec2#Tag"}},
+                "com.amazonaws.ec2#Tag":{"type":"structure","members":{"Key":{"target":"smithy.api#String"},"Value":{"target":"smithy.api#String"}}}
+            }
+        }"##).unwrap();
+        model.shapes.extend(tags.shapes);
+        let operation_id = format!("{}#{}", resource.service_namespace, resource.create_op);
+        let Some(Shape::Operation(operation)) = model.get_shape(&operation_id) else {
+            panic!("missing fixture operation {operation_id}");
+        };
+        let input_id = operation.input.as_ref().unwrap().target.clone();
+        let Some(Shape::Structure(input)) = model.shapes.get_mut(&input_id) else {
+            panic!("missing fixture input {input_id}");
+        };
+        input.members.insert(
+            member_name.to_string(),
+            carina_smithy::ShapeRef {
+                target: target.to_string(),
+                traits: Default::default(),
+            },
+        );
+        (resource, model)
+    }
+
+    #[test]
+    fn map_length_codegen_preserves_bounded_and_unbounded_maps() {
+        let model = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "test#Bounded":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#Boolean"},"traits":{"smithy.api#length":{"min":1,"max":7}}},
+                "test#Minimum":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":2}}},
+                "test#Maximum":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"max":9}}},
+                "test#Plain":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#Boolean"}}
+            }
+        }"##).unwrap();
+        for (target, expected) in [
+            (
+                "test#Bounded",
+                "AttributeType::refined_map(AttributeType::string(), AttributeType::bool(), Some((Some(1), Some(7))))",
+            ),
+            (
+                "test#Minimum",
+                "AttributeType::refined_map(AttributeType::string(), AttributeType::string(), Some((Some(2), None)))",
+            ),
+            (
+                "test#Maximum",
+                "AttributeType::refined_map(AttributeType::string(), AttributeType::string(), Some((None, Some(9))))",
+            ),
+            ("test#Plain", "AttributeType::map(AttributeType::bool())"),
+        ] {
+            assert_eq!(
+                map_length_fixture_type(&model, target),
+                expected,
+                "{target}"
+            );
+        }
+    }
+
+    #[test]
+    fn map_length_tags_are_derived_from_each_resource_smithy_model() {
+        for ((resource, model), minimum, maximum, key_length, value_length) in [
+            (
+                map_length_tag_fixture("logs.LogGroup"),
+                Some(1),
+                Some(50),
+                "Some((Some(1), Some(128)))",
+                "Some((Some(0), Some(256)))",
+            ),
+            (
+                map_length_tag_fixture("iam.Role"),
+                Some(0),
+                Some(50),
+                "Some((Some(1), Some(128)))",
+                "Some((Some(0), Some(256)))",
+            ),
+            (
+                map_length_tag_fixture("acm.Certificate"),
+                Some(1),
+                Some(50),
+                "Some((Some(1), Some(128)))",
+                "Some((None, Some(256)))",
+            ),
+            (
+                map_length_tag_fixture("ec2.Vpc"),
+                None,
+                None,
+                "None",
+                "None",
+            ),
+        ] {
+            let generated = generate_resource(&resource, &model).unwrap();
+            let expected = if minimum.is_some() || maximum.is_some() {
+                let key_pattern = if resource.name == "iam.Role" {
+                    r"^[\p{L}\p{Z}\p{N}_.:/=+\-@]+$"
+                } else if resource.name == "acm.Certificate" {
+                    r"^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$"
+                } else {
+                    r"^([\p{L}\p{Z}\p{N}_.:/=+\-@]+)$"
+                };
+                let value_pattern = if resource.name == "iam.Role" {
+                    r"^[\p{L}\p{Z}\p{N}_.:/=+\-@]*$"
+                } else {
+                    r"^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$"
+                };
+                format!(
+                    "AttributeType::refined_map(AttributeType::refined_string(None, Some({key_pattern:?}.to_string()), {key_length}, None), AttributeType::refined_string(None, Some({value_pattern:?}.to_string()), {value_length}, None), Some(({minimum:?}, {maximum:?})))"
+                )
+            } else {
+                "AttributeType::map(AttributeType::string())".to_string()
+            };
+            assert!(
+                generated.contains(&format!("AttributeSchema::optional(\"tags\", {expected})")),
+                "{}: {generated}",
+                resource.name
+            );
+            assert!(!generated.contains("tags_type()"), "{}", resource.name);
+        }
+    }
+
+    #[test]
+    fn map_length_docgen_displays_map_and_key_constraints() {
+        let attr_type = AttributeType::refined_map(
+            AttributeType::refined_string(
+                None,
+                Some("^[a-z]+$".to_string()),
+                Some((Some(1), Some(8))),
+                None,
+            ),
+            AttributeType::string(),
+            Some((Some(2), Some(5))),
+        );
+        let display = discover_markdown_attribute_type(
+            &attr_type,
+            &["entries".to_string()],
+            "aws.test.MapLength",
+            &mut BTreeMap::new(),
+            &mut BTreeMap::new(),
+        )
+        .unwrap();
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        let markdown = page.finish().unwrap();
+        assert!(
+            markdown.contains("String(length: 1..=8, pattern: `^[a-z]+$`)"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("(length: 2..=5)"), "{markdown}");
+    }
+
+    #[test]
+    fn map_length_tags_reject_conflicting_operation_shapes() {
+        let resource = resource_defs::logs_resources().remove(0);
+        let model = carina_smithy::parse(r##"{
+            "smithy":"2.0", "shapes": {
+                "com.amazonaws.cloudwatchlogs#CreateLogGroup":{"type":"operation","input":{"target":"test#Create"}},
+                "test#Create":{"type":"structure","members":{"tags":{"target":"test#CreateTags"}}},
+                "com.amazonaws.cloudwatchlogs#TagResource":{"type":"operation","input":{"target":"test#Tag"}},
+                "test#Tag":{"type":"structure","members":{"tags":{"target":"test#UpdateTags"}}},
+                "test#CreateTags":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":1,"max":50}}},
+                "test#UpdateTags":{"type":"map","key":{"target":"smithy.api#String"},"value":{"target":"smithy.api#String"},"traits":{"smithy.api#length":{"min":1,"max":10}}}
+            }
+        }"##).unwrap();
+        let error = resource_tag_type(&resource, &model)
+            .expect_err("different tag bounds must stop generation");
+        for expected in [
+            "logs.LogGroup",
+            "test#CreateTags",
+            "test#UpdateTags",
+            "conflicting tag bounds",
+        ] {
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn map_length_tags_follow_changes_to_the_resource_model() {
+        let (resource, mut model) = map_length_tag_fixture("iam.Role");
+        let Some(Shape::List(shape)) = model.shapes.get_mut("com.amazonaws.iam#tagListType") else {
+            panic!("IAM tag list");
+        };
+        shape.traits.get_mut("smithy.api#length").unwrap()["max"] = 17.into();
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert!(
+            generated.contains("Some((Some(0), Some(17)))"),
+            "{generated}"
+        );
+    }
+
     #[test]
     fn generated_integer_inputs_are_narrowed_before_guarded_parts() {
         let model = carina_smithy::parse(r##"{

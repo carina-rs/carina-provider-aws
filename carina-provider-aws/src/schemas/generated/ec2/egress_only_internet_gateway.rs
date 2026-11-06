@@ -5,8 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use super::tags_type;
-use carina_core::schema::{AttributeSchema, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
 /// Returns the schema config for ec2.EgressOnlyInternetGateway (Smithy: com.amazonaws.ec2)
@@ -38,7 +37,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
                 .build(),
             )
             .attribute(
-                AttributeSchema::optional("tags", tags_type())
+                AttributeSchema::optional("tags", AttributeType::map(AttributeType::string()))
                     .with_description("The tags for the resource.")
                     .with_provider_name("Tags")
                     .build(),

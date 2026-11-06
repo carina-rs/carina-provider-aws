@@ -25,11 +25,17 @@ pub struct TypeDisplay<K> {
 enum DisplayKind<K> {
     Text(String),
     Code(String),
-    Link { target: K, label: String },
+    Link {
+        target: K,
+        label: String,
+    },
     Sequence(Vec<TypeDisplay<K>>),
     Union(Vec<TypeDisplay<K>>),
     List(Box<TypeDisplay<K>>),
-    Map(Box<TypeDisplay<K>>),
+    Map {
+        key: Box<TypeDisplay<K>>,
+        value: Box<TypeDisplay<K>>,
+    },
 }
 
 impl<K> TypeDisplay<K> {
@@ -85,8 +91,15 @@ impl<K> TypeDisplay<K> {
     }
 
     pub fn map(value: Self) -> Self {
+        Self::map_with_key(Self::text("String"), value)
+    }
+
+    pub fn map_with_key(key: Self, value: Self) -> Self {
         Self {
-            kind: DisplayKind::Map(Box::new(value)),
+            kind: DisplayKind::Map {
+                key: Box::new(key),
+                value: Box::new(value),
+            },
         }
     }
 
@@ -107,13 +120,17 @@ impl<K> TypeDisplay<K> {
                 .collect::<Option<Vec<_>>>()
                 .map(|members| members.join(" | ")),
             DisplayKind::List(item) => item.literal_text().map(|item| format!("List<{item}>")),
-            DisplayKind::Map(value) => value.literal_text().map(|value| {
-                if value == "String" {
-                    "Map".to_string()
-                } else {
-                    format!("Map<String, {value}>")
-                }
-            }),
+            DisplayKind::Map { key, value } => {
+                key.literal_text()
+                    .zip(value.literal_text())
+                    .map(|(key, value)| {
+                        if key == "String" && value == "String" {
+                            "Map".to_string()
+                        } else {
+                            format!("Map<{key}, {value}>")
+                        }
+                    })
+            }
         }
     }
 }
@@ -152,11 +169,13 @@ impl<K: Clone> TypeDisplay<K> {
                     cell.push_text("\\>");
                 }
             }
-            DisplayKind::Map(value) => match self.literal_text() {
+            DisplayKind::Map { key, value } => match self.literal_text() {
                 Some(literal) if literal == "Map" => cell.push_text(literal),
                 Some(literal) => cell.push_code(literal),
                 None => {
-                    cell.push_text("Map\\<String, ");
+                    cell.push_text("Map\\<");
+                    key.write_parts(cell);
+                    cell.push_text(", ");
                     value.write_parts(cell);
                     cell.push_text("\\>");
                 }

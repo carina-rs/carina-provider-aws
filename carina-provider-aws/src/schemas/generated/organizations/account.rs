@@ -5,7 +5,6 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
@@ -110,7 +109,7 @@ pub fn organizations_account_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", tags_type())
+            AttributeSchema::optional("tags", AttributeType::map_with_key(AttributeType::refined_string(None, Some("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$".to_string()), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$".to_string()), Some((Some(0), Some(256))), None)))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),
