@@ -262,11 +262,70 @@ assert_ec2_security_group_state() {
     return 1
 }
 
+run_acm_certificate_replace() {
+    local work_dir="$1"
+    local description="$2"
+
+    printf "  %-55s " "$description"
+
+    local output
+    if output=$(cd "$work_dir" && with_account_creds "$CARINA_BIN" apply --auto-approve . 2>&1); then
+        echo "OK"
+        TOTAL_PASSED=$((TOTAL_PASSED + 1))
+    else
+        echo "FAIL"
+        echo "  ERROR: $output"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    local cert_create_line cert_delete_line record_create_line
+    cert_create_line=$(grep -nFm1 "✓ Create aws.acm.Certificate cert" <<< "$output" | cut -d: -f1)
+    cert_delete_line=$(grep -nFm1 "✓ Delete aws.acm.Certificate cert" <<< "$output" | cut -d: -f1)
+    record_create_line=$(grep -nFm1 "✓ Create aws.route53.RecordSet validation_records[0]" <<< "$output" | cut -d: -f1)
+
+    printf "  %-55s " "assert: certificate created before deletion"
+    if [ -z "$cert_create_line" ] || [ -z "$cert_delete_line" ] || \
+        [ "$cert_create_line" -ge "$cert_delete_line" ]; then
+        echo "FAIL"
+        echo "  ERROR: expected certificate Create before Delete in step-2 apply output:"
+        echo "  $output"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    echo "OK"
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+
+    printf "  %-55s " "assert: record created before certificate deletion"
+    if [ -z "$record_create_line" ] || [ "$record_create_line" -ge "$cert_delete_line" ]; then
+        echo "FAIL"
+        echo "  ERROR: expected validation record Create before certificate Delete in step-2 apply output:"
+        echo "  $output"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    echo "OK"
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+    return 0
+}
+
 # carina_state_query requires exactly one non-empty value, so this also checks
 # that state contains exactly one ACM certificate.
 get_acm_certificate_arn() {
     carina_state_query "$1" \
         '.resources[] | select(.resource_type == "acm.Certificate") | .current.identifier'
+}
+
+get_acm_validation_record_name() {
+    carina_state_query "$1" \
+        '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.name | ascii_downcase | rtrimstr(".")'
+}
+
+get_acm_validation_record_value() {
+    carina_state_query "$1" \
+        '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.value | ascii_downcase | rtrimstr(".")'
 }
 
 assert_acm_certificate_replaced() {
@@ -327,14 +386,14 @@ assert_acm_certificate_deleted() {
 assert_acm_validation_record_present() {
     local work_dir="$1"
     local description="$2"
+    local old_record_name="$3"
+    local old_record_value="$4"
 
-    printf "  %-55s " "$description"
+    printf "  %-55s " "assert: validation record name/value unchanged"
 
     local record_name record_value zone_id
-    if ! record_name=$(carina_state_query "$work_dir" \
-        '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.name') || \
-        ! record_value=$(carina_state_query "$work_dir" \
-            '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.value') || \
+    if ! record_name=$(get_acm_validation_record_name "$work_dir") || \
+        ! record_value=$(get_acm_validation_record_value "$work_dir") || \
         ! zone_id=$(carina_state_query "$work_dir" \
             '.resources[] | select(.provider == "awscc" and .resource_type == "route53.HostedZone") | .current.attributes.id'); then
         echo "FAIL"
@@ -343,6 +402,20 @@ assert_acm_validation_record_present() {
         TOTAL_FAILED=$((TOTAL_FAILED + 1))
         return 1
     fi
+
+    if [ "$record_name" != "$old_record_name" ] || [ "$record_value" != "$old_record_value" ]; then
+        echo "FAIL"
+        echo "  ERROR: validation record changed after replacement"
+        echo "    before: $old_record_name -> $old_record_value"
+        echo "    after:  $record_name -> $record_value"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    echo "OK"
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+
+    printf "  %-55s " "$description"
 
     local output
     if output=$(with_account_creds aws route53 list-resource-record-sets \
@@ -504,10 +577,21 @@ run_test() {
     fi
 
     local old_acm_certificate_arn=""
+    local old_acm_validation_record_name="" old_acm_validation_record_value=""
     if [ "$test_name" = "acm_certificate" ]; then
         if ! old_acm_certificate_arn=$(get_acm_certificate_arn "$work_dir"); then
             echo "  assert: read certificate ARN after step 1             FAIL"
             echo "  ERROR: expected exactly 1 acm.Certificate with an ARN in state"
+            TOTAL_FAILED=$((TOTAL_FAILED + 1))
+            destroy_work_dir "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+
+        if ! old_acm_validation_record_name=$(get_acm_validation_record_name "$work_dir") || \
+            ! old_acm_validation_record_value=$(get_acm_validation_record_value "$work_dir"); then
+            echo "  assert: read validation record after step 1           FAIL"
+            echo "  ERROR: could not read the validation record name and value from state"
             TOTAL_FAILED=$((TOTAL_FAILED + 1))
             destroy_work_dir "$work_dir"
             ACTIVE_WORK_DIR=""
@@ -549,7 +633,13 @@ run_test() {
     fi
 
     # Step 2: Apply modified config (triggers create_before_destroy replacement)
-    if ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "--auto-approve"; then
+    if [ "$test_name" = "acm_certificate" ]; then
+        if ! run_acm_certificate_replace "$work_dir" "step2: apply replace (create_before_destroy)"; then
+            destroy_work_dir "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+    elif ! run_step "$work_dir" "step2: apply replace (create_before_destroy)" "apply" "--auto-approve"; then
         destroy_work_dir "$work_dir"
         ACTIVE_WORK_DIR=""
         return 1
@@ -596,7 +686,8 @@ run_test() {
 
         # carina-rs/carina#4283: deleting the old record must preserve the shared CNAME.
         if ! assert_acm_validation_record_present \
-            "$work_dir" "assert: validation record survives replacement"; then
+            "$work_dir" "assert: validation record survives replacement" \
+            "$old_acm_validation_record_name" "$old_acm_validation_record_value"; then
             destroy_work_dir "$work_dir"
             ACTIVE_WORK_DIR=""
             return 1
