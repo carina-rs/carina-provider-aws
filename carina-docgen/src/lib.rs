@@ -1,8 +1,14 @@
 //! Registry-compatible Markdown page construction and generated-page checks.
 
+mod attribute_type;
 pub mod example;
 mod type_display;
 
+pub use attribute_type::{
+    Bounds, Declaration, DeclarationKind, DocLink, ListConstraints, MapConstraints, NamedKind,
+    Resolved, ScalarDoc, TypeDocHooks, TypeEdge, list_display, map_display, named_display,
+    render_attribute_type, render_field_groups, scalar_display,
+};
 pub use type_display::TypeDisplay;
 use type_display::escape_literal_text;
 
@@ -56,7 +62,7 @@ impl Heading {
                 self.level
             )));
         }
-        if self.content.contains(['\n', '\r']) {
+        if matches!(self.style, HeadingStyle::Plain) && self.content.contains(['\n', '\r']) {
             return Err(DocgenError::build(
                 "Markdown heading content must fit on one line",
             ));
@@ -64,7 +70,7 @@ impl Heading {
         let marker = "#".repeat(usize::from(self.level));
         let content = match self.style {
             HeadingStyle::Plain => self.content.clone(),
-            HeadingStyle::Code => inline_code(&self.content),
+            HeadingStyle::Code => render_code_span(&self.content, false, "heading")?,
         };
         Ok(format!("{marker} {content}"))
     }
@@ -213,7 +219,23 @@ where
         attribute_type: TableCell<K>,
         description: Option<&str>,
     ) -> Result<(), DocgenError> {
-        self.heading(Heading::code(3, name))?;
+        self.attribute_reference_entry_with_target(name, attribute_type, description, None)
+    }
+
+    /// Write an attribute entry, binding its optional target when its heading
+    /// is written so subsequent page content cannot change the target's anchor.
+    pub fn attribute_reference_entry_with_target(
+        &mut self,
+        name: &str,
+        attribute_type: TableCell<K>,
+        description: Option<&str>,
+        target: Option<K>,
+    ) -> Result<(), DocgenError> {
+        let heading = Heading::code(3, name);
+        match target {
+            Some(target) => self.target_heading(target, heading)?,
+            None => self.heading(heading)?,
+        }
         self.push_str("- **Type:** ");
         self.write_inline_parts(attribute_type, false);
         self.push_str("\n- **Read-only**\n\n");
@@ -320,11 +342,12 @@ where
                     });
                 }
                 PageChunk::Code { literal, in_table } => {
-                    let code = if in_table {
-                        table_inline_code(&literal)
+                    let context = if in_table {
+                        "table cell"
                     } else {
-                        inline_code(&literal)
+                        "inline code"
                     };
+                    let code = render_code_span(&literal, in_table, context)?;
                     markdown.push_str(&code);
                 }
                 PageChunk::Link {
@@ -366,7 +389,11 @@ where
 
     fn write_heading(&mut self, heading: Heading) -> Result<String, DocgenError> {
         let markdown = heading.markdown()?;
-        let slug = self.slugs.unique(heading_slug(&heading.content));
+        let content = match heading.style {
+            HeadingStyle::Plain => heading.content,
+            HeadingStyle::Code => attribute_type::visible_code_literal(&heading.content),
+        };
+        let slug = self.slugs.unique(heading_slug(&content));
         self.heading_ids.push(slug.clone());
         self.push_str(&markdown);
         self.push_str("\n\n");
@@ -397,7 +424,6 @@ where
                 literal: existing,
                 in_table: existing_in_table,
             }) if *existing_in_table == in_table => existing.push_str(&literal),
-            _ if literal.is_empty() => {}
             _ => self.chunks.push(PageChunk::Code { literal, in_table }),
         }
     }
@@ -467,94 +493,37 @@ fn escape_table_cell(value: &str) -> String {
     escaped
 }
 
-fn table_inline_code(literal: &str) -> String {
-    let mut markdown = String::new();
-    let mut start = 0;
-    let mut preceding_backslashes = 0_usize;
-    for (index, character) in literal.char_indices() {
-        if character == '|' && !preceding_backslashes.is_multiple_of(2) {
-            // Comrak 0.54's table parser removes a backslash from odd runs
-            // before pipes, so one code span cannot retain an odd literal run.
-            // Split before the pipe; an invisible comment keeps the resulting
-            // code spans' backtick delimiters from touching.
-            markdown.push_str(&inline_code(&escape_table_cell(&literal[start..index])));
-            markdown.push_str("<!---->");
-            start = index;
-        }
-        if character == '\\' {
-            preceding_backslashes += 1;
-        } else {
-            preceding_backslashes = 0;
-        }
-    }
-    markdown.push_str(&inline_code(&escape_table_cell(&literal[start..])));
-    markdown
-}
-
-fn inline_code(value: &str) -> String {
-    let value = value.replace("\r\n", " ").replace(['\r', '\n'], " ");
-    if value.is_empty() {
-        return value;
-    }
-
-    let mut longest_run = 0_usize;
-    let mut current_run = 0_usize;
-    for character in value.chars() {
-        if character == '`' {
-            current_run += 1;
-            longest_run = longest_run.max(current_run);
-        } else {
-            current_run = 0;
-        }
-    }
-
-    let delimiter = "`".repeat(longest_run + 1);
-    let needs_padding = value.starts_with('`')
-        || value.ends_with('`')
-        || (value.starts_with(' ')
-            && value.ends_with(' ')
-            && !value.chars().all(char::is_whitespace));
-    if needs_padding {
-        format!("{delimiter} {value} {delimiter}")
-    } else {
-        format!("{delimiter}{value}{delimiter}")
-    }
+fn render_code_span(
+    literal: &str,
+    in_table: bool,
+    context: &'static str,
+) -> Result<String, DocgenError> {
+    attribute_type::code_span(literal, in_table).map_err(|source| DocgenError::Literal {
+        context,
+        literal: literal.to_string(),
+        source,
+    })
 }
 
 /// An error encountered while constructing or validating a generated page.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DocgenError {
+    #[error("{0}")]
     Build(String),
-    Check(PageCheckError),
+    #[error("{0}")]
+    Check(#[from] PageCheckError),
+    #[error("cannot render {context} literal {literal:?}: {source}")]
+    Literal {
+        context: &'static str,
+        literal: String,
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 impl DocgenError {
     fn build(message: impl Into<String>) -> Self {
         Self::Build(message.into())
-    }
-}
-
-impl fmt::Display for DocgenError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Build(message) => formatter.write_str(message),
-            Self::Check(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl std::error::Error for DocgenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Build(_) => None,
-            Self::Check(error) => Some(error),
-        }
-    }
-}
-
-impl From<PageCheckError> for DocgenError {
-    fn from(error: PageCheckError) -> Self {
-        Self::Check(error)
     }
 }
 

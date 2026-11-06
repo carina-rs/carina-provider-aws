@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
-use carina_core::schema::{AttributeType, FieldGroup, FieldGroupKind, RawShape};
+use carina_core::schema::{
+    AttributeType, Draft, FieldGroup, FieldGroupKind, ListElements, RawShape, TypeIdentity,
+};
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
 use heck::{ToSnakeCase, ToUpperCamelCase};
@@ -23,13 +25,17 @@ use carina_codegen_aws::kms_references::{
 };
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
-use carina_docgen::{Heading, PageBuilder, TableCell, TypeDisplay};
+use carina_docgen::{
+    Bounds, Declaration, DeclarationKind, DocLink, Heading, ListConstraints, MapConstraints,
+    NamedKind, PageBuilder, Resolved, ScalarDoc, TableCell, TypeDisplay, TypeDocHooks, TypeEdge,
+    list_display, map_display, named_display, render_attribute_type, render_field_groups,
+    scalar_display,
+};
 
 mod tag_types;
 use tag_types::{TagMapType, resource_tag_type};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
-type LengthBounds = Option<(Option<u64>, Option<u64>)>;
 
 #[derive(Parser, Debug)]
 #[command(name = "smithy-codegen")]
@@ -147,20 +153,12 @@ enum TypeOverride {
 
 struct ValueTypeOverride {
     type_code: String,
-    display: MarkdownType,
+    documentation: Option<String>,
     attribute_type: AttributeType,
 }
 
-fn pattern_display(prefix: impl Into<String>, pattern: &str) -> MarkdownType {
-    MarkdownType::sequence([
-        MarkdownType::text(prefix),
-        MarkdownType::code(pattern),
-        MarkdownType::text(")"),
-    ])
-}
-
 /// Read the Smithy length trait for strings and collections through one path.
-fn length_from_traits(traits: &carina_smithy::Traits) -> LengthBounds {
+fn length_from_traits(traits: &carina_smithy::Traits) -> Bounds<u64> {
     traits.get("smithy.api#length").map(|length| {
         (
             length.get("min").and_then(|value| value.as_u64()),
@@ -169,26 +167,8 @@ fn length_from_traits(traits: &carina_smithy::Traits) -> LengthBounds {
     })
 }
 
-fn string_refinement_display(pattern: Option<&str>, length: LengthBounds) -> MarkdownType {
-    let prefix = match length {
-        Some((min, max)) => format!("String(length: {}", range_display_string(min, max)),
-        None => "String(".to_string(),
-    };
-    match pattern {
-        Some(pattern) => pattern_display(
-            format!(
-                "{prefix}{}pattern: ",
-                if length.is_some() { ", " } else { "" }
-            ),
-            pattern,
-        ),
-        None if length.is_some() => MarkdownType::text(format!("{prefix})")),
-        None => MarkdownType::text("String"),
-    }
-}
-
 /// Anonymous strings share their Rust literal encoding and schema metadata.
-fn string_refinement(pattern: Option<&str>, length: LengthBounds) -> ValueTypeOverride {
+fn string_refinement(pattern: Option<&str>, length: Bounds<u64>) -> ValueTypeOverride {
     let pattern_code = pattern.map_or_else(
         || "None".to_string(),
         |pattern| format!("Some({pattern:?}.to_string())"),
@@ -200,7 +180,7 @@ fn string_refinement(pattern: Option<&str>, length: LengthBounds) -> ValueTypeOv
     };
     ValueTypeOverride {
         type_code,
-        display: string_refinement_display(pattern, length),
+        documentation: None,
         attribute_type: AttributeType::refined_string(
             None,
             pattern.map(str::to_string),
@@ -211,7 +191,7 @@ fn string_refinement(pattern: Option<&str>, length: LengthBounds) -> ValueTypeOv
 }
 
 /// Ordinary maps and tag collections use the same constructor selection.
-fn map_type_code(key: &str, value: &str, length: LengthBounds) -> String {
+fn map_type_code(key: &str, value: &str, length: Bounds<u64>) -> String {
     if length.is_some() {
         format!("AttributeType::refined_map({key}, {value}, {length:?})")
     } else if key == PLAIN_STRING_TYPE_CODE {
@@ -224,13 +204,13 @@ fn map_type_code(key: &str, value: &str, length: LengthBounds) -> String {
 /// Rust and documentation use the same exact resource/path lookup. Enum
 /// identities retain their separate Smithy-shape lookup in enum_identity_override.
 fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
-    let (type_code, display, attribute_type) = match resource_type_overrides()
+    let (type_code, attribute_type, documentation) = match resource_type_overrides()
         .get(&(resource, property_path))?
     {
         TypeOverride::IntRange { min, max } => (
             format!("AttributeType::refined_int(None, Some((Some({min}), Some({max}))))"),
-            MarkdownType::text(format!("Int({min}..={max})")),
             AttributeType::refined_int(None, Some((Some(*min), Some(*max)))),
+            None,
         ),
         TypeOverride::StringBounds { min, max } => {
             return Some(string_refinement(None, Some((Some(*min), Some(*max)))));
@@ -248,84 +228,31 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
         TypeOverride::StringPattern(pattern) => {
             return Some(string_refinement(Some(pattern), None));
         }
-        TypeOverride::AnonymousStringConstructor(constructor) => {
-            let attr = attribute_type_from_code(constructor)
-                .expect("anonymous String constructor must resolve");
-            let RawShape::String {
-                identity: None,
-                pattern: Some(pattern),
-                length: Some((Some(minimum), Some(maximum))),
-                validate: None,
-                ..
-            } = attr.raw_shape()
-            else {
-                panic!("anonymous String constructor must expose its pattern and bounds");
-            };
-            (
-                constructor.to_string(),
-                pattern_display(
-                    format!("String(length: {minimum}..={maximum}, pattern: "),
-                    pattern,
-                ),
-                attr.clone(),
-            )
-        }
-        TypeOverride::CoreType(constructor) => (
+        TypeOverride::AnonymousStringConstructor(constructor)
+        | TypeOverride::CoreType(constructor) => (
             constructor.to_string(),
-            type_code_to_markdown(constructor),
-            attribute_type_from_code(constructor).expect("registered core type"),
+            attribute_type_from_code(constructor).expect("registered type"),
+            None,
         ),
-        TypeOverride::ListLength { .. } => return None,
+        TypeOverride::ListLength { .. } | TypeOverride::EnumIdentity(_) => return None,
         TypeOverride::SharedType(row) => {
-            let attr = row.attribute_type();
-            let display = if let Some(values) = row.allowed_int_values() {
-                let values = values
-                    .iter()
-                    .map(i64::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                MarkdownType::text(format!("{} (Int; allowed: {values})", row.identity().kind))
-            } else if let RawShape::String {
-                pattern: Some(pattern),
-                length: Some((Some(minimum), Some(maximum))),
-                ..
-            } = attr.raw_shape()
-            {
-                pattern_display(
-                    format!(
-                        "{} (String; length: {minimum}..={maximum}, pattern: ",
-                        type_code_to_display(row.constructor_path())
-                    ),
-                    pattern,
-                )
-            } else if let RawShape::String {
-                length: Some((Some(minimum), Some(maximum))),
-                ..
-            } = attr.raw_shape()
-            {
-                MarkdownType::text(format!(
-                    "{} (String; length: {minimum}..={maximum})",
-                    type_code_to_display(row.constructor_path())
-                ))
-            } else if let RawShape::String {
-                pattern: Some(pattern),
-                ..
-            } = attr.raw_shape()
-            {
-                pattern_display(
-                    format!(
-                        "{} (String; pattern: ",
-                        type_code_to_display(row.constructor_path())
-                    ),
-                    pattern,
-                )
-            } else {
-                MarkdownType::text(type_code_to_display(row.constructor_path()))
-            };
+            // Supplemental AWS validation explanations are documentation metadata,
+            // separate from the shared renderer's scalar and constraint wording.
+            let mut notes = Vec::new();
+            if let Some(values) = row.allowed_int_values() {
+                notes.push(format!(
+                    "allowed: {}",
+                    values
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             let ec2_rule = match row {
-                AwsType::Ec2AmazonSideAsn => Some("Int; 64512..=65534 or 4200000000..=4294967294"),
+                AwsType::Ec2AmazonSideAsn => Some("64512..=65534 or 4200000000..=4294967294"),
                 AwsType::Ec2VpnGatewayAmazonSideAsn => Some(
-                    "Int; 64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs: 7224, 9059, 10124, 17493",
+                    "64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs: 7224, 9059, 10124, 17493",
                 ),
                 AwsType::Ec2VpcCidrBlock => {
                     Some("IPv4 /16..=/28; excludes 0/8, 127/8, 169.254/16, 224/4")
@@ -338,29 +265,25 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                 AwsType::Ec2SecurityGroupName => Some("must not start with sg-"),
                 _ => None,
             };
-            let display = if let Some(rule) = ec2_rule {
-                MarkdownType::sequence([display, MarkdownType::text(format!("; {rule}"))])
-            } else if matches!(
+            if let Some(rule) = ec2_rule {
+                notes.push(rule.to_string());
+            }
+            if matches!(
                 row,
                 AwsType::AcmCertificateDomainName | AwsType::AcmCertificateSubjectAlternativeName
             ) {
-                MarkdownType::sequence([
-                    display,
-                    MarkdownType::text(format!(
-                        "; {}",
-                        carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE
-                    )),
-                ])
-            } else {
-                display
-            };
-            (row.constructor_path().to_string(), display, attr)
+                notes.push(carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE.to_string());
+            }
+            (
+                row.constructor_path().to_string(),
+                row.attribute_type(),
+                (!notes.is_empty()).then(|| notes.join("; ")),
+            )
         }
-        TypeOverride::EnumIdentity(_) => return None,
     };
     Some(ValueTypeOverride {
         type_code,
-        display,
+        documentation,
         attribute_type,
     })
 }
@@ -373,17 +296,14 @@ impl ValueTypeOverride {
         enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
         structs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
     ) -> Result<MarkdownType> {
-        if matches!(self.attribute_type.raw_shape(), RawShape::Enum { .. }) {
-            discover_markdown_attribute_type(
-                &self.attribute_type,
-                heading_path,
-                namespace,
-                enums,
-                structs,
-            )
-        } else {
-            Ok(self.display)
-        }
+        let display = discover_markdown_attribute_type(
+            &self.attribute_type,
+            heading_path,
+            namespace,
+            enums,
+            structs,
+        )?;
+        Ok(display.with_note(self.documentation))
     }
 }
 
@@ -415,7 +335,7 @@ fn string_list_value_override(
                 "AttributeType::refined_list({}, true, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
                 element.type_code
             ),
-            display: MarkdownType::list(element.display),
+            documentation: element.documentation,
             attribute_type: AttributeType::refined_list(
                 element.attribute_type,
                 true,
@@ -426,7 +346,7 @@ fn string_list_value_override(
     }
     Some(ValueTypeOverride {
         type_code: format!("AttributeType::unordered_list({})", element.type_code),
-        display: MarkdownType::list(element.display),
+        documentation: element.documentation,
         attribute_type: AttributeType::unordered_list(element.attribute_type),
     })
 }
@@ -3478,18 +3398,13 @@ fn bound_int_override(
         carina_aws_types::with_int_range(value.attribute_type.clone(), bounds.min, bounds.max);
     if let RawShape::Int {
         range: bounded_range,
-        identity,
         ..
     } = bounded.raw_shape()
+        && range == bounded_range
     {
-        if range == bounded_range {
-            return value;
-        }
-        if identity.is_none() {
-            let (min, max) = bounded_range.unwrap();
-            value.display = MarkdownType::text(format!("Int({})", range_display_string(min, max)));
-        }
+        return value;
     }
+
     value.type_code = format!(
         "carina_aws_types::with_int_range({}, {:?}, {:?})",
         value.type_code, bounds.min, bounds.max
@@ -3516,7 +3431,7 @@ fn bounded_int_constructor_code(
         field_name,
         ValueTypeOverride {
             type_code: code.to_string(),
-            display: type_code_to_markdown(code),
+            documentation: None,
             attribute_type: attribute_type_from_code(code)?,
         },
     )
@@ -6001,6 +5916,7 @@ struct MarkdownStructKey {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum MarkdownTarget {
+    Attribute(String),
     Enum(MarkdownEnumKey),
     Struct(MarkdownStructKey),
 }
@@ -6016,6 +5932,7 @@ struct MarkdownEnum {
 
 #[derive(Debug)]
 struct MarkdownStruct {
+    union_members: Option<Vec<MarkdownType>>,
     fields: Vec<MarkdownStructField>,
     // Captured from the shared union mapping or the hand-written type's raw shape.
     field_groups: Vec<FieldGroup>,
@@ -6038,20 +5955,7 @@ struct MarkdownAttrInfo {
 }
 
 fn render_struct_field_groups(page: &mut PageBuilder<MarkdownTarget>, field_groups: &[FieldGroup]) {
-    for group in field_groups {
-        let (cardinality, verb) = match group.kind() {
-            FieldGroupKind::ExactlyOne => ("Exactly one", "must"),
-            FieldGroupKind::AtLeastOne => ("At least one", "must"),
-            FieldGroupKind::AtMostOne => ("At most one", "may"),
-        };
-        let fields = group
-            .fields()
-            .iter()
-            .map(|field| format!("`{field}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        page.push_str(&format!("{cardinality} of {fields} {verb} be set.\n\n"));
-    }
+    render_field_groups(page, field_groups);
 }
 
 fn declared_scalar_display_name(identity: &carina_core::schema::TypeIdentity) -> String {
@@ -6070,22 +5974,174 @@ fn discover_markdown_override(
     structs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
 ) -> Result<MarkdownType> {
     let attr_type = attribute_type_from_code(code)?;
-    if matches!(
-        attr_type.raw_shape(),
-        RawShape::Struct { .. }
-            | RawShape::Enum { .. }
-            | RawShape::List { .. }
-            | RawShape::Map { .. }
-            | RawShape::Union(..)
-    ) {
-        discover_markdown_attribute_type(&attr_type, heading_path, namespace, enums, structs)
-    } else {
-        Ok(type_code_to_markdown(code))
+    discover_markdown_attribute_type(&attr_type, heading_path, namespace, enums, structs)
+}
+
+#[derive(Clone)]
+struct MarkdownScope {
+    heading_path: Vec<String>,
+    namespace: String,
+}
+
+struct MarkdownHooks<'store, 'a> {
+    enums: &'store mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
+    structs: &'store mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
+    pending: Vec<(MarkdownStructKey, MarkdownScope, DeclarationKind<'a, Draft>)>,
+}
+
+impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
+    type NodeId = usize;
+    type Target = MarkdownTarget;
+    type Scope = MarkdownScope;
+
+    fn resolve(&self, ty: &'a AttributeType) -> Result<Resolved<'a, Draft, usize>> {
+        if let RawShape::Ref(name) = ty.raw_shape() {
+            anyhow::bail!("cannot document unresolved schema type {name}");
+        }
+        Ok(Resolved {
+            id: ty as *const AttributeType as usize,
+            ty,
+        })
+    }
+
+    fn scalar_name(&self, identity: &TypeIdentity) -> String {
+        declared_scalar_display_name(identity)
+    }
+
+    fn child_scope(&self, parent: &MarkdownScope, edge: TypeEdge<'_>) -> MarkdownScope {
+        let mut scope = parent.clone();
+        match edge {
+            TypeEdge::Field(name) => scope.heading_path.push(name.to_string()),
+            TypeEdge::Item | TypeEdge::Key | TypeEdge::Value | TypeEdge::Member(_) => {}
+        }
+        scope
+    }
+
+    fn register(
+        &mut self,
+        scope: &MarkdownScope,
+        declaration: Declaration<'a, Draft, usize>,
+    ) -> Result<DocLink<MarkdownTarget>> {
+        match declaration.kind {
+            DeclarationKind::Enum {
+                identity,
+                values,
+                dsl_aliases,
+                ..
+            } => {
+                // Dynamic enums have no static values table. Link their existing
+                // attribute documentation, keeping the page's established anchors.
+                if values.is_none() {
+                    let root = scope
+                        .heading_path
+                        .first()
+                        .context("open enum needs an attribute heading")?;
+                    return Ok(DocLink {
+                        target: MarkdownTarget::Attribute(root.clone()),
+                        label: identity.kind.clone(),
+                    });
+                }
+                let namespace = identity
+                    .dotted_prefix()
+                    .unwrap_or_else(|| scope.namespace.clone());
+                let key = register_markdown_enum(
+                    MarkdownEnumSource::AttributeType(identity.to_string()),
+                    scope
+                        .heading_path
+                        .last()
+                        .map(String::as_str)
+                        .unwrap_or(&identity.kind),
+                    &identity.kind,
+                    &scope.heading_path,
+                    &namespace,
+                    values.unwrap_or_default().to_vec(),
+                    self.enums,
+                );
+                self.enums
+                    .get_mut(&key)
+                    .expect("registered enum")
+                    .dsl_aliases = dsl_aliases.to_vec();
+                Ok(DocLink {
+                    target: MarkdownTarget::Enum(key),
+                    label: identity.kind.clone(),
+                })
+            }
+            DeclarationKind::Struct {
+                name,
+                fields,
+                field_groups,
+            } => {
+                let mut child = scope.clone();
+                child.namespace = format!("{}.{name}", scope.namespace);
+                let key = MarkdownStructKey {
+                    namespace: child.namespace.clone(),
+                    heading_path: scope.heading_path.clone(),
+                    target: format!("AttributeType:{name}"),
+                };
+                if !self.structs.contains_key(&key) {
+                    self.structs.insert(
+                        key.clone(),
+                        MarkdownStruct {
+                            fields: Vec::new(),
+                            field_groups: field_groups.to_vec(),
+                            union_members: None,
+                        },
+                    );
+                    self.pending.push((
+                        key.clone(),
+                        child,
+                        DeclarationKind::Struct {
+                            name,
+                            fields,
+                            field_groups,
+                        },
+                    ));
+                }
+                Ok(DocLink {
+                    target: MarkdownTarget::Struct(key),
+                    label: name.to_string(),
+                })
+            }
+            DeclarationKind::Union { members } => {
+                let label = scope
+                    .heading_path
+                    .last()
+                    .map(|name| name.to_upper_camel_case())
+                    .unwrap_or_else(|| "Value".into());
+                let key = MarkdownStructKey {
+                    namespace: scope.namespace.clone(),
+                    heading_path: scope.heading_path.clone(),
+                    target: format!("AttributeType:Union:{:?}", declaration.ty),
+                };
+                if !self.structs.contains_key(&key) {
+                    self.structs.insert(
+                        key.clone(),
+                        MarkdownStruct {
+                            fields: Vec::new(),
+                            field_groups: Vec::new(),
+                            union_members: Some(Vec::new()),
+                        },
+                    );
+                    self.pending.push((
+                        key.clone(),
+                        scope.clone(),
+                        DeclarationKind::Union { members },
+                    ));
+                }
+                Ok(DocLink {
+                    target: MarkdownTarget::Struct(key),
+                    label,
+                })
+            }
+            DeclarationKind::Recursive => {
+                anyhow::bail!("AWS attribute overrides cannot contain unresolved recursive aliases")
+            }
+        }
     }
 }
 
-/// Walk the real AttributeType tree, including hand-written nested structs.
-/// Group metadata stays on each struct and is read only when rendering its table.
+/// AWS owns declaration layout and scope; all shape traversal and type wording
+/// live in carina-docgen. Targets are reserved before queued children are read.
 fn discover_markdown_attribute_type(
     attr_type: &AttributeType,
     heading_path: &[String],
@@ -6093,169 +6149,58 @@ fn discover_markdown_attribute_type(
     enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
     structs: &mut BTreeMap<MarkdownStructKey, MarkdownStruct>,
 ) -> Result<MarkdownType> {
-    Ok(match attr_type.raw_shape() {
-        RawShape::Struct {
-            name,
-            fields,
-            field_groups,
-        } => {
-            let namespace = format!("{namespace}.{name}");
-            let key = MarkdownStructKey {
-                namespace: namespace.clone(),
-                heading_path: heading_path.to_vec(),
-                target: format!("AttributeType:{name}"),
-            };
-            if !structs.contains_key(&key) {
+    let mut hooks = MarkdownHooks {
+        enums,
+        structs,
+        pending: Vec::new(),
+    };
+    let scope = MarkdownScope {
+        heading_path: heading_path.to_vec(),
+        namespace: namespace.to_string(),
+    };
+    let display = render_attribute_type(attr_type, &scope, &mut hooks)?;
+    while let Some((key, scope, kind)) = hooks.pending.pop() {
+        match kind {
+            DeclarationKind::Struct { fields, .. } => {
                 let fields = fields
                     .iter()
                     .map(|field| {
-                        let mut path = heading_path.to_vec();
-                        path.push(field.name().to_string());
+                        let child = hooks.child_scope(&scope, TypeEdge::Field(field.name()));
                         Ok(MarkdownStructField {
                             snake_name: field.name().to_string(),
-                            field_type: discover_markdown_attribute_type(
+                            field_type: render_attribute_type(
                                 field.field_type(),
-                                &path,
-                                &namespace,
-                                enums,
-                                structs,
+                                &child,
+                                &mut hooks,
                             )?,
                             is_required: field.parts().declared_input_mode.is_required(),
                             description: field.description().map(Description::authored),
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
-                structs.insert(
-                    key.clone(),
-                    MarkdownStruct {
-                        fields,
-                        field_groups: field_groups.to_vec(),
-                    },
-                );
+                hooks.structs.get_mut(&key).expect("reserved struct").fields = fields;
             }
-            MarkdownType::link(MarkdownTarget::Struct(key), format!("Struct({name})"))
-        }
-        RawShape::List {
-            element_type,
-            constraints,
-            ..
-        } => {
-            let list = MarkdownType::list(discover_markdown_attribute_type(
-                element_type,
-                heading_path,
-                namespace,
-                enums,
-                structs,
-            )?);
-            if let Some((min, max)) = constraints.length() {
-                MarkdownType::sequence([
-                    list,
-                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
-                ])
-            } else {
-                list
+            DeclarationKind::Union { members } => {
+                let members = members
+                    .iter()
+                    .enumerate()
+                    .map(|(index, member)| {
+                        let child = hooks.child_scope(&scope, TypeEdge::Member(index));
+                        render_attribute_type(member, &child, &mut hooks)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                hooks
+                    .structs
+                    .get_mut(&key)
+                    .expect("reserved union")
+                    .union_members = Some(members);
+            }
+            DeclarationKind::Enum { .. } | DeclarationKind::Recursive => {
+                unreachable!("only compound definitions are queued")
             }
         }
-        RawShape::Map {
-            key,
-            value,
-            constraints,
-        } => {
-            let map = MarkdownType::map_with_key(
-                discover_markdown_attribute_type(key, heading_path, namespace, enums, structs)?,
-                discover_markdown_attribute_type(value, heading_path, namespace, enums, structs)?,
-            );
-            if let Some((min, max)) = constraints.length() {
-                MarkdownType::sequence([
-                    map,
-                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
-                ])
-            } else {
-                map
-            }
-        }
-        RawShape::Union(members) => MarkdownType::union(
-            members
-                .iter()
-                .map(|member| {
-                    discover_markdown_attribute_type(
-                        member,
-                        heading_path,
-                        namespace,
-                        enums,
-                        structs,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?,
-        ),
-        RawShape::Enum {
-            identity,
-            values,
-            dsl_aliases,
-            ..
-        } => {
-            if let Some(values) = values {
-                let enum_namespace = identity
-                    .dotted_prefix()
-                    .unwrap_or_else(|| namespace.to_string());
-                let key = register_markdown_enum(
-                    MarkdownEnumSource::AttributeType(identity.to_string()),
-                    heading_path
-                        .last()
-                        .map(String::as_str)
-                        .unwrap_or(&identity.kind),
-                    &identity.kind,
-                    heading_path,
-                    &enum_namespace,
-                    values.to_vec(),
-                    enums,
-                );
-                enums.get_mut(&key).expect("registered enum").dsl_aliases = dsl_aliases.to_vec();
-                MarkdownType::link(
-                    MarkdownTarget::Enum(key),
-                    format!("Enum ({})", identity.kind),
-                )
-            } else {
-                MarkdownType::text(identity.kind.clone())
-            }
-        }
-        RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
-        } => {
-            if let Some(identity) = identity {
-                MarkdownType::text(declared_scalar_display_name(identity))
-            } else {
-                string_refinement_display(pattern, length)
-            }
-        }
-        RawShape::Reference { identity, .. } => {
-            MarkdownType::text(declared_scalar_display_name(identity))
-        }
-        RawShape::Int {
-            identity, range, ..
-        } => MarkdownType::text(if let Some(identity) = identity {
-            declared_scalar_display_name(identity)
-        } else if let Some((min, max)) = range {
-            format!("Int({})", range_display_string(min, max))
-        } else {
-            "Int".to_string()
-        }),
-        RawShape::Float { identity, .. } => MarkdownType::text(
-            identity
-                .map(declared_scalar_display_name)
-                .unwrap_or_else(|| "Float".to_string()),
-        ),
-        RawShape::Bool => MarkdownType::text("Bool".to_string()),
-        RawShape::Duration => MarkdownType::text("Duration".to_string()),
-        RawShape::UnloadedSchemaType(unloaded) => anyhow::bail!(
-            "cannot document unloaded schema type {}",
-            unloaded.identity()
-        ),
-        RawShape::Ref(name) => anyhow::bail!("cannot document unresolved schema type {name}"),
-    })
+    }
+    Ok(display)
 }
 
 /// Generate markdown documentation for a single resource.
@@ -6491,7 +6436,13 @@ fn generate_markdown_resource(
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
         let attr_type = if let Some(code) = reference_type_code(res.name, &snake_name) {
-            type_code_to_markdown(code)
+            discover_markdown_override(
+                code,
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
         } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
             override_type.markdown(
                 std::slice::from_ref(&snake_name),
@@ -6508,9 +6459,21 @@ fn generate_markdown_resource(
                 &mut struct_defs,
             )?
         } else if is_aws_resource_id_property(extra.name) {
-            MarkdownType::text(resource_id_display(extra.name))
+            scalar_display(ScalarDoc::String {
+                name: &resource_id_display(extra.name),
+                pattern: None,
+                length: None,
+                validate: false,
+                to_dsl: None,
+            })
         } else {
-            MarkdownType::text("String".to_string())
+            scalar_display(ScalarDoc::String {
+                name: "String",
+                pattern: None,
+                length: None,
+                validate: false,
+                to_dsl: None,
+            })
         };
         let entry = MarkdownAttrInfo {
             snake_name: snake_name.clone(),
@@ -6533,17 +6496,27 @@ fn generate_markdown_resource(
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
         let attr_type = if let Some(override_type) = resource_value_override(res.name, &snake_name)
         {
-            Some(override_type.display)
-        } else if name == "Arn" {
-            resource_identity_parts(res.name)
-                .and_then(|(service, resource)| shared_arn_constructor(service, resource))
-                .map(|constructor| type_code_to_display(&format!("super::{constructor}()")))
-                .map(MarkdownType::text)
+            override_type.markdown(
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
+        } else if let Some(constructor) = (name == "Arn")
+            .then(|| {
+                resource_identity_parts(res.name)
+                    .and_then(|(service, resource)| shared_arn_constructor(service, resource))
+            })
+            .flatten()
+        {
+            discover_markdown_override(
+                &format!("super::{constructor}()"),
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
         } else {
-            None
-        }
-        .map(Ok)
-        .unwrap_or_else(|| {
             discover_markdown_type(
                 model,
                 res.name,
@@ -6558,8 +6531,8 @@ fn generate_markdown_resource(
                 &mut all_enums,
                 &mut struct_defs,
                 &mut discovering_structs,
-            )
-        })?;
+            )?
+        };
 
         read_only_attrs.push(MarkdownAttrInfo {
             snake_name,
@@ -6591,6 +6564,7 @@ fn generate_markdown_resource(
     .with_context(|| format!("validating Markdown heading paths for aws.{}", res.name))?;
 
     let mut page = PageBuilder::new();
+    let mut attribute_headings = HashSet::new();
 
     page.heading(Heading::plain(1, format!("aws.{}", res.name)))?;
 
@@ -6655,7 +6629,14 @@ fn generate_markdown_resource(
     }
 
     for attr in &writable_attrs {
-        page.heading(Heading::code(3, &attr.snake_name))?;
+        if attribute_headings.insert(attr.snake_name.clone()) {
+            page.target_heading(
+                MarkdownTarget::Attribute(attr.snake_name.clone()),
+                Heading::code(3, &attr.snake_name),
+            )?;
+        } else {
+            page.heading(Heading::code(3, &attr.snake_name))?;
+        }
         page.push_str("- **Type:** ");
         attr.attr_type.write_to(&mut page);
         page.push_str("\n");
@@ -6697,10 +6678,14 @@ fn generate_markdown_resource(
         page.heading(Heading::plain(2, "Attribute Reference"))?;
         for attr in &read_only_attrs {
             let description = attr.description.as_ref().map(Description::markdown);
-            page.attribute_reference_entry(
+            let target = attribute_headings
+                .insert(attr.snake_name.clone())
+                .then(|| MarkdownTarget::Attribute(attr.snake_name.clone()));
+            page.attribute_reference_entry_with_target(
                 &attr.snake_name,
                 attr.attr_type.table_cell(),
                 description.as_deref(),
+                target,
             )?;
         }
     }
@@ -6768,7 +6753,7 @@ fn write_markdown_type_definitions(
     }
 
     // Struct Definitions section
-    if !struct_defs.is_empty() {
+    if !struct_heading_texts.is_empty() {
         page.heading(Heading::plain(2, "Struct Definitions"))?;
         for (key, heading_text) in &struct_heading_texts {
             let struct_doc = struct_defs
@@ -6794,6 +6779,34 @@ fn write_markdown_type_definitions(
                 ]
             });
             page.table(["Field", "Type", "Required", "Description"], rows)?;
+            page.push_str("\n");
+        }
+    }
+
+    // Union definitions are intentionally minimal and use their own headings,
+    // so adding a union cannot rename any existing struct or enum anchor.
+    let mut unions = struct_defs
+        .iter()
+        .filter(|(_, doc)| doc.union_members.is_some())
+        .peekable();
+    if unions.peek().is_some() {
+        page.heading(Heading::plain(2, "Union Definitions"))?;
+        let mut used_slugs = HashSet::new();
+        for (key, doc) in unions {
+            let heading = claim_unique_heading(
+                format!("{} union", key.heading_path.join(".")),
+                &key.namespace,
+                &mut used_slugs,
+            );
+            page.target_heading(
+                MarkdownTarget::Struct(key.clone()),
+                Heading::plain(3, heading),
+            )?;
+            for member in doc.union_members.as_ref().expect("union members") {
+                page.push_str("- ");
+                member.write_to(page);
+                page.push_str("\n");
+            }
             page.push_str("\n");
         }
     }
@@ -6861,7 +6874,9 @@ fn markdown_struct_heading_texts(
 ) -> Vec<(MarkdownStructKey, String)> {
     let mut used_slugs = HashSet::new();
     let mut headings: Vec<_> = structs
-        .keys()
+        .iter()
+        .filter(|(_, doc)| doc.union_members.is_none())
+        .map(|(key, _)| key)
         .map(|key| {
             let base = key.heading_path.join(".");
             let source = format!("{} {}", key.namespace, key.target);
@@ -7138,7 +7153,12 @@ fn generate_markdown_data_source(
                         let item = if let Some(override_type) =
                             resource_value_override(ds.name, &format!("{}[]", output.name))
                         {
-                            override_type.display
+                            override_type.markdown(
+                                &[output.name.to_string()],
+                                &namespace,
+                                &mut all_enums,
+                                &mut struct_defs,
+                            )?
                         } else {
                             discover_markdown_override(
                                 output.item_type,
@@ -7148,7 +7168,14 @@ fn generate_markdown_data_source(
                                 &mut struct_defs,
                             )?
                         };
-                        MarkdownType::list(item)
+                        list_display(
+                            item,
+                            false,
+                            ListConstraints {
+                                length: None,
+                                elements: ListElements::AllowDuplicates,
+                            },
+                        )
                     },
                     description: Description::authored(output.description),
                 })
@@ -7157,6 +7184,7 @@ fn generate_markdown_data_source(
     };
 
     let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+    let mut attribute_headings = HashSet::new();
     page.heading(Heading::plain(1, format!("aws.{}", ds.name)))?;
     page.push_str("This is a **data source** (read-only). Use with the `read` keyword.\n\n");
     write_markdown_example(&mut page, example)?;
@@ -7165,12 +7193,26 @@ fn generate_markdown_data_source(
     if !ds.inputs.is_empty() {
         page.heading(Heading::plain(2, "Lookup Inputs"))?;
         for input in &ds.inputs {
-            page.heading(Heading::code(3, input.name))?;
+            if attribute_headings.insert(input.name.to_string()) {
+                page.target_heading(
+                    MarkdownTarget::Attribute(input.name.to_string()),
+                    Heading::code(3, input.name),
+                )?;
+            } else {
+                page.heading(Heading::code(3, input.name))?;
+            }
             let required = if input.required { "Yes" } else { "No" };
             page.push_str(&format!("- **Required:** {}\n\n", required));
             if let Some(override_type) = resource_value_override(ds.name, input.name) {
                 page.push_str("- **Type:** ");
-                override_type.display.write_to(&mut page);
+                override_type
+                    .markdown(
+                        &[input.name.to_string()],
+                        &namespace,
+                        &mut all_enums,
+                        &mut struct_defs,
+                    )?
+                    .write_to(&mut page);
                 page.push_str("\n\n");
             } else if let Some(code) = input.type_override {
                 let ty = discover_markdown_override(
@@ -7197,10 +7239,14 @@ fn generate_markdown_data_source(
     page.heading(Heading::plain(2, "Attributes"))?;
     for output in outputs {
         let description = output.description.markdown();
-        page.attribute_reference_entry(
+        let target = attribute_headings
+            .insert(output.name.to_string())
+            .then(|| MarkdownTarget::Attribute(output.name.to_string()));
+        page.attribute_reference_entry_with_target(
             output.name,
             output.attr_type.table_cell(),
             Some(&description),
+            target,
         )?;
     }
 
@@ -7338,7 +7384,7 @@ fn discover_markdown_type(
             field_name,
             ValueTypeOverride {
                 type_code: override_type.to_string(),
-                display: type_code_to_markdown(override_type),
+                documentation: None,
                 attribute_type: attribute_type_from_code(override_type)?,
             },
         );
@@ -7355,7 +7401,7 @@ fn discover_markdown_type(
         if let Some(list) =
             string_list_value_override(model, target, resource_name, property_path, override_type)
         {
-            return Ok(list.display);
+            return list.markdown(heading_path, enum_namespace, all_enums, struct_defs);
         }
         let value = bound_int_override(
             model,
@@ -7363,7 +7409,7 @@ fn discover_markdown_type(
             field_name,
             ValueTypeOverride {
                 type_code: override_type.to_string(),
-                display: type_code_to_markdown(override_type),
+                documentation: None,
                 attribute_type: attribute_type_from_code(override_type)?,
             },
         );
@@ -7390,9 +7436,12 @@ fn discover_markdown_type(
             values.iter().map(|value| value.to_string()).collect(),
             all_enums,
         );
-        return Ok(MarkdownType::link(
-            MarkdownTarget::Enum(key),
-            format!("Enum ({type_name})"),
+        return Ok(named_display(
+            NamedKind::Enum,
+            DocLink {
+                target: MarkdownTarget::Enum(key),
+                label: type_name,
+            },
         ));
     }
 
@@ -7401,20 +7450,44 @@ fn discover_markdown_type(
     Ok(match kind {
         Some(ShapeKind::String) => {
             if let Some(inferred) = infer_string_type(field_name) {
-                return Ok(type_code_to_markdown(&inferred));
+                return discover_markdown_override(
+                    &inferred,
+                    heading_path,
+                    enum_namespace,
+                    all_enums,
+                    struct_defs,
+                );
             }
-            MarkdownType::text("String".to_string())
+            scalar_display(ScalarDoc::String {
+                name: "String",
+                pattern: None,
+                length: None,
+                validate: false,
+                to_dsl: None,
+            })
         }
-        Some(ShapeKind::Boolean) => MarkdownType::text("Bool".to_string()),
+        Some(ShapeKind::Boolean) => scalar_display(ScalarDoc::Bool),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             let range = get_int_range(model, target, field_name);
             if let Some(r) = range {
-                MarkdownType::text(format!("Int({})", range_display_string(r.min, r.max)))
+                scalar_display(ScalarDoc::Int {
+                    name: "Int",
+                    range: Some((r.min, r.max)),
+                    validate: false,
+                })
             } else {
-                MarkdownType::text("Int".to_string())
+                scalar_display(ScalarDoc::Int {
+                    name: "Int",
+                    range: None,
+                    validate: false,
+                })
             }
         }
-        Some(ShapeKind::Float) | Some(ShapeKind::Double) => MarkdownType::text("Float".to_string()),
+        Some(ShapeKind::Float) | Some(ShapeKind::Double) => scalar_display(ScalarDoc::Float {
+            name: "Float",
+            range: None,
+            validate: false,
+        }),
         Some(ShapeKind::Enum) => {
             if let Some(values) = model.enum_values(target) {
                 // Prefer the Smithy shape name (PascalCase, e.g. "LogGroupClass")
@@ -7438,12 +7511,28 @@ fn discover_markdown_type(
                     values.into_iter().map(|(_, value)| value).collect(),
                     all_enums,
                 );
-                MarkdownType::link(MarkdownTarget::Enum(key), format!("Enum ({type_name})"))
+                named_display(
+                    NamedKind::Enum,
+                    DocLink {
+                        target: MarkdownTarget::Enum(key),
+                        label: type_name,
+                    },
+                )
             } else {
-                MarkdownType::text("String".to_string())
+                scalar_display(ScalarDoc::String {
+                    name: "String",
+                    pattern: None,
+                    length: None,
+                    validate: false,
+                    to_dsl: None,
+                })
             }
         }
-        Some(ShapeKind::IntEnum) => MarkdownType::text("Int".to_string()),
+        Some(ShapeKind::IntEnum) => scalar_display(ScalarDoc::Int {
+            name: "Int",
+            range: None,
+            validate: false,
+        }),
         Some(ShapeKind::List) => {
             if let Some(carina_smithy::Shape::List(list_shape)) = model.get_shape(target) {
                 let item = discover_markdown_type(
@@ -7461,16 +7550,33 @@ fn discover_markdown_type(
                     struct_defs,
                     discovering_structs,
                 )?;
-                let list = MarkdownType::list(item);
-                match resource_type_overrides().get(&(resource_name, property_path)) {
-                    Some(TypeOverride::ListLength { min, max }) => MarkdownType::sequence([
-                        list,
-                        MarkdownType::text(format!(" (length: {min}..={max})")),
-                    ]),
-                    _ => list,
-                }
+                let length = match resource_type_overrides().get(&(resource_name, property_path)) {
+                    Some(TypeOverride::ListLength { min, max }) => Some((Some(*min), Some(*max))),
+                    _ => None,
+                };
+                list_display(
+                    item,
+                    true,
+                    ListConstraints {
+                        length,
+                        elements: ListElements::AllowDuplicates,
+                    },
+                )
             } else {
-                MarkdownType::list(MarkdownType::text("String"))
+                list_display(
+                    scalar_display(ScalarDoc::String {
+                        name: "String",
+                        pattern: None,
+                        length: None,
+                        validate: false,
+                        to_dsl: None,
+                    }),
+                    true,
+                    ListConstraints {
+                        length: None,
+                        elements: ListElements::AllowDuplicates,
+                    },
+                )
             }
         }
         Some(ShapeKind::Map) => {
@@ -7491,19 +7597,30 @@ fn discover_markdown_type(
                     discovering_structs,
                 )?
             } else {
-                MarkdownType::text("String".to_string())
+                scalar_display(ScalarDoc::String {
+                    name: "String",
+                    pattern: None,
+                    length: None,
+                    validate: false,
+                    to_dsl: None,
+                })
             };
-            let map = MarkdownType::map(value);
-            if let Some(Shape::Map(shape)) = model.get_shape(target)
-                && let Some((min, max)) = length_from_traits(&shape.traits)
-            {
-                MarkdownType::sequence([
-                    map,
-                    MarkdownType::text(format!(" (length: {})", range_display_string(min, max))),
-                ])
+            let length = if let Some(Shape::Map(shape)) = model.get_shape(target) {
+                length_from_traits(&shape.traits)
             } else {
-                map
-            }
+                None
+            };
+            map_display(
+                scalar_display(ScalarDoc::String {
+                    name: "String",
+                    pattern: None,
+                    length: None,
+                    validate: false,
+                    to_dsl: None,
+                }),
+                value,
+                MapConstraints { length },
+            )
         }
         Some(ShapeKind::Structure | ShapeKind::Union) => {
             let shape_name = SmithyModel::shape_name(target).to_string();
@@ -7520,7 +7637,7 @@ fn discover_markdown_type(
                 );
             }
             if kind == Some(ShapeKind::Structure) && shape_name == "AttributeBooleanValue" {
-                return Ok(MarkdownType::text("Bool".to_string()));
+                return Ok(scalar_display(ScalarDoc::Bool));
             }
             let structure = if let Some(structure) = model.get_structure(target) {
                 StructRepresentation::from_structure(structure)
@@ -7530,9 +7647,12 @@ fn discover_markdown_type(
                 anyhow::bail!("Cannot find Smithy struct or union {target}");
             };
             if let Some(active_key) = discovering_structs.get(target) {
-                return Ok(MarkdownType::link(
-                    MarkdownTarget::Struct(active_key.clone()),
-                    format!("Struct({shape_name})"),
+                return Ok(named_display(
+                    NamedKind::Struct,
+                    DocLink {
+                        target: MarkdownTarget::Struct(active_key.clone()),
+                        label: shape_name,
+                    },
                 ));
             }
 
@@ -7582,12 +7702,19 @@ fn discover_markdown_type(
                 struct_defs.insert(
                     key.clone(),
                     MarkdownStruct {
+                        union_members: None,
                         fields,
                         field_groups: structure.field_groups,
                     },
                 );
             }
-            MarkdownType::link(MarkdownTarget::Struct(key), format!("Struct({shape_name})"))
+            named_display(
+                NamedKind::Struct,
+                DocLink {
+                    target: MarkdownTarget::Struct(key),
+                    label: shape_name,
+                },
+            )
         }
         Some(
             ShapeKind::Blob
@@ -7599,9 +7726,21 @@ fn discover_markdown_type(
         )
         | None => {
             if let Some(inferred) = infer_string_type(field_name) {
-                type_code_to_markdown(&inferred)
+                discover_markdown_override(
+                    &inferred,
+                    heading_path,
+                    enum_namespace,
+                    all_enums,
+                    struct_defs,
+                )?
             } else {
-                MarkdownType::text("String".to_string())
+                scalar_display(ScalarDoc::String {
+                    name: "String",
+                    pattern: None,
+                    length: None,
+                    validate: false,
+                    to_dsl: None,
+                })
             }
         }
     })
@@ -7661,37 +7800,10 @@ fn split_top_level_commas(value: &str) -> Vec<&str> {
     parts
 }
 
-/// Build a type display without rendering collection contents as Markdown.
-fn type_code_to_markdown(type_code: &str) -> MarkdownType {
-    if let Some(inner) = type_code
-        .strip_prefix("AttributeType::union(vec![")
-        .and_then(|s| s.strip_suffix("])"))
-    {
-        return MarkdownType::union(
-            split_top_level_commas(inner)
-                .into_iter()
-                .map(|member| type_code_to_markdown(member.trim())),
-        );
-    }
-    if let Some(inner) = type_code
-        .strip_prefix("AttributeType::list(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        return MarkdownType::list(type_code_to_markdown(inner));
-    }
-    if let Some(inner) = type_code
-        .strip_prefix("AttributeType::map(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        return MarkdownType::map(type_code_to_markdown(inner));
-    }
-    MarkdownType::text(type_code_to_display(type_code))
-}
-
 /// Convert a scalar Rust type code string to a literal display name.
 ///
 /// Display names use PascalCase consistently (e.g. `IamRoleArn`, not
-/// `iam_role_arn`). Collections and unions are parsed by `type_code_to_markdown`.
+/// `iam_role_arn`). Collection and named-type wording belongs to carina-docgen.
 fn type_code_to_display(type_code: &str) -> String {
     match type_code {
         PLAIN_STRING_TYPE_CODE => "String".to_string(),
@@ -7879,16 +7991,6 @@ fn int_range_condition_and_display(min: Option<i64>, max: Option<i64>) -> (Strin
         ),
         (Some(min), None) => (format!("*n < {}", min), format!("{}..", min)),
         (None, Some(max)) => (format!("*n > {}", max), format!("..={}", max)),
-        (None, None) => unreachable!("at least one bound must be present"),
-    }
-}
-
-/// Format a range display string for type names.
-fn range_display_string<T: std::fmt::Display>(min: Option<T>, max: Option<T>) -> String {
-    match (min, max) {
-        (Some(min), Some(max)) => format!("{}..={}", min, max),
-        (Some(min), None) => format!("{}..", min),
-        (None, Some(max)) => format!("..={}", max),
         (None, None) => unreachable!("at least one bound must be present"),
     }
 }
@@ -8819,6 +8921,7 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
     #[test]
     fn map_length_tag_strings_preserve_literal_backslashes() {
         let model = carina_smithy::parse(r##"{
@@ -9130,10 +9233,10 @@ mod tests {
         display.write_to(&mut page);
         let markdown = page.finish().unwrap();
         assert!(
-            markdown.contains("String(length: 1..=8, pattern: `^[a-z]+$`)"),
+            markdown.contains("`String (pattern: ^[a-z]+$, len: 1..=8)`"),
             "{markdown}"
         );
-        assert!(markdown.contains("(length: 2..=5)"), "{markdown}");
+        assert!(markdown.contains("(entries: 2..=5)"), "{markdown}");
     }
 
     #[test]
@@ -9262,7 +9365,7 @@ mod tests {
                 "Count",
                 ValueTypeOverride {
                     type_code: original.clone(),
-                    display: MarkdownType::text("Int"),
+                    documentation: None,
                     attribute_type: AttributeType::refined_int(
                         None,
                         Some((Some(minimum), Some(maximum))),
@@ -9304,7 +9407,7 @@ mod tests {
         ] {
             let value = bound_int_override(&model, target, "Count", ValueTypeOverride {
                 type_code: "AttributeType::refined_int(None, Some((Some(1), Some(9223372036854775807))))".to_string(),
-                display: MarkdownType::text("Int(1..=9223372036854775807)"),
+                documentation: None,
                 attribute_type: AttributeType::refined_int(None, Some((Some(1), Some(i64::MAX)))),
             });
             assert!(matches!(value.attribute_type.raw_shape(), RawShape::Int {
@@ -9354,9 +9457,12 @@ mod tests {
             .is_none()
         );
         let markdown = lifecycle_markdown_fixture();
-        assert!(markdown.contains("Int(1..=100)"), "{markdown}");
-        assert!(markdown.contains("Int(1..=2147483647)"), "{markdown}");
-        assert!(markdown.contains("String(length: 0..=255)"), "{markdown}");
+        assert!(markdown.contains("`Int (range: 1..=100)`"), "{markdown}");
+        assert!(
+            markdown.contains("`Int (range: 1..=2147483647)`"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("`String (len: 0..=255)`"), "{markdown}");
     }
 
     use super::*;
@@ -9509,8 +9615,8 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            "length: 1..=1024",
-            "length: 0..=4000",
+            "len: 1..=1024",
+            "len: 0..=4000",
             "Route53HostedZoneId",
             "pattern:",
         ] {
@@ -9725,20 +9831,20 @@ mod tests {
         )
         .expect("generate Logs markdown");
         assert!(
-            markdown.contains("String(length: 1..=512, pattern: `^[.\\-_/#A-Za-z0-9]{1,512}\\z`)"),
+            markdown.contains("`String (pattern: ^[.\\-_/#A-Za-z0-9]{1,512}\\z, len: 1..=512)`"),
             "{markdown}"
         );
         assert!(
-            markdown.contains("RetentionInDays (Int; allowed: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653)"),
+            markdown.contains("`LogsLogGroupRetentionInDays (custom validator)`; allowed: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653"),
             "{markdown}"
         );
         assert!(
-            markdown.contains("| `log_group_name` | String |"),
+            markdown.contains("| `log_group_name` | `String` |"),
             "{markdown}"
         );
         // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            markdown.contains("| `retention_in_days` | Int(-2147483648..=2147483647) |"),
+            markdown.contains("| `retention_in_days` | `Int (range: -2147483648..=2147483647)` |"),
             "{markdown}"
         );
     }
@@ -9822,12 +9928,12 @@ mod tests {
         .unwrap();
         assert!(
             markdown.contains(
-                r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)"
+                r"`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`"
             ),
             "{markdown}"
         );
         assert!(
-            markdown.contains(r"String(length: 1..=512, pattern: `^(?:/|/[\x21-\x7E]+/)\z`)"),
+            markdown.contains(r"`String (pattern: ^(?:/|/[\x21-\x7E]+/)\z, len: 1..=512)`"),
             "{markdown}"
         );
     }
@@ -9904,12 +10010,12 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"String(length: 1..=50, pattern: `^[ -;=?-~]+\z`)",
-            r"IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)",
-            "OrganizationsAccountEmail (String; length: 6..=64)",
-            r"AwsAccountId (String; length: 12..=12, pattern: `^\d{12}$`)",
+            r"`String (pattern: ^[ -;=?-~]+\z, len: 1..=50)`",
+            r"`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`",
+            "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
+            r"`AwsAccountId (pattern: ^\d{12}$, len: 12..=12, custom validator)`",
             // #638: Organizations account ARN docs pin all eight supported partitions.
-            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            r"`OrganizationsAccountArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z)`",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -9961,11 +10067,11 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"String(length: 12..=34, pattern: `^o-[a-z0-9]{10,32}\z`)",
+            r"`String (pattern: ^o-[a-z0-9]{10,32}\z, len: 12..=34)`",
             // #638: Management-account ARN docs pin all eight supported partitions.
-            r"OrganizationsAccountArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z`)",
+            r"`OrganizationsAccountArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z)`",
             // #638: Organization ARN docs pin all eight supported partitions.
-            r"OrganizationsOrganizationArn (String; pattern: `^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z`)",
+            r"`OrganizationsOrganizationArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z)`",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -10148,7 +10254,7 @@ mod tests {
         .expect("generate recursive docs");
         assert_eq!(
             markdown
-                .matches("Exactly one of `node`, `text` must be set.")
+                .matches("- Exactly one of: `node`, `text`.")
                 .count(),
             2,
             "{markdown}"
@@ -10199,16 +10305,19 @@ mod tests {
         .expect("generate union docs");
         assert_eq!(
             markdown
-                .matches("Exactly one of `details`, `flag`, `text` must be set.")
+                .matches("- Exactly one of: `details`, `flag`, `text`.")
                 .count(),
             3,
             "{markdown}"
         );
         assert!(
-            markdown.contains("| `text` | String | No | A literal value. |"),
+            markdown.contains("| `text` | `String` | No | A literal value. |"),
             "{markdown}"
         );
-        assert!(markdown.contains("| `text` | String | Yes |"), "{markdown}");
+        assert!(
+            markdown.contains("| `text` | `String` | Yes |"),
+            "{markdown}"
+        );
         assert!(markdown.contains("### single_choice\n"), "{markdown}");
         assert!(
             markdown.contains("aws.ec2.RouteTable.Choice.Details.Mode.fast"),
@@ -10247,7 +10356,7 @@ mod tests {
         let markdown = lifecycle_markdown_fixture();
         assert_eq!(
             markdown
-                .matches("| `date` | S3LifecycleDate | No |")
+                .matches("| `date` | `S3LifecycleDate (pattern: ^(?:[0-9]{4}-(?:(?:01\\|03\\|05\\|07\\|08\\|10\\|12)-(?:0[1-9]\\|[12][0-9]\\|3[01])\\|(?:04\\|06\\|09\\|11)-(?:0[1-9]\\|[12][0-9]\\|30)\\|02-(?:0[1-9]\\|1[0-9]\\|2[0-8]))\\|(?:[0-9]{2}(?:0[48]\\|[2468][048]\\|[13579][26])\\|(?:[02468][048]\\|[13579][26])00)-02-29)T00:00:00Z\\z, len: 20..=20, custom validator)` | No |")
                 .count(),
             2,
             "{markdown}"
@@ -10269,8 +10378,8 @@ mod tests {
             .split("\n### ")
             .next()
             .expect("filter section");
-        assert!(filter.contains("At most one of `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and` may be set."), "{filter}");
-        assert!(filter.contains("| `prefix` | String | No |"), "{filter}");
+        assert!(filter.contains("- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`."), "{filter}");
+        assert!(filter.contains("| `prefix` | `String` | No |"), "{filter}");
         assert!(
             filter.contains("| `and` | [Struct(LifecycleRuleAndOperator)]"),
             "{filter}"
@@ -10283,15 +10392,15 @@ mod tests {
         for (group, sentence) in [
             (
                 FieldGroup::at_most_one(["first", "second"]).unwrap(),
-                "At most one of `first`, `second` may be set.",
+                "- At most one of: `first`, `second`.",
             ),
             (
                 FieldGroup::exactly_one(["first", "second"]).unwrap(),
-                "Exactly one of `first`, `second` must be set.",
+                "- Exactly one of: `first`, `second`.",
             ),
             (
                 FieldGroup::at_least_one(["first", "second"]).unwrap(),
-                "At least one of `first`, `second` must be set.",
+                "- At least one of: `first`, `second`.",
             ),
         ] {
             let attr_type =
@@ -10357,13 +10466,58 @@ mod tests {
             .finish()
             .expect("declared enum aliases produce valid docs");
         assert!(
-            markdown.contains("| `zone` | Route53HostedZoneId |"),
+            markdown
+                .contains("| `zone` | `Route53HostedZoneId (pattern: ^Z[A-Z0-9]+$, len: ..=32)` |"),
             "{markdown}"
         );
         assert!(
             markdown.contains("`aws.cloudfront.HostedZoneId.global`"),
             "{markdown}"
         );
+    }
+
+    #[test]
+    fn markdown_data_source_input_and_aggregated_output_can_share_a_name() {
+        let mut source = resource_defs::sts_data_sources().remove(0);
+        source.inputs = vec![resource_defs::DataSourceInput {
+            name: "names",
+            provider_name: "Names",
+            description: "Names to look up.",
+            required: false,
+            type_override: Some("super::availability_zone()"),
+        }];
+        source.shape = resource_defs::DataSourceShape::ListAggregated {
+            aggregated_outputs: vec![resource_defs::DataSourceListOutput {
+                name: "names",
+                description: "Names returned by the lookup.",
+                item_type: "super::availability_zone()",
+            }],
+        };
+        let markdown = generate_markdown_data_source(
+            &source,
+            &empty_test_model(),
+            &markdown_data_source_example(source.name),
+        )
+        .expect("an input and output can share an attribute target");
+        assert_eq!(markdown.matches("### `names`").count(), 2, "{markdown}");
+        assert!(markdown.contains("Names to look up."), "{markdown}");
+        assert!(
+            markdown.contains("Names returned by the lookup."),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("List\\<[ZoneName](#names)\\> (unordered)"),
+            "{markdown}"
+        );
+        assert_eq!(
+            markdown.matches("[ZoneName](#names)").count(),
+            2,
+            "{markdown}"
+        );
+        let ids = carina_docgen::heading_ids(&markdown);
+        assert!(ids.iter().any(|id| id == "names"));
+        assert!(ids.iter().any(|id| id == "names-1"));
+        carina_docgen::check_page(&markdown).unwrap();
     }
 
     #[test]
@@ -10383,7 +10537,7 @@ mod tests {
             &markdown_data_source_example(source.name),
         )
         .expect("data source struct docs");
-        assert!(markdown.contains("### rules.filter\n\nAt most one of `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and` may be set.\n\n| Field | Type |"), "{markdown}");
+        assert!(markdown.contains("### rules.filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`.\n\n| Field | Type |"), "{markdown}");
         carina_docgen::check_page(&markdown).expect("valid data source field-group docs");
     }
 
@@ -10403,7 +10557,7 @@ mod tests {
             &markdown_data_source_example(source.name),
         )
         .expect("data source input docs");
-        assert!(markdown.contains("### rules.filter\n\nAt most one of `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and` may be set."), "{markdown}");
+        assert!(markdown.contains("### rules.filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`."), "{markdown}");
         carina_docgen::check_page(&markdown).expect("valid input field-group docs");
     }
 
@@ -12031,27 +12185,81 @@ mod tests {
 
     #[test]
     fn type_display_names_include_route53_hosted_zone_id_union() {
-        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
-        type_code_to_markdown(
+        let mut enums = BTreeMap::new();
+        let mut structs = BTreeMap::new();
+        let display = discover_markdown_override(
             "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
+            &["zone".to_string()],
+            "aws.test",
+            &mut enums,
+            &mut structs,
         )
-        .write_to(&mut page);
+        .expect("discover the production union");
+        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().expect("valid union display and definitions");
+        assert!(
+            markdown.starts_with("[Union(Zone)](#zone-union)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("- [HostedZoneId](#zone-hostedzoneid)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("- `Route53HostedZoneId (pattern: ^Z[A-Z0-9]+$, len: ..=32)`"),
+            "{markdown}"
+        );
+        assert_eq!(structs.len(), 1);
         assert_eq!(
-            page.finish().expect("valid union display"),
-            r"CloudFrontHostedZoneId \| Route53HostedZoneId"
+            structs
+                .values()
+                .next()
+                .unwrap()
+                .union_members
+                .as_ref()
+                .unwrap()
+                .len(),
+            2
         );
     }
 
     #[test]
     fn type_display_union_splits_only_on_top_level_commas() {
-        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
-        type_code_to_markdown(
-            "AttributeType::union(vec![super::route53_hosted_zone_id(a, b), super::cloudfront_hosted_zone_id()])",
+        let mut enums = BTreeMap::new();
+        let mut structs = BTreeMap::new();
+        let display = discover_markdown_override(
+            "AttributeType::union(vec![AttributeType::map(AttributeType::union(vec![super::route53_hosted_zone_id(), AttributeType::bool()])), super::cloudfront_hosted_zone_id()])",
+            &["zone".to_string()],
+            "aws.test",
+            &mut enums,
+            &mut structs,
         )
-        .write_to(&mut page);
-        assert_eq!(
-            page.finish().expect("valid union display"),
-            r"Route53HostedZoneId \| CloudFrontHostedZoneId"
+        .expect("nested constructor commas do not split the outer union");
+        assert_eq!(structs.len(), 2, "both unions have definitions");
+        for definition in structs.values() {
+            assert_eq!(definition.union_members.as_ref().unwrap().len(), 2);
+        }
+        let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().expect("valid nested union display");
+        assert!(
+            markdown.starts_with("[Union(Zone)](#zone-union)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("- Map\\<`String`, [Union(Zone)](#zone-union--awstest)\\>"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("- `Bool`\n"), "{markdown}");
+        assert!(markdown.contains("- [HostedZoneId]"), "{markdown}");
+        assert!(
+            markdown.contains("- `Route53HostedZoneId (pattern:"),
+            "{markdown}"
         );
     }
 
@@ -12406,16 +12614,16 @@ mod tests {
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
         assert!(
-            md.contains("- **Type:** `List<Arn>`"),
+            md.contains("- **Type:** List\\<`IamRoleArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$, custom validator)`\\> (unordered)"),
             "aggregated outputs must use MarkdownType's list renderer: {md}"
         );
         assert!(
-            md.contains(r"- **Type:** String(length: 1..=512, pattern: `^/[\x21-\x7F]*\z`)"),
+            md.contains(r"- **Type:** `String (pattern: ^/[\x21-\x7F]*\z, len: 1..=512)`"),
             "path_prefix constraint: {md}"
         );
         assert!(
             md.contains(
-                r"- **Type:** List\<IamRoleName (String; length: 1..=64, pattern: `^[A-Za-z0-9_+=,.@-]+\z`)\>"
+                r"- **Type:** List\<`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`\> (unordered)"
             ),
             "names element constraint: {md}"
         );
@@ -12432,7 +12640,7 @@ mod tests {
             .expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
-        assert!(md.contains("- **Type:** IamRoleArn"), "{md}");
+        assert!(md.contains("- **Type:** `IamRoleArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$, custom validator)`"), "{md}");
     }
 
     #[test]
@@ -13160,7 +13368,7 @@ mod tests {
                 " Field | Type | Required | Description |\n",
                 "|-------|------|----------|-------------|\n",
                 "|",
-                " `name` | String | No |  |\n",
+                " `name` | `String` | No |  |\n",
             )),
             "{markdown}"
         );
@@ -13267,8 +13475,8 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            "length: 1..=64",
-            "length: 1..=253",
+            "len: 1..=64",
+            "len: 1..=253",
             carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE,
             "aws.acm.Certificate.KeyAlgorithm.rsa_2048",
             "aws.acm.Certificate.KeyAlgorithm.ec_prime256v1",
@@ -13407,24 +13615,44 @@ mod tests {
     #[test]
     fn markdown_type_display_preserves_literal_patterns() {
         let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
-        let display = pattern_display("String(pattern: ", pattern);
+        let attribute_type = AttributeType::refined_string(None, Some(pattern.into()), None, None);
+        let mut enums = BTreeMap::new();
+        let mut structs = BTreeMap::new();
+        let display = discover_markdown_attribute_type(
+            &attribute_type,
+            &["name".to_string()],
+            "aws.test",
+            &mut enums,
+            &mut structs,
+        )
+        .unwrap();
         let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
         page.table(["Type"], [[display.table_cell()]]).unwrap();
         page.push_str("\n");
-        MarkdownType::list(display).write_to(&mut page);
+        discover_markdown_attribute_type(
+            &AttributeType::list(attribute_type),
+            &["names".to_string()],
+            "aws.test",
+            &mut enums,
+            &mut structs,
+        )
+        .unwrap()
+        .write_to(&mut page);
 
         let markdown = page.finish().expect("literal regex passes page validation");
         assert_eq!(
             markdown
-                .matches(&format!("String(pattern: `{pattern}`)"))
+                .matches(&format!("`String (pattern: {pattern})`"))
                 .count(),
             3,
             "{markdown}"
         );
         assert!(
-            markdown.contains(&format!("List\\<String(pattern: `{pattern}`)\\>")),
+            markdown.contains(&format!(
+                "List\\<`String (pattern: {pattern})`\\> (ordered)"
+            )),
             "{markdown}"
         );
     }
@@ -13461,10 +13689,7 @@ mod tests {
             markdown.contains("`aws.ec2.Vpc.Options.Type.nested`"),
             "{markdown}"
         );
-        assert!(
-            markdown.contains("[Enum (Type)](#optionstype-type)"),
-            "{markdown}"
-        );
+        assert!(markdown.contains("[Type](#optionstype-type)"), "{markdown}");
     }
 
     #[test]
