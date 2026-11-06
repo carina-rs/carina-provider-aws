@@ -36,7 +36,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("acm.Certificate")
         .with_description("Contains metadata about an ACM certificate. This structure is returned in the response to a DescribeCertificate request.")
         .with_operation_config(carina_provider_protocol::types::OperationConfig { delete_timeout_secs: None, delete_max_retries: None, create_timeout_secs: None, create_max_retries: None, update_timeout_secs: None, read_back: carina_provider_protocol::types::ReadBackBudget::from_secs(300) })
-        .with_conflicting_replacement()
+        .with_coexisting_replacement()
         .attribute(
             AttributeSchema::required("domain_name", carina_aws_types::acm_certificate_domain_name())
                 .create_only()

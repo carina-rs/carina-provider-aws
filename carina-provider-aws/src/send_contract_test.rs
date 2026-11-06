@@ -14,6 +14,7 @@ use carina_core::FiniteF64;
 use carina_core::provider::{
     AppliedIdentifier, Observation, PatchOp, ProviderError, Sent, UpdatePatch,
 };
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{ConcreteValue, Resource, State, Value};
 use carina_core::schema::{
     CompiledAttributeType, CompiledPattern, CompiledResourceSchema, CustomValidator, SchemaKind,
@@ -1661,8 +1662,10 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
                 panic!("cross-field validation must reject during normalization: {error:?}")
             }
             Ok(request) => {
-                let (create, _cancellation) =
-                    carina_core::executor::dispatch_create(&provider, &id, request);
+                let (create, _cancellation) = carina_core::executor::dispatch_create(
+                    &provider,
+                    create_permit_for_test(request),
+                );
                 let _ = tokio::time::timeout(Duration::from_secs(1), create).await;
                 panic!("invalid native create passed preparation and reached the provider");
             }

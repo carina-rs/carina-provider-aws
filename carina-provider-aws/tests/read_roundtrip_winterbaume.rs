@@ -16,6 +16,7 @@ use carina_core::provider::{
     NoopNormalizer, PersistedAttributes, Provider, ProviderFactory, ProviderNormalizer,
     RawSavedAttrs, ReadRequest, UpdateRequest,
 };
+use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
     Value, into_plan_input_current_map,
@@ -304,20 +305,19 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
 
 async fn create_outcome_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
-    let (create, _cancellation) = carina_core::executor::dispatch_create(provider, id, request);
+    let (create, _cancellation) =
+        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
     provider: &AwsProvider,
-    id: &carina_core::resource::ResourceId,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
-    create_outcome_for_test(provider, id, request)
+    create_outcome_for_test(provider, request)
         .await
         .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
 }
@@ -338,7 +338,6 @@ async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
 async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> SnapshotState {
     create_state_for_test(
         provider,
-        &desired.id,
         create_request_without_schema_for_test(desired.clone()).await,
     )
     .await
@@ -1690,7 +1689,6 @@ async fn account_write_only_create_inputs_and_import_read_round_trip() {
 
     let created = create_state_for_test(
         &provider,
-        &id,
         create_request_without_schema_for_test(desired.clone()).await,
     )
     .await
@@ -2229,10 +2227,9 @@ async fn standard_queue_false_fifo_flags_are_not_sent_and_round_trip() {
     desired.set_attr("fifo_queue", bool_value(false));
     desired.set_attr("content_based_deduplication", bool_value(false));
     desired.set_attr("tags", empty_map());
-    let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
 
-    let current = create_state_for_test(&provider, &id, request)
+    let current = create_state_for_test(&provider, request)
         .await
         .expect("create standard queue");
 
@@ -2276,9 +2273,8 @@ async fn fifo_queue_aws_defaults_round_trip_without_becoming_desired() {
     desired.set_attr("fifo_queue", bool_value(true));
     desired.set_attr("content_based_deduplication", bool_value(true));
     desired.set_attr("tags", empty_map());
-    let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = create_state_for_test(&provider, &id, request)
+    let current = create_state_for_test(&provider, request)
         .await
         .expect("create FIFO queue");
 
@@ -2315,9 +2311,8 @@ async fn redrive_numeric_string_count_round_trips_as_an_integer() {
         ]))),
     );
     desired.set_attr("tags", empty_map());
-    let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = create_state_for_test(&provider, &id, request)
+    let current = create_state_for_test(&provider, request)
         .await
         .expect("create redrive queue");
 
@@ -2433,9 +2428,8 @@ async fn sqs_typed_settings_preserve_enum_wire_spellings_and_decimal_string_pack
             &schema_registry(),
         )
         .expect("canonicalize authored SQS enum identifiers");
-        let id = desired.id.clone();
         let request = create_request_for_test(desired.clone()).await;
-        let current = create_state_for_test(&provider, &id, request)
+        let current = create_state_for_test(&provider, request)
             .await
             .expect("create queue with typed settings");
         for (field, api) in [
@@ -2458,9 +2452,8 @@ async fn kms_alias_round_trips_without_arn_rewriting() {
     desired.set_attr("queue_name", string(QUEUE_NAME));
     desired.set_attr("kms_master_key_id", string("alias/aws/sqs"));
     desired.set_attr("tags", empty_map());
-    let id = desired.id.clone();
     let request = create_request_for_test(desired.clone()).await;
-    let current = create_state_for_test(&provider, &id, request)
+    let current = create_state_for_test(&provider, request)
         .await
         .expect("create KMS-encrypted queue");
 
@@ -2556,8 +2549,7 @@ async fn replication_omitted_delete_marker_default_has_no_diff() {
     };
     assert_api_text(delete_marker_replication.get("status"), "Disabled");
 
-    let id = desired.id.clone();
-    let current = create_state_for_test(&provider, &id, checked_request)
+    let current = create_state_for_test(&provider, checked_request)
         .await
         .expect("put and read back S3 replication configuration");
     assert_no_diff(desired, current);

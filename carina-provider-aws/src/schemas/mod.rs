@@ -1015,9 +1015,10 @@ mod tests {
     #[test]
     fn generated_resource_unique_name_specs_follow_explicit_replacement_classes() {
         let acm_certificate = super::generated::acm::certificate::acm_certificate_config();
+        // #649: a fresh ClientToken per create lets ACM certificates coexist.
         assert_eq!(
             acm_certificate.schema.unique_name(),
-            &UniqueNameSpec::Conflicting
+            &UniqueNameSpec::Coexisting
         );
 
         let iam_role = super::generated::iam::role::iam_role_config();
