@@ -6636,13 +6636,14 @@ fn generate_markdown_resource(
         page.push_str(&documentation);
     }
     if !read_back.await_attributes.is_empty() {
-        let names = read_back
-            .await_attributes
-            .iter()
-            .map(|requirement| format!("`{}`", requirement.attribute))
-            .collect::<Vec<_>>()
-            .join(", ");
-        page.push_str(&format!("After create or update, the host polls for {names} when DNS validation is requested.\n\n"));
+        page.push_str("After create or update, the host polls for ");
+        for (index, requirement) in read_back.await_attributes.iter().enumerate() {
+            if index > 0 {
+                page.push_str(", ");
+            }
+            page.inline(TableCell::code(requirement.attribute));
+        }
+        page.push_str(" when DNS validation is requested.\n\n");
     }
 
     for entry in carina_codegen_aws::kms_references::CLASSIFICATIONS
@@ -6655,14 +6656,15 @@ fn generate_markdown_resource(
                 )
         })
     {
+        page.inline(TableCell::code(entry.path));
         if matches!(
             entry.classification,
             carina_codegen_aws::kms_references::Classification::Reference { arn_only: true }
         ) {
-            page.push_str(&format!("`{}` uses `KmsKeyReference` and accepts key ARNs only. Key ARNs need no lookup. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n", entry.path));
+            page.push_str(" uses `KmsKeyReference` and accepts key ARNs only. Key ARNs need no lookup. See [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions).\n\n");
             continue;
         }
-        page.push_str(&format!("`{}` uses `KmsKeyReference`; during planning, key IDs, alias names, and alias ARNs may need `kms:DescribeKey` for the provider's effective identity and authorization in the key policy, only when the authored value differs from the value the service returns. Key ARNs never need a lookup; resolving an AWS-managed alias can initialize its key during planning (see [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions)).\n\n", entry.path));
+        page.push_str(" uses `KmsKeyReference`; during planning, key IDs, alias names, and alias ARNs may need `kms:DescribeKey` for the provider's effective identity and authorization in the key policy, only when the authored value differs from the value the service returns. Key ARNs never need a lookup; resolving an AWS-managed alias can initialize its key during planning (see [KMS reference planning permissions](https://carina-rs.dev/guides/aws-credentials/#kms-reference-planning-permissions)).\n\n");
     }
 
     write_markdown_example(&mut page, example)?;
@@ -6779,10 +6781,12 @@ fn write_markdown_type_definitions(
 
             let first_value = enum_info.values.first().map(|s| s.as_str()).unwrap_or("");
             let first_dsl = dsl_for(first_value);
-            page.push_str(&format!(
-                "Shorthand formats: `{}` or `{}.{}`\n\n",
-                first_dsl, enum_info.type_name, first_dsl,
-            ));
+            let mut shorthand = TableCell::text("Shorthand formats: ");
+            shorthand.push_code(&first_dsl);
+            shorthand.push_text(" or ");
+            shorthand.push_code(format!("{}.{first_dsl}", enum_info.type_name));
+            page.inline(shorthand);
+            page.push_str("\n\n");
         }
     }
 

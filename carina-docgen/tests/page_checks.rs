@@ -105,6 +105,57 @@ fn schema_type(
 }
 
 #[test]
+fn page_builder_inline_preserves_code_literals_in_prose() {
+    for (literal, expected_code, visible_code) in [
+        ("key`part|value", "``key`part|value``", "key`part|value"),
+        ("key\u{7}part", r"`key\u{7}part`", r"key\u{7}part"),
+    ] {
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        page.push_str("Uses ");
+        page.inline(TableCell::code(literal));
+        page.push_str(" in prose.\n\n");
+
+        let markdown = page.finish().expect("valid inline code in prose");
+        assert_eq!(markdown, format!("Uses {expected_code} in prose.\n\n"));
+        render_like_registry(&markdown, |_, html, visible| {
+            assert_eq!(
+                html,
+                format!("<p>Uses <code>{visible_code}</code> in prose.</p>\n")
+            );
+            assert_eq!(visible, format!("Uses {visible_code} in prose."));
+        });
+    }
+}
+
+#[test]
+fn page_builder_inline_keeps_text_and_typed_links_in_prose() {
+    let mut parts = TableCell::text("Use | ");
+    parts.push_code("name");
+    parts.push_text(" with ");
+    parts.push_link(Target::Options, "Struct(Options)");
+
+    let mut page = PageBuilder::new();
+    page.inline(parts);
+    page.push_str(".\n\n");
+    page.heading(Heading::code(3, "options")).unwrap();
+    page.target_heading(Target::Options, Heading::plain(3, "Options"))
+        .unwrap();
+
+    let markdown = page.finish().expect("valid typed inline parts in prose");
+    assert_eq!(
+        markdown,
+        concat!(
+            "Use | `name` with [Struct(Options)](#options-1).\n\n",
+            "### `options`\n\n### Options\n\n",
+        )
+    );
+    render_like_registry(&markdown, |_, html, visible| {
+        assert!(html.contains("<a href=\"#options-1\">Struct(Options)</a>"));
+        assert_eq!(visible, "Use | name with Struct(Options).optionsOptions");
+    });
+}
+
+#[test]
 fn attribute_reference_entry_writes_description_and_resolves_type_links() {
     let mut page: PageBuilder<Target> = PageBuilder::new();
     page.heading(Heading::plain(1, "Page")).unwrap();

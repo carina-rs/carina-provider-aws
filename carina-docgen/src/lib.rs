@@ -204,6 +204,13 @@ where
         }
     }
 
+    /// Write typed inline parts in prose, preserving code literals and link targets.
+    ///
+    /// Text remains inline Markdown; table escaping and block separators are omitted.
+    pub fn inline(&mut self, cell: TableCell<K>) {
+        self.write_inline_parts(cell, false);
+    }
+
     /// Write an ordinary heading and allocate its registry slug immediately.
     pub fn heading(&mut self, heading: Heading) -> Result<(), DocgenError> {
         self.write_heading(heading).map(|_| ())
