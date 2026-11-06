@@ -5916,7 +5916,6 @@ struct MarkdownStructKey {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum MarkdownTarget {
-    Attribute(String),
     Enum(MarkdownEnumKey),
     Struct(MarkdownStructKey),
 }
@@ -6029,18 +6028,6 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                 dsl_aliases,
                 ..
             } => {
-                // Dynamic enums have no static values table. Link their existing
-                // attribute documentation, keeping the page's established anchors.
-                if values.is_none() {
-                    let root = scope
-                        .heading_path
-                        .first()
-                        .context("open enum needs an attribute heading")?;
-                    return Ok(DocLink {
-                        target: MarkdownTarget::Attribute(root.clone()),
-                        label: identity.kind.clone(),
-                    });
-                }
                 let namespace = identity
                     .dotted_prefix()
                     .unwrap_or_else(|| scope.namespace.clone());
@@ -6564,7 +6551,6 @@ fn generate_markdown_resource(
     .with_context(|| format!("validating Markdown heading paths for aws.{}", res.name))?;
 
     let mut page = PageBuilder::new();
-    let mut attribute_headings = HashSet::new();
 
     page.heading(Heading::plain(1, format!("aws.{}", res.name)))?;
 
@@ -6629,14 +6615,7 @@ fn generate_markdown_resource(
     }
 
     for attr in &writable_attrs {
-        if attribute_headings.insert(attr.snake_name.clone()) {
-            page.target_heading(
-                MarkdownTarget::Attribute(attr.snake_name.clone()),
-                Heading::code(3, &attr.snake_name),
-            )?;
-        } else {
-            page.heading(Heading::code(3, &attr.snake_name))?;
-        }
+        page.heading(Heading::code(3, &attr.snake_name))?;
         page.push_str("- **Type:** ");
         attr.attr_type.write_to(&mut page);
         page.push_str("\n");
@@ -6678,14 +6657,10 @@ fn generate_markdown_resource(
         page.heading(Heading::plain(2, "Attribute Reference"))?;
         for attr in &read_only_attrs {
             let description = attr.description.as_ref().map(Description::markdown);
-            let target = attribute_headings
-                .insert(attr.snake_name.clone())
-                .then(|| MarkdownTarget::Attribute(attr.snake_name.clone()));
-            page.attribute_reference_entry_with_target(
+            page.attribute_reference_entry(
                 &attr.snake_name,
                 attr.attr_type.table_cell(),
                 description.as_deref(),
-                target,
             )?;
         }
     }
@@ -7150,23 +7125,30 @@ fn generate_markdown_data_source(
                 Ok(MarkdownDataSourceOutput {
                     name: output.name,
                     attr_type: {
-                        let item = if let Some(override_type) =
+                        let (item, note) = if let Some(override_type) =
                             resource_value_override(ds.name, &format!("{}[]", output.name))
                         {
-                            override_type.markdown(
-                                &[output.name.to_string()],
-                                &namespace,
-                                &mut all_enums,
-                                &mut struct_defs,
-                            )?
+                            (
+                                discover_markdown_attribute_type(
+                                    &override_type.attribute_type,
+                                    &[output.name.to_string()],
+                                    &namespace,
+                                    &mut all_enums,
+                                    &mut struct_defs,
+                                )?,
+                                override_type.documentation,
+                            )
                         } else {
-                            discover_markdown_override(
-                                output.item_type,
-                                &[output.name.to_string()],
-                                &namespace,
-                                &mut all_enums,
-                                &mut struct_defs,
-                            )?
+                            (
+                                discover_markdown_override(
+                                    output.item_type,
+                                    &[output.name.to_string()],
+                                    &namespace,
+                                    &mut all_enums,
+                                    &mut struct_defs,
+                                )?,
+                                None,
+                            )
                         };
                         list_display(
                             item,
@@ -7176,6 +7158,7 @@ fn generate_markdown_data_source(
                                 elements: ListElements::AllowDuplicates,
                             },
                         )
+                        .with_note(note)
                     },
                     description: Description::authored(output.description),
                 })
@@ -7184,7 +7167,6 @@ fn generate_markdown_data_source(
     };
 
     let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
-    let mut attribute_headings = HashSet::new();
     page.heading(Heading::plain(1, format!("aws.{}", ds.name)))?;
     page.push_str("This is a **data source** (read-only). Use with the `read` keyword.\n\n");
     write_markdown_example(&mut page, example)?;
@@ -7193,14 +7175,7 @@ fn generate_markdown_data_source(
     if !ds.inputs.is_empty() {
         page.heading(Heading::plain(2, "Lookup Inputs"))?;
         for input in &ds.inputs {
-            if attribute_headings.insert(input.name.to_string()) {
-                page.target_heading(
-                    MarkdownTarget::Attribute(input.name.to_string()),
-                    Heading::code(3, input.name),
-                )?;
-            } else {
-                page.heading(Heading::code(3, input.name))?;
-            }
+            page.heading(Heading::code(3, input.name))?;
             let required = if input.required { "Yes" } else { "No" };
             page.push_str(&format!("- **Required:** {}\n\n", required));
             if let Some(override_type) = resource_value_override(ds.name, input.name) {
@@ -7239,14 +7214,10 @@ fn generate_markdown_data_source(
     page.heading(Heading::plain(2, "Attributes"))?;
     for output in outputs {
         let description = output.description.markdown();
-        let target = attribute_headings
-            .insert(output.name.to_string())
-            .then(|| MarkdownTarget::Attribute(output.name.to_string()));
-        page.attribute_reference_entry_with_target(
+        page.attribute_reference_entry(
             output.name,
             output.attr_type.table_cell(),
             Some(&description),
-            target,
         )?;
     }
 
@@ -7852,7 +7823,7 @@ fn type_code_to_display(type_code: &str) -> String {
         s if s.contains("aws_account_id") => "AwsAccountId".to_string(),
         s if s.contains("aws_resource_id") => "AwsResourceId".to_string(),
         s if s.contains("availability_zone_id") => "AvailabilityZoneId".to_string(),
-        s if s.contains("availability_zone") => "AvailabilityZone".to_string(),
+        s if s.contains("availability_zone") => "ZoneName".to_string(),
         "carina_aws_types::organizations_account_email()" => {
             "OrganizationsAccountEmail".to_string()
         }
@@ -7979,20 +7950,6 @@ fn known_enum_overrides() -> &'static HashMap<&'static str, Vec<&'static str>> {
         m
     });
     &OVERRIDES
-}
-
-/// Generate condition string and display string for integer range validation.
-#[allow(dead_code)]
-fn int_range_condition_and_display(min: Option<i64>, max: Option<i64>) -> (String, String) {
-    match (min, max) {
-        (Some(min), Some(max)) => (
-            format!("*n < {} || *n > {}", min, max),
-            format!("{}..={}", min, max),
-        ),
-        (Some(min), None) => (format!("*n < {}", min), format!("{}..", min)),
-        (None, Some(max)) => (format!("*n > {}", max), format!("..={}", max)),
-        (None, None) => unreachable!("at least one bound must be present"),
-    }
 }
 
 fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
@@ -10498,7 +10455,7 @@ mod tests {
             &empty_test_model(),
             &markdown_data_source_example(source.name),
         )
-        .expect("an input and output can share an attribute target");
+        .expect("an input and output can share an attribute name");
         assert_eq!(markdown.matches("### `names`").count(), 2, "{markdown}");
         assert!(markdown.contains("Names to look up."), "{markdown}");
         assert!(
@@ -10506,17 +10463,52 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown.contains("List\\<[ZoneName](#names)\\> (unordered)"),
+            markdown.contains("List\\<`ZoneName`\\> (unordered)"),
             "{markdown}"
         );
-        assert_eq!(
-            markdown.matches("[ZoneName](#names)").count(),
-            2,
-            "{markdown}"
-        );
+        assert_eq!(markdown.matches("`ZoneName`").count(), 2, "{markdown}");
         let ids = carina_docgen::heading_ids(&markdown);
         assert!(ids.iter().any(|id| id == "names"));
         assert!(ids.iter().any(|id| id == "names-1"));
+        carina_docgen::check_page(&markdown).unwrap();
+    }
+
+    #[test]
+    fn markdown_data_source_list_validation_note_follows_the_list() {
+        let mut source = resource_defs::sts_data_sources().remove(0);
+        source.name = "acm.Certificate";
+        source.inputs.clear();
+        source.shape = resource_defs::DataSourceShape::ListAggregated {
+            aggregated_outputs: vec![resource_defs::DataSourceListOutput {
+                name: "subject_alternative_names",
+                description: "Certificate domain names.",
+                item_type: "AttributeType::string()",
+            }],
+        };
+        let markdown = generate_markdown_data_source(
+            &source,
+            &empty_test_model(),
+            &markdown_data_source_example(source.name),
+        )
+        .expect("data source list with a validation note");
+        let type_line = markdown
+            .lines()
+            .find(|line| line.starts_with("- **Type:** "))
+            .unwrap();
+        assert!(
+            type_line.ends_with(&format!(
+                "\\> (unordered); {}",
+                carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE
+            )),
+            "{markdown}"
+        );
+        assert_eq!(
+            type_line
+                .matches(carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE)
+                .count(),
+            1
+        );
+        assert!(type_line.contains("custom validator)`"), "{markdown}");
         carina_docgen::check_page(&markdown).unwrap();
     }
 

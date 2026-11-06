@@ -255,24 +255,18 @@ fn attribute_reference_entry_writes_description_and_resolves_type_links() {
 }
 
 #[test]
-fn attribute_reference_target_is_bound_when_its_heading_is_written() {
-    let mut page = PageBuilder::new();
+fn attribute_reference_entry_allocates_duplicate_heading_slugs() {
+    let mut page: PageBuilder<Target> = PageBuilder::new();
     page.heading(Heading::code(3, "region")).unwrap();
-    page.attribute_reference_entry_with_target(
+    page.attribute_reference_entry(
         "region",
-        TableCell::link(Target::Options, "Region"),
+        TableCell::code("Region"),
         Some("The region to use."),
-        Some(Target::Options),
     )
     .unwrap();
     page.heading(Heading::plain(3, "Another heading")).unwrap();
-    page.link(Target::Options, "Region");
     let markdown = page.finish().unwrap();
-    assert_eq!(
-        markdown.matches("[Region](#region-1)").count(),
-        2,
-        "{markdown}"
-    );
+    assert!(markdown.contains("- **Type:** `Region`\n"), "{markdown}");
     assert_eq!(
         heading_ids(&markdown),
         ["region", "region-1", "another-heading"]
@@ -360,22 +354,23 @@ fn code_entry_points_render_controls_visibly() {
 }
 
 #[test]
-fn code_entry_points_reject_empty_literals_with_a_source() {
+fn inline_code_entry_points_reject_empty_literals_with_a_source() {
     use std::error::Error;
 
     let mut heading: PageBuilder<Target> = PageBuilder::new();
     let heading_error = heading.heading(Heading::code(2, "")).unwrap_err();
     let mut inline: PageBuilder<Target> = PageBuilder::new();
     TypeDisplay::code("").write_to(&mut inline);
-    let mut table: PageBuilder<Target> = PageBuilder::new();
-    table.table(["Literal"], [[TableCell::code("")]]).unwrap();
-    for error in [
-        heading_error,
-        inline.finish().unwrap_err(),
-        table.finish().unwrap_err(),
-    ] {
-        assert!(error.to_string().contains("empty literal"), "{error}");
-        assert!(error.source().is_some(), "missing error source: {error}");
+    for error in [heading_error, inline.finish().unwrap_err()] {
+        assert!(matches!(error, DocgenError::Literal { .. }), "{error}");
+        assert!(error.to_string().contains("literal \"\""), "{error}");
+        let cause = error
+            .source()
+            .expect("literal errors preserve their source")
+            .to_string();
+        assert!(cause.contains("empty literal"), "{cause}");
+        let chain = format!("{:#}", anyhow::Error::new(error));
+        assert_eq!(chain.matches(&cause).count(), 1, "{chain}");
     }
 }
 
@@ -610,77 +605,43 @@ fn type_display_adjacent_code_parts_preserve_links() {
 
 #[test]
 fn type_display_table_code_preserves_backslashes_before_pipes() {
-    use std::error::Error;
-
-    let literals = ["|", r"\\|", r"\\\\|", "`|`"];
+    let literals = [r"\|", "|", r"\\|", r"\\\|", r"\|\|", r"`\|`"];
+    let split_literal = TypeDisplay::sequence([TypeDisplay::code("\\"), TypeDisplay::code("|")]);
     let mut page: PageBuilder<Target> = PageBuilder::new();
     page.table(
         ["Pattern"],
-        literals.map(|literal| [TypeDisplay::code(literal).table_cell()]),
+        literals
+            .map(|literal| [TypeDisplay::code(literal).table_cell()])
+            .into_iter()
+            .chain([[split_literal.table_cell()]]),
     )
     .unwrap();
-    let markdown = page
-        .finish()
-        .expect("representable pipe escapes stay in their cells");
+    let markdown = page.finish().expect("escaped pipes stay in their cells");
     render_like_registry(&markdown, |root, html, _| {
-        let code: Vec<_> = root
+        let code: Vec<String> = root
             .descendants()
-            .filter_map(|node| match &node.data.borrow().value {
-                NodeValue::Code(code) => Some(code.literal.clone()),
-                _ => None,
+            .filter(|node| matches!(node.data.borrow().value, NodeValue::TableRow(false)))
+            .flat_map(|row| row.children())
+            .map(|cell| {
+                cell.descendants()
+                    .filter_map(|node| match &node.data.borrow().value {
+                        NodeValue::Code(code) => Some(code.literal.clone()),
+                        _ => None,
+                    })
+                    .collect::<String>()
             })
             .collect();
         assert_eq!(
-            code, literals,
-            "GFM preserves representable literals: {markdown}"
+            code,
+            literals.into_iter().chain([r"\|"]).collect::<Vec<_>>(),
+            "GFM must preserve literal code text: {markdown}"
+        );
+        assert!(
+            html.contains("<td><code>\\</code><!-- raw HTML omitted --><code>|</code></td>"),
+            "{html}"
         );
         assert!(html.contains("<code>|</code>"), "{html}");
-        assert!(
-            !html.contains("<!--"),
-            "code spans never need split-span comments: {html}"
-        );
     });
-
-    for literal in [r"\|", r"\\\|", r"\|\|", r"`\|`"] {
-        // Inline code can represent these literals, but a GFM table cannot.
-        let mut inline: PageBuilder<Target> = PageBuilder::new();
-        TypeDisplay::code(literal).write_to(&mut inline);
-        let markdown = inline.finish().unwrap();
-        render_like_registry(&markdown, |_, _, visible| assert_eq!(visible, literal));
-        for cell in [
-            TypeDisplay::code(literal).table_cell(),
-            TableCell::code(literal),
-        ] {
-            let mut page: PageBuilder<Target> = PageBuilder::new();
-            page.table(["Pattern"], [[cell]]).unwrap();
-            let error = page
-                .finish()
-                .expect_err("unrepresentable table literal must fail");
-            assert!(
-                error.to_string().contains(&format!("{literal:?}")),
-                "{error}"
-            );
-            assert!(error.to_string().contains("table cell"), "{error}");
-            assert!(
-                error
-                    .source()
-                    .unwrap()
-                    .to_string()
-                    .contains("cannot round-trip"),
-                "{error}"
-            );
-        }
-    }
-    let split_literal = TypeDisplay::sequence([TypeDisplay::code("\\"), TypeDisplay::code("|")]);
-    let mut page: PageBuilder<Target> = PageBuilder::new();
-    page.table(["Pattern"], [[split_literal.table_cell()]])
-        .unwrap();
-    assert!(
-        page.finish()
-            .unwrap_err()
-            .to_string()
-            .contains("cannot round-trip")
-    );
 }
 
 #[test]
@@ -946,16 +907,14 @@ fn table_resolves_keyed_links_in_cells() {
 }
 
 #[test]
-fn table_rejects_empty_code_literals() {
+fn table_renders_empty_code_as_an_empty_cell() {
     let mut page: PageBuilder<Target> = PageBuilder::new();
     page.table(["Value"], [[TableCell::code("")]])
         .expect("valid table");
 
-    let error = page
-        .finish()
-        .expect_err("empty code literals are not representable");
-    assert!(matches!(error, DocgenError::Literal { .. }), "{error}");
-    assert!(error.to_string().contains("empty literal"), "{error}");
+    let markdown = page.finish().expect("valid finished page");
+
+    assert_eq!(markdown, "| Value |\n|-------|\n|  |\n");
 }
 
 #[test]

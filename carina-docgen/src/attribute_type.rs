@@ -232,8 +232,9 @@ pub fn named_display<K>(kind: NamedKind, link: DocLink<K>) -> TypeDisplay<K> {
     TypeDisplay::link(link.target, label)
 }
 
-/// Compose a type description without rendering any Markdown. Named nodes
-/// register a definition; inline nodes recurse here with a shared active set.
+/// Compose a type description without rendering any Markdown. Closed enums
+/// and compound declarations register definitions; open enums use scalar names.
+/// Inline nodes recurse here with a shared active set.
 pub fn render_attribute_type<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
     scope: &H::Scope,
@@ -325,24 +326,27 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             dsl_aliases,
             validate,
             to_dsl,
-        } => named_display(
-            NamedKind::Enum,
-            hooks.register(
-                scope,
-                Declaration {
-                    id: id.clone(),
-                    ty,
-                    kind: DeclarationKind::Enum {
-                        identity,
-                        base,
-                        values,
-                        dsl_aliases,
-                        validate,
-                        to_dsl,
+        } => match values {
+            None => TypeDisplay::code(hooks.scalar_name(identity)),
+            Some(values) => named_display(
+                NamedKind::Enum,
+                hooks.register(
+                    scope,
+                    Declaration {
+                        id: id.clone(),
+                        ty,
+                        kind: DeclarationKind::Enum {
+                            identity,
+                            base,
+                            values: Some(values),
+                            dsl_aliases,
+                            validate,
+                            to_dsl,
+                        },
                     },
-                },
-            )?,
-        ),
+                )?,
+            ),
+        },
         RawShape::Struct {
             name,
             fields,
@@ -467,16 +471,36 @@ fn number_constraints<T: Display>(range: Bounds<T>, validate: bool) -> Vec<Strin
 /// from table cells; controls must be visible because Markdown normalizes them.
 pub(crate) fn code_span(literal: &str, table: bool) -> Result<String> {
     if literal.is_empty() {
+        if table {
+            return Ok(String::new());
+        }
         bail!("empty literal cannot be represented by a Markdown code span");
     }
+    let span = |code: &str| {
+        let fence = "`".repeat(code.split(|c| c != '`').map(str::len).max().unwrap_or(0) + 1);
+        let padding = if code.starts_with('`')
+            || code.ends_with('`')
+            || (code.starts_with(' ') && code.ends_with(' ') && !code.chars().all(|c| c == ' '))
+        {
+            " "
+        } else {
+            ""
+        };
+        format!("{fence}{padding}{code}{padding}{fence}")
+    };
+    let mut markdown = String::new();
     let mut code = String::new();
-    let mut backslashes = 0;
+    let mut backslashes = 0_usize;
     for character in visible_code_literal(literal).chars() {
         match character {
             '|' if table => {
-                // GFM cannot round-trip a pipe preceded by an odd backslash run.
-                if backslashes % 2 == 1 {
-                    bail!("literal cannot round-trip in a GFM table cell: {literal:?}");
+                if !backslashes.is_multiple_of(2) {
+                    // GFM removes a backslash from odd runs before pipes. Split
+                    // before the pipe; an invisible comment keeps the adjacent
+                    // code spans' backtick delimiters from touching.
+                    markdown.push_str(&span(&code));
+                    markdown.push_str("<!---->");
+                    code.clear();
                 }
                 code.push_str(r"\|");
             }
@@ -488,19 +512,10 @@ pub(crate) fn code_span(literal: &str, table: bool) -> Result<String> {
             0
         };
     }
-    let fence = "`".repeat(code.split(|c| c != '`').map(str::len).max().unwrap_or(0) + 1);
-    let padding = if code.starts_with('`')
-        || code.ends_with('`')
-        || (code.starts_with(' ') && code.ends_with(' ') && !code.chars().all(|c| c == ' '))
-    {
-        " "
-    } else {
-        ""
-    };
-    let span = format!("{fence}{padding}{code}{padding}{fence}");
-    crate::check_page(&span)
+    markdown.push_str(&span(&code));
+    crate::check_page(&markdown)
         .with_context(|| format!("literal {literal:?} rejected by carina-docgen"))?;
-    Ok(span)
+    Ok(markdown)
 }
 
 pub(crate) fn visible_code_literal(literal: &str) -> String {

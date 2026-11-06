@@ -284,12 +284,12 @@ fn scalars_render_all_refinements_in_github_order() {
 }
 
 #[test]
-fn enum_registration_preserves_open_values_base_aliases_validator_and_transform() {
+fn enum_registration_preserves_closed_values_base_aliases_validator_and_transform() {
     let transform = DslTransform::Identity;
     let ty = AttributeType::enum_with_base(
         TypeIdentity::bare("E"),
         AttributeType::int(),
-        None,
+        Some(vec!["a-b".into()]),
         vec![("a-b".into(), "a_b".into())],
         Some(Arc::new(|_| Ok(()))),
         Some(transform.clone()),
@@ -313,10 +313,37 @@ fn enum_registration_preserves_open_values_base_aliases_validator_and_transform(
     };
     assert_eq!(identity.kind, "E");
     assert!(matches!(base.raw_shape(), RawShape::Int { .. }));
-    assert!(values.is_none());
+    assert_eq!(*values, Some(["a-b".to_string()].as_slice()));
     assert_eq!(dsl_aliases[0], ("a-b".into(), "a_b".into()));
     assert!(validate.is_some());
     assert_eq!(*to_dsl, Some(&transform));
+}
+
+#[test]
+fn open_enums_use_the_hooks_scalar_name_without_registering_a_definition() {
+    let ty = AttributeType::enum_with_base(
+        TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
+        AttributeType::string(),
+        None,
+        Vec::new(),
+        Some(Arc::new(|_| Ok(()))),
+        Some(DslTransform::Identity),
+    );
+    let mut hooks = Hooks::default();
+    let markdown = page(&ty, &mut hooks).unwrap();
+    assert_eq!(
+        markdown,
+        "`provider.Scope.Open`\n\n| Type |\n|------|\n| `provider.Scope.Open` |\n"
+    );
+    assert!(hooks.declarations.is_empty());
+
+    let config = ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), ty)])).unwrap();
+    let mut hooks = Hooks::default();
+    assert_eq!(
+        page(config.parts().get("value").unwrap(), &mut hooks).unwrap(),
+        markdown
+    );
+    assert!(hooks.declarations.is_empty());
 }
 
 #[test]
@@ -381,11 +408,10 @@ fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
         "{markdown}"
     );
     let odd_slash = AttributeType::refined_string(None, Some(r"a\|b".into()), None, None);
+    let markdown = page(&odd_slash, &mut Hooks::default()).unwrap();
     assert!(
-        page(&odd_slash, &mut Hooks::default())
-            .unwrap_err()
-            .to_string()
-            .contains("cannot round-trip")
+        markdown.contains(r"| `String (pattern: a\`<!---->`\|b)` |"),
+        "{markdown}"
     );
 }
 

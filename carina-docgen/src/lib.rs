@@ -219,23 +219,7 @@ where
         attribute_type: TableCell<K>,
         description: Option<&str>,
     ) -> Result<(), DocgenError> {
-        self.attribute_reference_entry_with_target(name, attribute_type, description, None)
-    }
-
-    /// Write an attribute entry, binding its optional target when its heading
-    /// is written so subsequent page content cannot change the target's anchor.
-    pub fn attribute_reference_entry_with_target(
-        &mut self,
-        name: &str,
-        attribute_type: TableCell<K>,
-        description: Option<&str>,
-        target: Option<K>,
-    ) -> Result<(), DocgenError> {
-        let heading = Heading::code(3, name);
-        match target {
-            Some(target) => self.target_heading(target, heading)?,
-            None => self.heading(heading)?,
-        }
+        self.heading(Heading::code(3, name))?;
         self.push_str("- **Type:** ");
         self.write_inline_parts(attribute_type, false);
         self.push_str("\n- **Read-only**\n\n");
@@ -512,7 +496,7 @@ pub enum DocgenError {
     Build(String),
     #[error("{0}")]
     Check(#[from] PageCheckError),
-    #[error("cannot render {context} literal {literal:?}: {source}")]
+    #[error("cannot render {context} literal {literal:?}")]
     Literal {
         context: &'static str,
         literal: String,
