@@ -3244,10 +3244,10 @@ pub fn acm_resources() -> Vec<ResourceDef> {
             }],
             budget: carina_provider_protocol::types::ReadBackBudget::from_secs(300),
         },
-        // Reusing create-only idempotency_token within one hour returns the
-        // existing certificate ARN, so CBD create and old delete can target
-        // the same certificate.
-        replacement: ReplacementClass::Conflicting,
+        // Each initial create gets a fresh ClientToken, reused only to resend
+        // that create. RequestCertificate issues a distinct ARN; multiple
+        // certificates may share a domain.
+        replacement: ReplacementClass::Coexisting,
         service_namespace: "com.amazonaws.acm",
         schema_structure: None,
         simple_delete: true,

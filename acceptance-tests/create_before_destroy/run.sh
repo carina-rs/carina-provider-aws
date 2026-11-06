@@ -7,6 +7,7 @@
 # Tests:
 #   ec2_vpc - Replacement is rejected for a conflicting resource
 #   ec2_security_group - Replacement succeeds with a temporary unique name
+#   acm_certificate - Dependents promote a coexisting certificate replacement to CBD
 #
 # Filter (optional): substring to match test names (e.g. "ec2_vpc")
 #
@@ -14,6 +15,8 @@
 # time because the replacement cannot safely coexist with the original.
 # The ec2_security_group case verifies that a UniqueName resource can coexist
 # with its original by using a temporary group_name during replacement.
+# The acm_certificate case verifies that DNS validation records promote their
+# certificate's replacement to CBD and that the old certificate is deleted.
 #
 # AWS authentication:
 #   Set AWS_PROFILE to one of the carina-test-00X profiles. The Carina host
@@ -259,6 +262,114 @@ assert_ec2_security_group_state() {
     return 1
 }
 
+# carina_state_query requires exactly one non-empty value, so this also checks
+# that state contains exactly one ACM certificate.
+get_acm_certificate_arn() {
+    carina_state_query "$1" \
+        '.resources[] | select(.resource_type == "acm.Certificate") | .current.identifier'
+}
+
+assert_acm_certificate_replaced() {
+    local work_dir="$1"
+    local description="$2"
+    local old_arn="$3"
+
+    printf "  %-55s " "$description"
+
+    local new_arn
+    if ! new_arn=$(get_acm_certificate_arn "$work_dir"); then
+        echo "FAIL"
+        echo "  ERROR: expected exactly 1 acm.Certificate with an ARN in state"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    if [ "$new_arn" = "$old_arn" ]; then
+        echo "FAIL"
+        echo "  ERROR: certificate ARN unchanged after replacement: $old_arn"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    echo "OK"
+    TOTAL_PASSED=$((TOTAL_PASSED + 1))
+    return 0
+}
+
+assert_acm_certificate_deleted() {
+    local description="$1"
+    local old_arn="$2"
+
+    printf "  %-55s " "$description"
+
+    local output
+    if output=$(with_account_creds aws acm describe-certificate \
+        --certificate-arn "$old_arn" --region ap-northeast-1 2>&1); then
+        echo "FAIL"
+        echo "  ERROR: old certificate still exists: $old_arn"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    if grep -Fq "ResourceNotFoundException" <<< "$output"; then
+        echo "OK"
+        TOTAL_PASSED=$((TOTAL_PASSED + 1))
+        return 0
+    fi
+
+    echo "FAIL"
+    echo "  ERROR: expected ResourceNotFoundException for $old_arn, got:"
+    echo "  $output"
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    return 1
+}
+
+assert_acm_validation_record_present() {
+    local work_dir="$1"
+    local description="$2"
+
+    printf "  %-55s " "$description"
+
+    local record_name record_value zone_id
+    if ! record_name=$(carina_state_query "$work_dir" \
+        '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.name') || \
+        ! record_value=$(carina_state_query "$work_dir" \
+            '.resources[] | select(.resource_type == "acm.Certificate") | .current.attributes.domain_validation_options[0].resource_record.value') || \
+        ! zone_id=$(carina_state_query "$work_dir" \
+            '.resources[] | select(.provider == "awscc" and .resource_type == "route53.HostedZone") | .current.attributes.id'); then
+        echo "FAIL"
+        echo "  ERROR: validation record missing after replacement (carina-rs/carina#4283)"
+        echo "  Could not read the validation record and hosted zone ID from state"
+        TOTAL_FAILED=$((TOTAL_FAILED + 1))
+        return 1
+    fi
+
+    local output
+    if output=$(with_account_creds aws route53 list-resource-record-sets \
+        --hosted-zone-id "$zone_id" \
+        --start-record-name "$record_name" \
+        --start-record-type CNAME --max-items 1 --output json 2>&1) && \
+        jq -e --arg name "$record_name" --arg value "$record_value" '
+            def normalize: ascii_downcase | rtrimstr(".");
+            any(.ResourceRecordSets[];
+                .Type == "CNAME"
+                and ((.Name | normalize) == ($name | normalize))
+                and ((.ResourceRecords | length) == 1)
+                and ((.ResourceRecords[0].Value | normalize) == ($value | normalize)))
+        ' <<< "$output" >/dev/null; then
+        echo "OK"
+        TOTAL_PASSED=$((TOTAL_PASSED + 1))
+        return 0
+    fi
+
+    echo "FAIL"
+    echo "  ERROR: validation record missing after replacement (carina-rs/carina#4283)"
+    echo "  Expected CNAME: $record_name -> $record_value"
+    echo "  $output"
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    return 1
+}
+
 run_plan_verify() {
     local work_dir="$1"
     local description="$2"
@@ -392,6 +503,18 @@ run_test() {
         return 1
     fi
 
+    local old_acm_certificate_arn=""
+    if [ "$test_name" = "acm_certificate" ]; then
+        if ! old_acm_certificate_arn=$(get_acm_certificate_arn "$work_dir"); then
+            echo "  assert: read certificate ARN after step 1             FAIL"
+            echo "  ERROR: expected exactly 1 acm.Certificate with an ARN in state"
+            TOTAL_FAILED=$((TOTAL_FAILED + 1))
+            destroy_work_dir "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+    fi
+
     # Swap in step2 config (providers are the same, lock already present)
     swap_crn "$step2" "$work_dir"
 
@@ -461,6 +584,25 @@ run_test() {
         return 1
     fi
 
+    if [ "$test_name" = "acm_certificate" ]; then
+        if ! assert_acm_certificate_replaced \
+            "$work_dir" "assert: one certificate with a new ARN" "$old_acm_certificate_arn" || \
+            ! assert_acm_certificate_deleted \
+                "assert: old certificate deleted" "$old_acm_certificate_arn"; then
+            destroy_work_dir "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+
+        # carina-rs/carina#4283: deleting the old record must preserve the shared CNAME.
+        if ! assert_acm_validation_record_present \
+            "$work_dir" "assert: validation record survives replacement"; then
+            destroy_work_dir "$work_dir"
+            ACTIVE_WORK_DIR=""
+            return 1
+        fi
+    fi
+
     # Step 3: Plan-verify after replacement
     if ! run_plan_verify "$work_dir" "step3: plan-verify after replace"; then
         destroy_work_dir "$work_dir"
@@ -497,6 +639,13 @@ run_test "ec2_security_group" \
     "$SCRIPT_DIR/ec2_security_group_step1.crn" \
     "$SCRIPT_DIR/ec2_security_group_step2.crn" \
     "Test 2: EC2 Security Group (temporary unique name)" || true
+
+# Test 3: ACM Certificate - DNS validation records promote the replacement to CBD.
+# Certificates for the same domain can coexist with distinct ARNs (#649).
+run_test "acm_certificate" \
+    "$SCRIPT_DIR/acm_certificate_step1.crn" \
+    "$SCRIPT_DIR/acm_certificate_step2.crn" \
+    "Test 3: ACM Certificate (dependent-promoted coexisting replacement)" || true
 
 echo "════════════════════════════════════════"
 echo "Total: $TOTAL_PASSED passed, $TOTAL_FAILED failed"
