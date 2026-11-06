@@ -437,8 +437,8 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             None,
             None,
         ),
-        RawShape::Bool => scalar_text("Bool".into(), Vec::new(), false, None, None),
-        RawShape::Duration => scalar_text("Duration".into(), Vec::new(), false, None, None),
+        RawShape::Bool => scalar_display(ScalarDoc::Bool, None),
+        RawShape::Duration => scalar_display(ScalarDoc::Duration, None),
         RawShape::Enum {
             identity,
             base,
@@ -535,8 +535,9 @@ fn enum_base_refinements<R: PatternForm>(
     base: &PatternAttributeType<R>,
     identity: &TypeIdentity,
 ) -> Result<Vec<String>> {
-    // carina-core's validate_enum, enum_parts, and walk_custom_lookup use only outer-enum callbacks/transforms.
-    // Like ScalarConstraints::from_declaration, recurse through enums to scalar refinements.
+    // Show base refinements because they are part of the declared type, used for annotation
+    // assignability and diagnostics, not because value validation checks them. Omit the base's own
+    // validator and DSL transform because carina never runs them (carina-rs/carina#4300).
     Ok(match base.raw_shape() {
         RawShape::String {
             identity: _,
