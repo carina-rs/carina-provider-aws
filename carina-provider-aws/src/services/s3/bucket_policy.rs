@@ -14,6 +14,13 @@ use crate::send_models_generated::{S3BucketPolicyCreateInput, S3BucketPolicyUpda
 use crate::services::iam::role::{iam_policy_json_to_value, resolve_iam_policy_value};
 use crate::services::s3::bucket::is_s3_not_configured_error;
 
+fn decode_bucket_policy(id: &ResourceId, raw: &str) -> ProviderResult<Value> {
+    iam_policy_json_to_value(raw).map_err(|error| {
+        ProviderError::api_error_caused_by("Failed to parse bucket policy", error)
+            .for_resource(id.clone())
+    })
+}
+
 impl AwsProvider {
     /// Read an S3 BucketPolicy.
     ///
@@ -37,10 +44,7 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(policy_json) = output.policy() {
-                    let policy = iam_policy_json_to_value(policy_json).map_err(|error| {
-                        ProviderError::api_error_caused_by("Failed to parse bucket policy", error)
-                            .for_resource(id.clone())
-                    })?;
+                    let policy = decode_bucket_policy(id, policy_json)?;
                     let model = S3BucketPolicyReadModel {
                         bucket: crate::read_model::applied_identifier_value(identifier),
                         policy,
@@ -156,6 +160,37 @@ impl AwsProvider {
                 Err(api_error_with_meta("Failed to delete bucket policy", e)
                     .for_resource(id.clone()))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::iam::role::IamPolicyDecodeError;
+    use carina_core::provider::ProviderErrorKind;
+    use std::error::Error;
+
+    #[test]
+    fn bucket_policy_read_decode_failure_keeps_its_typed_cause() {
+        let id = ResourceId::with_provider_identity("aws", "s3.BucketPolicy", "test", None);
+        for raw in [
+            "",
+            "{",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let error =
+                decode_bucket_policy(&id, raw).expect_err("a malformed policy must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(decode.source().unwrap().is::<serde_json::Error>());
         }
     }
 }

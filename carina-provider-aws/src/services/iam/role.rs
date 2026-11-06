@@ -16,6 +16,21 @@ use crate::read_model::found_managed_read;
 use crate::read_models_generated::IamRoleReadModelSupplement;
 use crate::send_models_generated::{IamRoleCreateInput, IamRoleUpdateInput};
 
+fn decode_assume_role_policy_document(
+    id: &ResourceId,
+    raw: Option<&str>,
+) -> ProviderResult<Option<Value>> {
+    raw.map(|raw| {
+        let decoded = urlencoding::decode(raw).map_err(IamPolicyDecodeError::UrlDecode)?;
+        iam_policy_json_to_value(&decoded)
+    })
+    .transpose()
+    .map_err(|error| {
+        ProviderError::api_error_caused_by("Failed to decode assume role policy document", error)
+            .for_resource(id.clone())
+    })
+}
+
 impl AwsProvider {
     /// Read an IAM Role
     pub(crate) async fn read_iam_role(
@@ -36,20 +51,8 @@ impl AwsProvider {
         match result {
             Ok(output) => {
                 if let Some(role) = output.role() {
-                    let policy = role
-                        .assume_role_policy_document()
-                        .map(|raw| {
-                            let decoded = urlencoding::decode(raw).unwrap_or_else(|_| raw.into());
-                            iam_policy_json_to_value(&decoded)
-                        })
-                        .transpose()
-                        .map_err(|error| {
-                            ProviderError::api_error_caused_by(
-                                "Failed to decode assume role policy document",
-                                error,
-                            )
-                            .for_resource(id.clone())
-                        })?;
+                    let policy =
+                        decode_assume_role_policy_document(id, role.assume_role_policy_document())?;
                     let fields = Self::extract_iam_role_attributes(role)
                         .map_assume_role_policy_document(|_| policy);
 
@@ -581,6 +584,8 @@ fn scalar_to_json(value: &Value) -> serde_json::Value {
 /// A policy decode failure with its original parse or numeric cause.
 #[derive(Debug, thiserror::Error)]
 pub enum IamPolicyDecodeError {
+    #[error("URL decode failed")]
+    UrlDecode(#[source] std::string::FromUtf8Error),
     #[error("JSON parse failed")]
     Json(#[source] serde_json::Error),
     #[error("invalid JSON number")]
@@ -769,6 +774,8 @@ fn json_scalar_to_value(json: &serde_json::Value) -> Result<Value, IamPolicyDeco
             } else {
                 let raw = match n.as_f64() {
                     Some(value) => value,
+                    // Reachable only if feature unification enables serde_json's
+                    // arbitrary_precision; keep decoding checked at this trust boundary.
                     None => n
                         .to_string()
                         .parse()
@@ -794,7 +801,70 @@ fn json_scalar_to_value(json: &serde_json::Value) -> Result<Value, IamPolicyDeco
 #[cfg(test)]
 mod tests {
     use super::*;
+    use carina_core::provider::ProviderErrorKind;
     use indexmap::IndexMap;
+
+    #[test]
+    fn role_read_policy_url_decode_failure_keeps_its_typed_cause() {
+        use std::error::Error;
+
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        for raw in ["%FF", r#"{"Version":"%FF","Statement":[]}"#] {
+            let error = decode_assume_role_policy_document(&id, Some(raw))
+                .expect_err("invalid percent-encoded UTF-8 must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::UrlDecode(_)));
+            assert!(decode.source().unwrap().is::<std::string::FromUtf8Error>());
+        }
+    }
+
+    #[test]
+    fn role_read_policy_json_failure_keeps_its_typed_cause() {
+        use std::error::Error;
+
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        for raw in [
+            "",
+            "{",
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
+            r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
+        ] {
+            let encoded = urlencoding::encode(raw);
+            let error = decode_assume_role_policy_document(&id, Some(&encoded))
+                .expect_err("a malformed policy must fail the read");
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError);
+            let decode = error
+                .detail()
+                .cause()
+                .unwrap()
+                .downcast_ref::<IamPolicyDecodeError>()
+                .expect("typed IAM policy decode error");
+            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(decode.source().unwrap().is::<serde_json::Error>());
+        }
+    }
+
+    #[test]
+    fn role_read_policy_preserves_absence_and_decodes_url_encoded_json() {
+        let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
+        assert_eq!(decode_assume_role_policy_document(&id, None).unwrap(), None);
+        let raw = r#"{"Statement":[]}"#;
+        for policy in [raw.to_string(), urlencoding::encode(raw).into_owned()] {
+            assert_eq!(
+                decode_assume_role_policy_document(&id, Some(&policy)).unwrap(),
+                Some(Value::Concrete(ConcreteValue::Map(IndexMap::from([(
+                    "statement".to_string(),
+                    Value::Concrete(ConcreteValue::List(vec![])),
+                )])))),
+            );
+        }
+    }
 
     #[test]
     fn policy_json_preserves_finite_float_values() {
