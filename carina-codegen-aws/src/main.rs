@@ -6520,27 +6520,22 @@ fn generate_markdown_resource(
                 &mut struct_defs,
             )?
         } else if is_aws_resource_id_property(extra.name) {
-            scalar_display(
-                ScalarDoc::String {
-                    identity: Some(&resource_id_identity(extra.name)),
-                    pattern: None,
-                    length: None,
-                    validate: false,
-                    to_dsl: None,
-                },
-                declared_scalar_display_name,
+            discover_markdown_attribute_type(
+                &resource_id_aws_type(extra.name).attribute_type(),
+                std::slice::from_ref(&snake_name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
                 None,
-            )
+            )?
         } else {
             scalar_display(
                 ScalarDoc::String {
-                    identity: None,
                     pattern: None,
                     length: None,
                     validate: false,
                     to_dsl: None,
                 },
-                declared_scalar_display_name,
                 None,
             )
         };
@@ -7531,50 +7526,40 @@ fn discover_markdown_type(
             }
             scalar_display(
                 ScalarDoc::String {
-                    identity: None,
                     pattern: None,
                     length: None,
                     validate: false,
                     to_dsl: None,
                 },
-                declared_scalar_display_name,
                 None,
             )
         }
-        Some(ShapeKind::Boolean) => {
-            scalar_display(ScalarDoc::Bool, declared_scalar_display_name, None)
-        }
+        Some(ShapeKind::Boolean) => scalar_display(ScalarDoc::Bool, None),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             let range = get_int_range(model, target, field_name);
             if let Some(r) = range {
                 scalar_display(
                     ScalarDoc::Int {
-                        identity: None,
                         range: Some((r.min, r.max)),
                         validate: false,
                     },
-                    declared_scalar_display_name,
                     None,
                 )
             } else {
                 scalar_display(
                     ScalarDoc::Int {
-                        identity: None,
                         range: None,
                         validate: false,
                     },
-                    declared_scalar_display_name,
                     None,
                 )
             }
         }
         Some(ShapeKind::Float) | Some(ShapeKind::Double) => scalar_display(
             ScalarDoc::Float {
-                identity: None,
                 range: None,
                 validate: false,
             },
-            declared_scalar_display_name,
             None,
         ),
         Some(ShapeKind::Enum) => {
@@ -7617,24 +7602,20 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
-                    declared_scalar_display_name,
                     None,
                 )
             }
         }
         Some(ShapeKind::IntEnum) => scalar_display(
             ScalarDoc::Int {
-                identity: None,
                 range: None,
                 validate: false,
             },
-            declared_scalar_display_name,
             None,
         ),
         Some(ShapeKind::List) => {
@@ -7671,13 +7652,11 @@ fn discover_markdown_type(
                 list_display(
                     scalar_display(
                         ScalarDoc::String {
-                            identity: None,
                             pattern: None,
                             length: None,
                             validate: false,
                             to_dsl: None,
                         },
-                        declared_scalar_display_name,
                         None,
                     ),
                     true,
@@ -7709,13 +7688,11 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
-                    declared_scalar_display_name,
                     None,
                 )
             };
@@ -7727,13 +7704,11 @@ fn discover_markdown_type(
             map_display(
                 scalar_display(
                     ScalarDoc::String {
-                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
-                    declared_scalar_display_name,
                     None,
                 ),
                 value,
@@ -7757,11 +7732,7 @@ fn discover_markdown_type(
                 );
             }
             if kind == Some(ShapeKind::Structure) && shape_name == "AttributeBooleanValue" {
-                return Ok(scalar_display(
-                    ScalarDoc::Bool,
-                    declared_scalar_display_name,
-                    None,
-                ));
+                return Ok(scalar_display(ScalarDoc::Bool, None));
             }
             let structure = if let Some(structure) = model.get_structure(target) {
                 StructRepresentation::from_structure(structure)
@@ -7862,13 +7833,11 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
-                    declared_scalar_display_name,
                     None,
                 )
             }
@@ -8086,9 +8055,9 @@ fn snake_to_pascal_type(s: &str) -> String {
     out
 }
 
-/// Use the same declared identity as the resource-ID schema constructor.
-fn resource_id_identity(prop_name: &str) -> TypeIdentity {
-    let ty = match classify_resource_id(prop_name) {
+/// Use the full attribute type of the resource-ID schema constructor.
+fn resource_id_aws_type(prop_name: &str) -> AwsType {
+    match classify_resource_id(prop_name) {
         ResourceIdKind::VpcId => AwsType::VpcId,
         ResourceIdKind::SubnetId => AwsType::SubnetId,
         ResourceIdKind::SecurityGroupId => AwsType::SecurityGroupId,
@@ -8108,8 +8077,7 @@ fn resource_id_identity(prop_name: &str) -> TypeIdentity {
         ResourceIdKind::LocalGatewayId => AwsType::LocalGatewayId,
         ResourceIdKind::NetworkAclId => AwsType::NetworkAclId,
         ResourceIdKind::Generic => AwsType::ResourceId,
-    };
-    ty.identity()
+    }
 }
 
 // ── Type inference helpers (ported from codegen.rs) ──
@@ -9833,6 +9801,61 @@ mod tests {
             ExampleKind::Resource,
         )
         .expect("checked resource Markdown fixture")
+    }
+
+    #[test]
+    fn markdown_internet_gateway_vpc_id_keeps_nat_gateway_constraints() {
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.ec2#CreateInternetGateway": {
+                  "type": "operation", "input": {"target": "com.amazonaws.ec2#CreateInternetGatewayRequest"}
+                },
+                "com.amazonaws.ec2#CreateInternetGatewayRequest": {"type": "structure", "members": {}},
+                "com.amazonaws.ec2#InternetGateway": {
+                  "type": "structure", "members": {"InternetGatewayId": {"target": "com.amazonaws.ec2#String"}}
+                },
+                "com.amazonaws.ec2#CreateNatGateway": {
+                  "type": "operation", "input": {"target": "com.amazonaws.ec2#CreateNatGatewayRequest"}
+                },
+                "com.amazonaws.ec2#CreateNatGatewayRequest": {
+                  "type": "structure", "members": {"VpcId": {"target": "com.amazonaws.ec2#String"}}
+                },
+                "com.amazonaws.ec2#NatGateway": {
+                  "type": "structure", "members": {"NatGatewayId": {"target": "com.amazonaws.ec2#String"}}
+                },
+                "com.amazonaws.ec2#String": {"type": "string"}
+              }
+            }"##,
+        )
+        .unwrap();
+        let vpc_id_type = |name| {
+            let resource = resource_defs::ec2_resources()
+                .into_iter()
+                .find(|resource| resource.name == name)
+                .unwrap();
+            let markdown = generate_markdown_resource(
+                &resource,
+                &model,
+                &markdown_resource_example(resource.name),
+            )
+            .unwrap();
+            markdown
+                .split("### `vpc_id`\n")
+                .nth(1)
+                .unwrap()
+                .lines()
+                .find_map(|line| line.strip_prefix("- **Type:** "))
+                .unwrap()
+                .to_string()
+        };
+        let nat_type = vpc_id_type("ec2.NatGateway");
+        assert_eq!(
+            nat_type,
+            "`VpcId (pattern: ^vpc-[0-9a-f]{8,}$, custom validator)`"
+        );
+        assert_eq!(vpc_id_type("ec2.InternetGateway"), nat_type);
     }
 
     fn markdown_data_source_example(dsl_name: &str) -> DocExample {

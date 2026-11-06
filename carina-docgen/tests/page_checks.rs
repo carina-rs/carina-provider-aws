@@ -1,4 +1,7 @@
-use carina_core::schema::{AttributeType, Draft, ListElements, TypeIdentity};
+use std::cell::Cell;
+use std::sync::Arc;
+
+use carina_core::schema::{AttributeType, Draft, ListElements, RawShape, TypeIdentity};
 use carina_docgen::{
     Declaration, DeclarationKind, DocLink, DocgenError, Heading, ListConstraints, MapConstraints,
     PageBuilder, PageViolationKind, Resolved, ScalarDoc, TableCell, TypeDisplay, TypeDocHooks,
@@ -52,8 +55,16 @@ fn render_like_registry(markdown: &str, check: impl for<'a> FnOnce(&'a AstNode<'
 }
 
 fn named_type(ty: AttributeType) -> TypeDisplay<Target> {
-    struct Hooks;
-    impl<'a> TypeDocHooks<'a, Draft> for Hooks {
+    schema_type(&ty, |identity| identity.to_string(), None)
+}
+
+fn schema_type(
+    ty: &AttributeType,
+    scalar_name: impl Fn(&TypeIdentity) -> String,
+    note: Option<ValidationNote<'_>>,
+) -> TypeDisplay<Target> {
+    struct Hooks<F>(F);
+    impl<'a, F: Fn(&TypeIdentity) -> String> TypeDocHooks<'a, Draft> for Hooks<F> {
         type NodeId = usize;
         type Target = Target;
         type Scope = ();
@@ -64,7 +75,7 @@ fn named_type(ty: AttributeType) -> TypeDisplay<Target> {
             })
         }
         fn scalar_name(&self, identity: &TypeIdentity) -> String {
-            identity.to_string()
+            self.0(identity)
         }
         fn child_scope(&self, _parent: &(), _edge: TypeEdge<'_>) {}
         fn register(
@@ -83,7 +94,14 @@ fn named_type(ty: AttributeType) -> TypeDisplay<Target> {
             })
         }
     }
-    render_attribute_type(&ty, &(), &mut Hooks, &mut TypeRegistry::default(), None).unwrap()
+    render_attribute_type(
+        ty,
+        &(),
+        &mut Hooks(scalar_name),
+        &mut TypeRegistry::default(),
+        note,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -141,36 +159,28 @@ fn attribute_reference_entry_allocates_duplicate_heading_slugs() {
 #[test]
 fn scalar_compositors_name_declared_identities_and_keep_builtin_names() {
     let identity = TypeIdentity::bare("Declared");
-    for scalar in [
-        ScalarDoc::String {
-            identity: Some(&identity),
-            pattern: None,
-            length: None,
-            validate: false,
-            to_dsl: None,
-        },
-        ScalarDoc::Int {
-            identity: Some(&identity),
-            range: None,
-            validate: false,
-        },
-        ScalarDoc::Float {
-            identity: Some(&identity),
-            range: None,
-            validate: false,
-        },
+    for ty in [
+        AttributeType::refined_string(Some(identity.clone()), None, None, None),
+        AttributeType::refined_int(Some(identity.clone()), None),
+        AttributeType::refined_float(Some(identity), None),
     ] {
-        let mut calls = 0;
-        let display = scalar_display(
-            scalar,
+        let identity = match ty.raw_shape() {
+            RawShape::String { identity, .. }
+            | RawShape::Int { identity, .. }
+            | RawShape::Float { identity, .. } => identity.unwrap(),
+            _ => unreachable!("declared scalar fixture"),
+        };
+        let calls = Cell::new(0);
+        let display = schema_type(
+            &ty,
             |actual| {
-                assert!(std::ptr::eq(actual, &identity));
-                calls += 1;
+                assert!(std::ptr::eq(actual, identity));
+                calls.set(calls.get() + 1);
                 format!("Provider{}", actual.kind)
             },
             None,
         );
-        assert_eq!(calls, 1);
+        assert_eq!(calls.get(), 1);
         let mut page: PageBuilder<Target> = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
@@ -179,57 +189,61 @@ fn scalar_compositors_name_declared_identities_and_keep_builtin_names() {
             assert_eq!(visible, "ProviderDeclaredTypeProviderDeclared");
         });
     }
-    for (scalar, name) in [
+    for (scalar, ty, name) in [
         (
             ScalarDoc::String {
-                identity: None,
                 pattern: None,
                 length: None,
                 validate: false,
                 to_dsl: None,
             },
+            AttributeType::string(),
             "String",
         ),
         (
             ScalarDoc::Int {
-                identity: None,
                 range: None,
                 validate: false,
             },
+            AttributeType::int(),
             "Int",
         ),
         (
             ScalarDoc::Float {
-                identity: None,
                 range: None,
                 validate: false,
             },
+            AttributeType::float(),
             "Float",
         ),
-        (ScalarDoc::Bool, "Bool"),
-        (ScalarDoc::Duration, "Duration"),
+        (ScalarDoc::Bool, AttributeType::bool(), "Bool"),
+        (ScalarDoc::Duration, AttributeType::duration(), "Duration"),
     ] {
-        let display = scalar_display(
-            scalar,
-            |_| panic!("builtin names must not call the provider's naming hook"),
-            None,
-        );
-        let mut page: PageBuilder<Target> = PageBuilder::new();
-        display.write_to(&mut page);
-        assert_eq!(page.finish().unwrap(), format!("`{name}`"));
+        for display in [
+            scalar_display(scalar, None),
+            schema_type(
+                &ty,
+                |_| panic!("builtin names must not call the provider's naming hook"),
+                None,
+            ),
+        ] {
+            let mut page: PageBuilder<Target> = PageBuilder::new();
+            display.write_to(&mut page);
+            assert_eq!(page.finish().unwrap(), format!("`{name}`"));
+        }
     }
 }
 
 #[test]
 fn type_validation_notes_use_one_literal_suffix_inline_and_in_tables() {
-    let identity = TypeIdentity::bare("Asn");
+    let ty = AttributeType::refined_int_with_validator(
+        TypeIdentity::bare("Asn"),
+        None,
+        Arc::new(|_| Ok(())),
+    );
     let note = "64512..=65534 or 4200000000..=4294967294; [text](#literal) | `literal`";
-    let display = scalar_display(
-        ScalarDoc::Int {
-            identity: Some(&identity),
-            range: None,
-            validate: true,
-        },
+    let display = schema_type(
+        &ty,
         |identity| identity.kind.clone(),
         Some(ValidationNote::new(note)),
     );
@@ -296,13 +310,11 @@ fn type_display_pattern_is_literal_code() {
     let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
     let display = scalar_display(
         ScalarDoc::String {
-            identity: None,
             pattern: Some(pattern),
             length: None,
             validate: false,
             to_dsl: None,
         },
-        |identity| identity.kind.clone(),
         None,
     );
     let mut page: PageBuilder<Target> = PageBuilder::new();
@@ -322,13 +334,11 @@ fn type_display_pattern_is_literal_code() {
 fn map_length_type_display_keeps_key_constraints_and_value_links() {
     let key = scalar_display(
         ScalarDoc::String {
-            identity: None,
             pattern: Some("^[a-z]+$"),
             length: Some((Some(1), Some(8))),
             validate: false,
             to_dsl: None,
         },
-        |identity| identity.kind.clone(),
         None,
     );
     let display = map_display(
@@ -368,13 +378,11 @@ fn type_display_keeps_nested_collection_links_outside_code_spans() {
     let string = || {
         scalar_display(
             ScalarDoc::String {
-                identity: None,
                 pattern: None,
                 length: None,
                 validate: false,
                 to_dsl: None,
             },
-            |identity| identity.kind.clone(),
             None,
         )
     };

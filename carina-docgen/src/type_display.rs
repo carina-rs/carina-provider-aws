@@ -12,7 +12,7 @@ use crate::{PageBuilder, TableCell};
 ///
 /// ```compile_fail
 /// use carina_docgen::{ScalarDoc, TypeDisplay, scalar_display};
-/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, |identity| identity.kind.clone(), None);
+/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, None);
 /// let wrapped = format!("`List<{}>`", display);
 /// ```
 ///
@@ -32,7 +32,7 @@ use crate::{PageBuilder, TableCell};
 /// ```
 /// ```compile_fail
 /// use carina_docgen::{ScalarDoc, TypeDisplay, scalar_display};
-/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, |identity| identity.kind.clone(), None);
+/// let display: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, None);
 /// display.with_note(None);
 /// ```
 #[derive(Clone, Debug)]

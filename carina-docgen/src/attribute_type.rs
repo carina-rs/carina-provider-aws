@@ -85,16 +85,19 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
     ) -> Result<DocLink<Self::Target>>;
 }
 
-/// Semantic scalar data shared by schema trees and discovery-only providers.
-/// `identity: None` selects the variant's builtin name; `Some` refers to a
-/// declared identity, spelled by the provider's scalar naming hook.
+/// Semantic constraints for builtin scalars in discovery-only providers.
+/// The variant determines the builtin name. Declared scalars must be rendered
+/// from their schema node through [`render_attribute_type`], which obtains the
+/// name from [`TypeDocHooks::scalar_name`].
 ///
-/// Declared scalar names cannot be supplied as free text:
+/// Direct scalar composition cannot accept declared identities:
 ///
 /// ```compile_fail
+/// use carina_core::schema::TypeIdentity;
 /// use carina_docgen::ScalarDoc;
+/// let identity = TypeIdentity::bare("Declared");
 /// ScalarDoc::String {
-///     identity: Some("provider wording"),
+///     identity: Some(&identity),
 ///     pattern: None,
 ///     length: None,
 ///     validate: false,
@@ -102,28 +105,29 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
 /// };
 /// ```
 /// ```compile_fail
+/// use carina_core::schema::TypeIdentity;
 /// use carina_docgen::ScalarDoc;
-/// ScalarDoc::Int { identity: Some("provider wording"), range: None, validate: false };
+/// let identity = TypeIdentity::bare("Declared");
+/// ScalarDoc::Int { identity: Some(&identity), range: None, validate: false };
 /// ```
 /// ```compile_fail
+/// use carina_core::schema::TypeIdentity;
 /// use carina_docgen::ScalarDoc;
-/// ScalarDoc::Float { identity: Some("provider wording"), range: None, validate: false };
+/// let identity = TypeIdentity::bare("Declared");
+/// ScalarDoc::Float { identity: Some(&identity), range: None, validate: false };
 /// ```
 pub enum ScalarDoc<'a> {
     String {
-        identity: Option<&'a TypeIdentity>,
         pattern: Option<&'a str>,
         length: Bounds<u64>,
         validate: bool,
         to_dsl: Option<&'a DslTransform>,
     },
     Int {
-        identity: Option<&'a TypeIdentity>,
         range: Bounds<i64>,
         validate: bool,
     },
     Float {
-        identity: Option<&'a TypeIdentity>,
         range: Bounds<FiniteF64>,
         validate: bool,
     },
@@ -182,17 +186,27 @@ impl<'a> ValidationNote<'a> {
     }
 }
 
-/// Render a scalar using shared wording. Use the same `scalar_name` function as
-/// the provider's [`TypeDocHooks::scalar_name`] implementation; it is called only
-/// for a declared identity, never for a builtin.
+/// Render a builtin scalar using shared wording. Declared identities and their
+/// naming hooks are available only through [`render_attribute_type`].
+///
+/// ```compile_fail
+/// use carina_docgen::{ScalarDoc, TypeDisplay, scalar_display};
+/// let _: TypeDisplay<()> = scalar_display(ScalarDoc::Bool, |_| "ProviderBool".into(), None);
+/// ```
 pub fn scalar_display<K>(
     scalar: ScalarDoc<'_>,
-    scalar_name: impl FnOnce(&TypeIdentity) -> String,
     note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
-    let (identity, builtin_name, constraints) = match scalar {
+    scalar_display_with_name(scalar, None, note)
+}
+
+fn scalar_display_with_name<K>(
+    scalar: ScalarDoc<'_>,
+    name: Option<String>,
+    note: Option<ValidationNote<'_>>,
+) -> TypeDisplay<K> {
+    let (builtin_name, constraints) = match scalar {
         ScalarDoc::String {
-            identity,
             pattern,
             length,
             validate,
@@ -205,24 +219,14 @@ pub fn scalar_display<K>(
             if let Some(transform) = to_dsl {
                 constraints.push(format!("DSL transform: {transform:?}"));
             }
-            (identity, "String", constraints)
+            ("String", constraints)
         }
-        ScalarDoc::Int {
-            identity,
-            range,
-            validate,
-        } => (identity, "Int", number_constraints(range, validate)),
-        ScalarDoc::Float {
-            identity,
-            range,
-            validate,
-        } => (identity, "Float", number_constraints(range, validate)),
-        ScalarDoc::Bool => (None, "Bool", Vec::new()),
-        ScalarDoc::Duration => (None, "Duration", Vec::new()),
+        ScalarDoc::Int { range, validate } => ("Int", number_constraints(range, validate)),
+        ScalarDoc::Float { range, validate } => ("Float", number_constraints(range, validate)),
+        ScalarDoc::Bool => ("Bool", Vec::new()),
+        ScalarDoc::Duration => ("Duration", Vec::new()),
     };
-    let name = identity
-        .map(scalar_name)
-        .unwrap_or_else(|| builtin_name.to_string());
+    let name = name.unwrap_or_else(|| builtin_name.to_string());
     TypeDisplay::code(if constraints.is_empty() {
         name
     } else {
@@ -385,15 +389,14 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             identity,
             pattern,
             length,
-        } => scalar_display(
+        } => scalar_display_with_name(
             ScalarDoc::String {
-                identity: Some(identity),
                 pattern,
                 length,
                 validate: false,
                 to_dsl: None,
             },
-            |identity| hooks.scalar_name(identity),
+            Some(hooks.scalar_name(identity)),
             None,
         ),
         RawShape::String {
@@ -402,53 +405,42 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             length,
             validate,
             to_dsl,
-        } => scalar_display(
+        } => scalar_display_with_name(
             ScalarDoc::String {
-                identity,
                 pattern,
                 length,
                 validate: validate.is_some(),
                 to_dsl,
             },
-            |identity| hooks.scalar_name(identity),
+            identity.map(|identity| hooks.scalar_name(identity)),
             None,
         ),
         RawShape::Int {
             identity,
             range,
             validate,
-        } => scalar_display(
+        } => scalar_display_with_name(
             ScalarDoc::Int {
-                identity,
                 range,
                 validate: validate.is_some(),
             },
-            |identity| hooks.scalar_name(identity),
+            identity.map(|identity| hooks.scalar_name(identity)),
             None,
         ),
         RawShape::Float {
             identity,
             range,
             validate,
-        } => scalar_display(
+        } => scalar_display_with_name(
             ScalarDoc::Float {
-                identity,
                 range,
                 validate: validate.is_some(),
             },
-            |identity| hooks.scalar_name(identity),
+            identity.map(|identity| hooks.scalar_name(identity)),
             None,
         ),
-        RawShape::Bool => scalar_display(
-            ScalarDoc::Bool,
-            |identity| hooks.scalar_name(identity),
-            None,
-        ),
-        RawShape::Duration => scalar_display(
-            ScalarDoc::Duration,
-            |identity| hooks.scalar_name(identity),
-            None,
-        ),
+        RawShape::Bool => scalar_display(ScalarDoc::Bool, None),
+        RawShape::Duration => scalar_display(ScalarDoc::Duration, None),
         RawShape::Enum {
             identity,
             base,
