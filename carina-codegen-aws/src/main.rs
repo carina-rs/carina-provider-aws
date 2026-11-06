@@ -288,6 +288,32 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
     })
 }
 
+/// Select synthetic extra types once for schemas and documentation, retaining
+/// both the Rust constructor and its complete attribute type and validation note.
+fn synthetic_extra_attribute_type(
+    resource: &str,
+    field_name: &str,
+    type_overrides: &HashMap<&str, &str>,
+) -> Result<ValueTypeOverride> {
+    let snake_name = field_name.to_snake_case();
+    let type_code = if let Some(code) = reference_type_code(resource, &snake_name) {
+        code.to_string()
+    } else if let Some(override_type) = resource_value_override(resource, &snake_name) {
+        return Ok(override_type);
+    } else if let Some(&override_type) = type_overrides.get(field_name) {
+        override_type.to_string()
+    } else if let Some(inferred) = infer_string_type(field_name) {
+        inferred
+    } else {
+        PLAIN_STRING_TYPE_CODE.to_string()
+    };
+    Ok(ValueTypeOverride {
+        attribute_type: attribute_type_from_code(&type_code)?,
+        type_code,
+        documentation: None,
+    })
+}
+
 impl ValueTypeOverride {
     fn markdown(
         self,
@@ -1796,17 +1822,8 @@ fn collect_resource_attributes_unvalidated(
         }
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
-        let type_code = if let Some(code) = reference_type_code(res.name, &snake_name) {
-            code.to_string()
-        } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
-            override_type.type_code
-        } else if let Some(&override_type) = type_overrides.get(extra.name) {
-            override_type.to_string()
-        } else if let Some(inferred) = infer_string_type(extra.name) {
-            inferred
-        } else {
-            PLAIN_STRING_TYPE_CODE.to_string()
-        };
+        let type_code =
+            synthetic_extra_attribute_type(res.name, extra.name, &type_overrides)?.type_code;
         let is_read_only = read_only_overrides.contains(extra.name);
         let is_create_only = !is_read_only
             && (!updatable_fields.contains(extra.name)
@@ -6496,49 +6513,13 @@ fn generate_markdown_resource(
         }
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
-        let attr_type = if let Some(code) = reference_type_code(res.name, &snake_name) {
-            discover_markdown_override(
-                code,
+        let attr_type = synthetic_extra_attribute_type(res.name, extra.name, &type_overrides)?
+            .markdown(
                 std::slice::from_ref(&snake_name),
                 &namespace,
                 &mut all_enums,
                 &mut struct_defs,
-            )?
-        } else if let Some(override_type) = resource_value_override(res.name, &snake_name) {
-            override_type.markdown(
-                std::slice::from_ref(&snake_name),
-                &namespace,
-                &mut all_enums,
-                &mut struct_defs,
-            )?
-        } else if let Some(&override_type) = type_overrides.get(extra.name) {
-            discover_markdown_override(
-                override_type,
-                std::slice::from_ref(&snake_name),
-                &namespace,
-                &mut all_enums,
-                &mut struct_defs,
-            )?
-        } else if is_aws_resource_id_property(extra.name) {
-            discover_markdown_attribute_type(
-                &resource_id_aws_type(extra.name).attribute_type(),
-                std::slice::from_ref(&snake_name),
-                &namespace,
-                &mut all_enums,
-                &mut struct_defs,
-                None,
-            )?
-        } else {
-            scalar_display(
-                ScalarDoc::String {
-                    pattern: None,
-                    length: None,
-                    validate: false,
-                    to_dsl: None,
-                },
-                None,
-            )
-        };
+            )?;
         let entry = MarkdownAttrInfo {
             snake_name: snake_name.clone(),
             attr_type,
@@ -8053,31 +8034,6 @@ fn snake_to_pascal_type(s: &str) -> String {
         }
     }
     out
-}
-
-/// Use the full attribute type of the resource-ID schema constructor.
-fn resource_id_aws_type(prop_name: &str) -> AwsType {
-    match classify_resource_id(prop_name) {
-        ResourceIdKind::VpcId => AwsType::VpcId,
-        ResourceIdKind::SubnetId => AwsType::SubnetId,
-        ResourceIdKind::SecurityGroupId => AwsType::SecurityGroupId,
-        ResourceIdKind::EgressOnlyInternetGatewayId => AwsType::EgressOnlyInternetGatewayId,
-        ResourceIdKind::InternetGatewayId => AwsType::InternetGatewayId,
-        ResourceIdKind::RouteTableId => AwsType::RouteTableId,
-        ResourceIdKind::NatGatewayId => AwsType::NatGatewayId,
-        ResourceIdKind::VpcPeeringConnectionId => AwsType::VpcPeeringConnectionId,
-        ResourceIdKind::TransitGatewayId => AwsType::TransitGatewayId,
-        ResourceIdKind::VpnGatewayId => AwsType::VpnGatewayId,
-        ResourceIdKind::VpcEndpointId => AwsType::VpcEndpointId,
-        ResourceIdKind::InstanceId => AwsType::InstanceId,
-        ResourceIdKind::NetworkInterfaceId => AwsType::NetworkInterfaceId,
-        ResourceIdKind::AllocationId => AwsType::AllocationId,
-        ResourceIdKind::PrefixListId => AwsType::PrefixListId,
-        ResourceIdKind::CarrierGatewayId => AwsType::CarrierGatewayId,
-        ResourceIdKind::LocalGatewayId => AwsType::LocalGatewayId,
-        ResourceIdKind::NetworkAclId => AwsType::NetworkAclId,
-        ResourceIdKind::Generic => AwsType::ResourceId,
-    }
 }
 
 // ── Type inference helpers (ported from codegen.rs) ──
@@ -9856,6 +9812,77 @@ mod tests {
             "`VpcId (pattern: ^vpc-[0-9a-f]{8,}$, custom validator)`"
         );
         assert_eq!(vpc_id_type("ec2.InternetGateway"), nat_type);
+    }
+
+    #[test]
+    fn markdown_s3_bucket_arn_matches_schema_type() {
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0",
+              "shapes": {
+                "com.amazonaws.s3#CreateBucket": {
+                  "type": "operation", "input": {"target": "com.amazonaws.s3#CreateBucketRequest"}
+                },
+                "com.amazonaws.s3#CreateBucketRequest": {
+                  "type": "structure", "members": {
+                    "Bucket": {"target": "smithy.api#String", "traits": {"smithy.api#required": {}}},
+                    "BucketNamespace": {"target": "smithy.api#String"}
+                  }
+                }
+              }
+            }"##,
+        )
+        .unwrap();
+        let resource = resource_defs::s3_resources().remove(0);
+        let schema = generate_resource(&resource, &model).unwrap();
+        assert!(
+            schema.contains(r#"AttributeSchema::provider_populated("arn", self::arn())"#),
+            "{schema}"
+        );
+        let attributes = collect_resource_attributes(&resource, &model).unwrap();
+        let arn = attributes
+            .attrs
+            .iter()
+            .find(|attr| attr.snake_name == "arn")
+            .unwrap();
+        assert_eq!(arn.type_code, "super::arn()");
+        let schema_display = discover_markdown_override(
+            &arn.type_code,
+            &["arn".to_string()],
+            "aws.s3.Bucket",
+            &mut BTreeMap::new(),
+            &mut MarkdownTypes::default(),
+        )
+        .unwrap();
+        let mut page = PageBuilder::new();
+        schema_display.write_to(&mut page);
+        let schema_type = page.finish().unwrap();
+        assert_eq!(
+            schema_type,
+            "`Arn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$, custom validator)`"
+        );
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        let docs_type = markdown
+            .split("### `arn`\n")
+            .nth(1)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("- **Type:** "))
+            .unwrap();
+        assert_eq!(docs_type, schema_type);
+        let data_source = resource_defs::s3_data_sources().remove(0);
+        let data_source_markdown = generate_markdown_data_source(
+            &data_source,
+            &model,
+            &markdown_data_source_example(data_source.name),
+        )
+        .unwrap();
+        assert!(data_source_markdown.contains(&format!("- **Type:** {schema_type}\n")));
     }
 
     fn markdown_data_source_example(dsl_name: &str) -> DocExample {
