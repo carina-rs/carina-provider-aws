@@ -267,6 +267,7 @@ fn unpack_attr(raw: &str, kind: AttrKind) -> Result<Option<Value>, IamPolicyDeco
         AttrKind::String => Some(Value::Concrete(ConcreteValue::String(
             raw.to_string().into(),
         ))),
+        AttrKind::IamPolicy if raw.is_empty() => None,
         AttrKind::IamPolicy => Some(iam_policy_json_to_value(raw)?),
         AttrKind::RedrivePolicyStruct => serde_json::from_str(raw)
             .ok()
@@ -289,7 +290,7 @@ fn queue_attribute(
         .transpose()
         .map(Option::flatten)
         .map_err(|error| {
-            ProviderError::api_error_caused_by("Failed to decode SQS queue attribute", error)
+            ProviderError::api_error_caused_by("Failed to decode SQS queue attribute Policy", error)
                 .for_resource(id.clone())
         })
 }
@@ -1252,11 +1253,21 @@ mod tests {
     use carina_core::resource::DeferredValue;
 
     #[test]
+    fn sqs_empty_policy_is_absent() {
+        assert_eq!(
+            unpack_attr("", AttrKind::IamPolicy)
+                .expect("an empty policy must be treated as absent"),
+            None,
+        );
+    }
+
+    #[test]
     fn sqs_policy_decode_failure_keeps_its_typed_cause() {
         use std::error::Error;
 
         let id = queue_resource().id;
         for raw in [
+            " ",
             r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":1e999}}}]}"#,
             r#"{"Statement":[{"Condition":{"NumericLessThan":{"example:Limit":-1e999}}}]}"#,
         ] {
@@ -1268,6 +1279,10 @@ mod tests {
                 AttrKind::IamPolicy,
             )
             .expect_err("an invalid policy must fail the read");
+            assert_eq!(
+                error.detail().context(),
+                "Failed to decode SQS queue attribute Policy"
+            );
             let cause = error.detail().cause().expect("policy decode cause");
             let decode = cause
                 .downcast_ref::<IamPolicyDecodeError>()

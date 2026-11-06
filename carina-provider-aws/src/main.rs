@@ -1286,6 +1286,87 @@ mod tests {
         }
     }
 
+    fn out_of_range_duration_attributes() -> HashMap<String, CoreValue> {
+        HashMap::from([(
+            "value".to_string(),
+            CoreValue::Concrete(ConcreteValue::Duration(std::time::Duration::from_secs(
+                u64::MAX,
+            ))),
+        )])
+    }
+
+    fn out_of_range_duration_state() -> CoreAppliedState {
+        carina_provider_aws::out_of_range_duration_applied_state_for_protocol_test()
+    }
+
+    fn assert_typed_conversion_error(error: CoreProviderError, message: &str) {
+        assert!(
+            error
+                .detail()
+                .cause()
+                .is_some_and(|cause| cause.is::<protocol_convert::ProtocolConvertError>()),
+            "typed protocol-conversion cause must be retained: {error:?}"
+        );
+        let error = error.to_wire();
+        assert_eq!(error.kind, proto::ProviderErrorKind::Internal);
+        assert_eq!(error.message, message);
+        assert!(
+            error.cause.as_deref().is_some_and(|cause| cause
+                .contains("duration in seconds does not fit the provider protocol integer domain")),
+            "protocol-conversion cause must name the out-of-range duration: {error:?}"
+        );
+    }
+
+    #[test]
+    fn out_of_range_duration_read_output_surfaces_as_a_provider_error() {
+        let error = read_outcome_to_proto(&CoreReadOutcome::Found {
+            state: out_of_range_duration_state(),
+        })
+        .expect_err("out-of-range duration in provider output must be rejected without panicking");
+        assert_typed_conversion_error(error, "failed to encode read result");
+    }
+
+    #[test]
+    fn out_of_range_duration_issued_create_output_surfaces_as_a_provider_error() {
+        let error = issued_create_attributes_to_proto(&out_of_range_duration_attributes());
+        assert_typed_conversion_error(
+            error.expect_err("out-of-range duration in issued-create output must be rejected"),
+            "failed to encode create result",
+        );
+    }
+
+    #[test]
+    fn out_of_range_duration_partial_create_output_surfaces_as_a_provider_error() {
+        let error = partial_create_attributes_to_proto(&out_of_range_duration_attributes());
+        assert_typed_conversion_error(
+            error.expect_err("out-of-range duration in partial-create output must be rejected"),
+            "failed to encode partial create result",
+        );
+    }
+
+    #[test]
+    fn out_of_range_duration_resumed_create_output_surfaces_as_a_provider_error() {
+        let error = resumed_state_to_proto(&out_of_range_duration_state())
+            .expect_err("out-of-range duration in resumed-create output must be rejected");
+        assert_typed_conversion_error(error, "failed to encode resumed create result");
+    }
+
+    #[test]
+    fn out_of_range_duration_update_output_surfaces_as_a_provider_error() {
+        let state = out_of_range_duration_state();
+        let id = state.id().clone();
+        let outcome = carina_core::provider::UpdateOutcome::success(state);
+        let state_after_patch = proto::PersistedState {
+            id: protocol_convert::resource_id_to_protocol(&id),
+            identifier: None,
+            attributes: BTreeMap::new(),
+            exists: true,
+        };
+        let error = update_outcome_to_proto(&outcome, state_after_patch, &id)
+            .expect_err("out-of-range duration in update output must be rejected");
+        assert_typed_conversion_error(error, "failed to encode update result");
+    }
+
     #[test]
     fn schemas_include_tags_validator_for_tagged_resources() {
         let provider = AwsProcessProvider::new();

@@ -38,11 +38,8 @@ impl AwsProvider {
             Ok(output) => {
                 if let Some(policy_json) = output.policy() {
                     let policy = iam_policy_json_to_value(policy_json).map_err(|error| {
-                        ProviderError::invalid_input_caused_by(
-                            "Failed to parse bucket policy",
-                            error,
-                        )
-                        .for_resource(id.clone())
+                        ProviderError::api_error_caused_by("Failed to parse bucket policy", error)
+                            .for_resource(id.clone())
                     })?;
                     let model = S3BucketPolicyReadModel {
                         bucket: crate::read_model::applied_identifier_value(identifier),
