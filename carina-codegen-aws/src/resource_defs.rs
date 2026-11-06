@@ -379,6 +379,29 @@ pub struct ResourceDef {
 }
 
 impl ResourceDef {
+    /// Tag mutations and side reads implemented outside the ordinary CRUD metadata.
+    /// The collection types and bounds still come from this resource's model.
+    pub fn tag_operations(&self) -> &'static [&'static str] {
+        if !self.has_tags {
+            return &[];
+        }
+        match self.service_namespace {
+            "com.amazonaws.ec2" => &["CreateTags", "DescribeTags"],
+            "com.amazonaws.s3" => &["PutBucketTagging", "GetBucketTagging"],
+            "com.amazonaws.organizations" => &["TagResource", "ListTagsForResource"],
+            "com.amazonaws.acm" => &["AddTagsToCertificate", "ListTagsForCertificate"],
+            "com.amazonaws.iam" => &["TagRole", "ListRoleTags"],
+            "com.amazonaws.cloudwatchlogs" => &[
+                "TagLogGroup",
+                "ListTagsLogGroup",
+                "TagResource",
+                "ListTagsForResource",
+            ],
+            "com.amazonaws.sqs" => &["TagQueue", "ListQueueTags"],
+            _ => &[],
+        }
+    }
+
     /// Host-driven read-back declarations, independent of the canonical read contract.
     pub fn read_back_overrides(&self) -> ReadBackOverrides {
         self.read_back.clone()

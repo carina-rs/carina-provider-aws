@@ -10,7 +10,6 @@ mod region;
 mod resend_guard;
 mod resource_id;
 mod send_outcome;
-mod tags;
 mod transience;
 
 pub use account::*;
@@ -27,4 +26,3 @@ pub use resource_id::*;
 #[cfg(feature = "test-utils")]
 pub use send_outcome::attach_single_attempt_verdict_for_test;
 pub use send_outcome::{FinalAttempt, Idempotency, SendClassification, Transience};
-pub use tags::*;

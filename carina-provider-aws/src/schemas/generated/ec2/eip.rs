@@ -5,7 +5,6 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use super::tags_type;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
 use carina_provider_protocol::types::ValidatorType;
 
@@ -61,7 +60,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", tags_type())
+            AttributeSchema::optional("tags", AttributeType::map(AttributeType::string()))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),

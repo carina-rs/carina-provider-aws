@@ -305,6 +305,34 @@ fn type_display_pattern_is_literal_code() {
 }
 
 #[test]
+fn map_length_type_display_keeps_key_constraints_and_value_links() {
+    let key = TypeDisplay::sequence([
+        TypeDisplay::text("String(length: 1..=8, pattern: "),
+        TypeDisplay::code("^[a-z]+$"),
+        TypeDisplay::text(")"),
+    ]);
+    let display = TypeDisplay::sequence([
+        TypeDisplay::map_with_key(key, TypeDisplay::link(Target::Options, "Struct(X)")),
+        TypeDisplay::text(" (length: 2..=5)"),
+    ]);
+    let mut page = PageBuilder::new();
+    display.write_to(&mut page);
+    page.push_str("\n\n");
+    page.table(["Type"], [[display.table_cell()]]).unwrap();
+    page.push_str("\n");
+    page.target_heading(Target::Options, Heading::plain(2, "X"))
+        .unwrap();
+    let markdown = page.finish().unwrap();
+    assert!(
+        markdown.contains("String(length: 1..=8, pattern: `^[a-z]+$`)"),
+        "{markdown}"
+    );
+    assert!(markdown.contains("[Struct(X)](#x)"), "{markdown}");
+    assert!(markdown.contains("(length: 2..=5)"), "{markdown}");
+    check_page(&markdown).unwrap();
+}
+
+#[test]
 fn type_display_keeps_nested_collection_links_outside_code_spans() {
     let link = || TypeDisplay::link(Target::Options, "Struct(X)");
     let displays = [
