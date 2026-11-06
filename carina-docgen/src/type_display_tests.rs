@@ -241,6 +241,11 @@ fn type_display_adjacent_code_parts_preserve_links() {
     ];
     for parts in displays {
         for in_table in [false, true] {
+            let (expected_code, expected_inline) = if in_table || parts.len() == 1 {
+                (vec!["a`", "`"], "`` a` ``[X](#x)`` ` ``")
+            } else {
+                (vec!["a", "`", "`"], "`a`<!---->`` ` ``[X](#x)`` ` ``")
+            };
             let mut page = PageBuilder::new();
             if in_table {
                 page.table(
@@ -259,7 +264,8 @@ fn type_display_adjacent_code_parts_preserve_links() {
 
             let markdown = page.finish().expect("the page checker accepts the display");
             check_page(&markdown).expect("the finished page remains valid");
-            render_like_registry(&markdown, |root, _, _| {
+            render_like_registry(&markdown, |root, _, visible| {
+                assert_eq!(visible, if in_table { "Typea`X`X" } else { "a`X`X" });
                 let links: Vec<String> = root
                     .descendants()
                     .filter_map(|node| match &node.data.borrow().value {
@@ -276,11 +282,10 @@ fn type_display_adjacent_code_parts_preserve_links() {
                     })
                     .collect();
                 assert_eq!(
-                    code,
-                    ["a`", "`"],
-                    "adjacent code literals coalesce: {markdown}"
+                    code, expected_code,
+                    "code coalesces only within one value: {markdown}"
                 );
-                assert!(markdown.contains("`` a` ``[X](#x)`` ` ``"), "{markdown}");
+                assert!(markdown.contains(expected_inline), "{markdown}");
             });
         }
     }

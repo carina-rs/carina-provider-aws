@@ -128,6 +128,69 @@ fn page_builder_inline_preserves_code_literals_in_prose() {
 }
 
 #[test]
+fn separate_inline_and_type_display_writes_keep_code_spans_separate() {
+    for (first_is_display, second_is_display) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let display = |literal| {
+            named_type(AttributeType::refined_string(
+                Some(TypeIdentity::bare(literal)),
+                None,
+                None,
+                None,
+            ))
+        };
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        if first_is_display {
+            display("a").write_to(&mut page);
+        } else {
+            page.inline(TableCell::code("a"));
+        }
+        if second_is_display {
+            display("b").write_to(&mut page);
+        } else {
+            page.inline(TableCell::code("b"));
+        }
+
+        let markdown = page.finish().expect("valid separate code spans in prose");
+        // Without the comment, `a``b` parses as one span containing a``b.
+        assert_eq!(markdown, "`a`<!---->`b`");
+        render_like_registry(&markdown, |root, _, visible| {
+            assert_eq!(visible, "ab");
+            let code: Vec<_> = root
+                .descendants()
+                .filter_map(|node| match &node.data.borrow().value {
+                    NodeValue::Code(code) => Some(code.literal.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(code, ["a", "b"]);
+        });
+    }
+}
+
+#[test]
+fn page_builder_inline_coalesces_code_parts_within_one_value() {
+    let mut parts = TableCell::code("a`");
+    parts.push_code("`b");
+    let mut page: PageBuilder<Target> = PageBuilder::new();
+    page.inline(parts);
+
+    let markdown = page.finish().expect("valid combined code span in prose");
+    assert_eq!(markdown, "```a``b```");
+    render_like_registry(&markdown, |root, html, visible| {
+        assert_eq!(visible, "a``b");
+        assert_eq!(html, "<p><code>a``b</code></p>\n");
+        assert_eq!(
+            root.descendants()
+                .filter(|node| matches!(node.data.borrow().value, NodeValue::Code(_)))
+                .count(),
+            1
+        );
+    });
+}
+
+#[test]
 fn page_builder_inline_keeps_text_and_typed_links_in_prose() {
     let mut parts = TableCell::text("Use | ");
     parts.push_code("name");

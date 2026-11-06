@@ -102,12 +102,12 @@ enum TableCellPart<K> {
     Link { target: K, label: String },
 }
 
-/// One table cell made only from table-safe inline parts.
+/// Inline parts for one table cell or prose written by [`PageBuilder::inline`].
 ///
 /// Text parts remain inline Markdown: this is not a general Markdown escaper.
-/// Only table delimiters (`|`) are escaped and line breaks are collapsed when
-/// the table is written. There is intentionally no raw part that can bypass
-/// that table-specific escaping.
+/// Tables escape delimiters (`|`) and collapse line breaks; prose applies no
+/// table escaping. There is intentionally no raw part that can bypass table
+/// escaping.
 #[derive(Debug)]
 pub struct TableCell<K> {
     parts: Vec<TableCellPart<K>>,
@@ -407,8 +407,8 @@ where
         }
     }
 
-    // Keep source literals typed until finish, coalescing even across nested
-    // sequences or separate TypeDisplay writes before choosing delimiters.
+    // Keep source literals typed until finish, coalescing consecutive code
+    // parts within one inline value before choosing delimiters.
     fn write_code(&mut self, literal: String, in_table: bool) {
         match self.chunks.last_mut() {
             Some(PageChunk::Code {
@@ -420,6 +420,7 @@ where
     }
 
     fn write_inline_parts(&mut self, cell: TableCell<K>, in_table: bool) {
+        let first_chunk = self.chunks.len();
         for part in cell.parts {
             match part {
                 TableCellPart::Text(text) => {
@@ -431,6 +432,13 @@ where
                 }
                 TableCellPart::Literal(literal) => self.write_literal(literal, in_table),
                 TableCellPart::Code(code) => {
+                    if self.chunks.len() == first_chunk
+                        && matches!(self.chunks.last(), Some(PageChunk::Code { .. }))
+                    {
+                        // Start this value's code separately, keeping its
+                        // backtick delimiters from touching the preceding span.
+                        self.push_str("<!---->");
+                    }
                     self.write_code(code, in_table);
                 }
                 TableCellPart::Link { target, label } => {
