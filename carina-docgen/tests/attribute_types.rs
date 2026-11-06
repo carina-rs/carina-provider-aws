@@ -4,8 +4,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
-    AttributeType, DslTransform, FieldGroup, ListElements, PatternAttributeType, PatternForm,
-    RawShape, StructField, TypeIdentity, ValidatedConfigSchema,
+    AttributeType, CustomValidator, DslTransform, FieldGroup, ListElements, PatternAttributeType,
+    PatternForm, RawShape, StructField, TypeIdentity, ValidatedConfigSchema,
 };
 use carina_docgen::{
     Declaration, DeclarationKind, DocLink, Heading, PageBuilder, Resolved, TypeDocHooks, TypeEdge,
@@ -411,6 +411,296 @@ fn enum_registration_preserves_closed_values_base_aliases_validator_and_transfor
 }
 
 #[test]
+fn open_enums_render_custom_validators() {
+    let ty = AttributeType::enum_(
+        TypeIdentity::bare("Name"),
+        None,
+        Vec::new(),
+        Some(Arc::new(|_| Ok(()))),
+        None,
+    );
+    let mut hooks = Hooks::default();
+    assert_eq!(
+        page(&ty, &mut hooks).unwrap(),
+        "`Name (custom validator)`\n\n| Type |\n|------|\n| `Name (custom validator)` |\n"
+    );
+    assert!(hooks.declarations.is_empty());
+}
+
+#[test]
+fn open_enums_render_dsl_transforms() {
+    let ty = AttributeType::enum_(
+        TypeIdentity::bare("Name"),
+        None,
+        Vec::new(),
+        None,
+        Some(DslTransform::HyphenToUnderscore),
+    );
+    let mut hooks = Hooks::default();
+    assert_eq!(
+        page(&ty, &mut hooks).unwrap(),
+        "`Name (DSL transform: HyphenToUnderscore)`\n\n| Type |\n|------|\n| `Name (DSL transform: HyphenToUnderscore)` |\n"
+    );
+    assert!(hooks.declarations.is_empty());
+}
+
+#[test]
+fn open_enums_without_constraints_render_only_the_declared_name() {
+    let ty = AttributeType::enum_(TypeIdentity::bare("Name"), None, Vec::new(), None, None);
+    let mut hooks = Hooks::default();
+    assert_eq!(
+        page(&ty, &mut hooks).unwrap(),
+        "`Name`\n\n| Type |\n|------|\n| `Name` |\n"
+    );
+    assert!(hooks.declarations.is_empty());
+}
+
+#[test]
+fn open_enums_preserve_string_base_constraints_like_declared_strings() {
+    for (pattern, length) in [
+        (Some("^a$".to_string()), None),
+        (None, Some((Some(1), Some(8)))),
+        (Some("^a$".to_string()), Some((Some(1), Some(8)))),
+    ] {
+        let identity = TypeIdentity::new(Some("provider"), ["Scope"], "Name");
+        let validate = Arc::new(|_: &carina_core::resource::Value| Ok(()));
+        let ty = AttributeType::enum_with_base(
+            identity.clone(),
+            AttributeType::refined_string(None, pattern.clone(), length, None),
+            None,
+            Vec::new(),
+            Some(validate.clone()),
+            Some(DslTransform::HyphenToUnderscore),
+        );
+        let scalar = AttributeType::refined_string_with_validator(
+            identity,
+            pattern,
+            length,
+            validate,
+            Some(DslTransform::HyphenToUnderscore),
+        );
+        let mut hooks = Hooks::default();
+        let markdown = page(&ty, &mut hooks).unwrap();
+        assert_eq!(markdown, page(&scalar, &mut Hooks::default()).unwrap());
+        assert!(hooks.declarations.is_empty());
+
+        let config =
+            ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), ty)])).unwrap();
+        assert_eq!(
+            page(config.parts().get("value").unwrap(), &mut Hooks::default()).unwrap(),
+            markdown
+        );
+    }
+}
+
+#[test]
+fn open_enums_preserve_numeric_base_ranges_before_validator_and_transform() {
+    for (base, range) in [
+        (
+            AttributeType::refined_int(None, Some((Some(-1), Some(8)))),
+            "range: -1..=8, ",
+        ),
+        (
+            AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
+            "range: 0.5.., ",
+        ),
+        (AttributeType::refined_int(None, Some((None, None))), ""),
+        (AttributeType::refined_float(None, Some((None, None))), ""),
+    ] {
+        let ty = AttributeType::enum_with_base(
+            TypeIdentity::bare("Name"),
+            base,
+            None,
+            Vec::new(),
+            Some(Arc::new(|_| Ok(()))),
+            Some(DslTransform::Identity),
+        );
+        let expected = format!("`Name ({range}custom validator, DSL transform: Identity)`");
+        let mut hooks = Hooks::default();
+        let markdown = page(&ty, &mut hooks).unwrap();
+        assert!(markdown.starts_with(&expected), "{markdown}");
+        assert!(markdown.contains(&format!("| {expected} |")), "{markdown}");
+        assert!(hooks.declarations.is_empty());
+    }
+}
+
+#[test]
+fn open_enums_ignore_base_callbacks_and_transforms() {
+    let validate: CustomValidator = Arc::new(|_| Ok(()));
+    for (base, refinements) in [
+        (
+            AttributeType::refined_string_with_validator(
+                TypeIdentity::new(Some("provider"), ["Scope"], "Text"),
+                Some("^a$".into()),
+                Some((Some(1), Some(8))),
+                validate.clone(),
+                Some(DslTransform::HyphenToUnderscore),
+            ),
+            "pattern: ^a$, len: 1..=8",
+        ),
+        (
+            AttributeType::refined_int_with_validator(
+                TypeIdentity::new(Some("provider"), ["Scope"], "Integer"),
+                Some((Some(-1), Some(8))),
+                validate.clone(),
+            ),
+            "range: -1..=8",
+        ),
+        (
+            AttributeType::refined_float_with_validator(
+                TypeIdentity::new(Some("provider"), ["Scope"], "Number"),
+                Some((Some(FiniteF64::new(0.5).unwrap()), None)),
+                validate.clone(),
+            ),
+            "range: 0.5..",
+        ),
+    ] {
+        for (enum_validate, to_dsl, metadata) in [
+            (None, None, ""),
+            (
+                Some(validate.clone()),
+                Some(DslTransform::Identity),
+                ", custom validator, DSL transform: Identity",
+            ),
+        ] {
+            let ty = AttributeType::enum_with_base(
+                TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
+                base.clone(),
+                None,
+                Vec::new(),
+                enum_validate,
+                to_dsl,
+            );
+            let expected = format!("`provider.Scope.Open ({refinements}{metadata})`");
+            let mut hooks = Hooks::default();
+            let markdown = page(&ty, &mut hooks).unwrap();
+            assert!(markdown.starts_with(&expected), "{markdown}");
+            assert!(markdown.contains(&format!("| {expected} |")), "{markdown}");
+            assert!(hooks.declarations.is_empty());
+
+            let config =
+                ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), ty)])).unwrap();
+            assert_eq!(
+                page(config.parts().get("value").unwrap(), &mut Hooks::default()).unwrap(),
+                markdown
+            );
+        }
+    }
+}
+
+#[test]
+fn open_enums_preserve_nested_enum_scalar_refinements() {
+    for (base, refinements) in [
+        (
+            AttributeType::refined_string(None, Some("^a$".into()), Some((Some(1), Some(8))), None),
+            "pattern: ^a$, len: 1..=8",
+        ),
+        (
+            AttributeType::refined_int(None, Some((Some(-1), Some(8)))),
+            "range: -1..=8",
+        ),
+        (
+            AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
+            "range: 0.5..",
+        ),
+    ] {
+        let mut base = base;
+        for name in ["Inner", "Middle"] {
+            base = AttributeType::enum_with_base(
+                TypeIdentity::new(Some("provider"), ["Scope"], name),
+                base,
+                None,
+                Vec::new(),
+                Some(Arc::new(|_| Ok(()))),
+                Some(DslTransform::HyphenToUnderscore),
+            );
+        }
+        let ty = AttributeType::enum_with_base(
+            TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
+            base,
+            None,
+            Vec::new(),
+            None,
+            Some(DslTransform::Identity),
+        );
+        let expected = format!("`provider.Scope.Open ({refinements}, DSL transform: Identity)`");
+        let mut hooks = Hooks::default();
+        let markdown = page(&ty, &mut hooks).unwrap();
+        assert!(markdown.starts_with(&expected), "{markdown}");
+        assert!(markdown.contains(&format!("| {expected} |")), "{markdown}");
+        assert!(hooks.declarations.is_empty());
+
+        let config =
+            ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), ty)])).unwrap();
+        assert_eq!(
+            page(config.parts().get("value").unwrap(), &mut Hooks::default()).unwrap(),
+            markdown
+        );
+    }
+}
+
+#[test]
+fn open_enums_preserve_reference_base_constraints() {
+    let ty = AttributeType::enum_with_base(
+        TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
+        AttributeType::reference(
+            TypeIdentity::new(Some("provider"), ["Scope"], "Reference"),
+            Some("^ref-[a-z]+$".into()),
+            Some((Some(5), Some(32))),
+        ),
+        None,
+        Vec::new(),
+        Some(Arc::new(|_| Ok(()))),
+        Some(DslTransform::Identity),
+    );
+    let expected = "`provider.Scope.Open (pattern: ^ref-[a-z]+$, len: 5..=32, custom validator, DSL transform: Identity)`";
+    let mut hooks = Hooks::default();
+    let markdown = page(&ty, &mut hooks).unwrap();
+    assert!(markdown.starts_with(expected), "{markdown}");
+    assert!(markdown.contains(&format!("| {expected} |")), "{markdown}");
+    assert!(hooks.declarations.is_empty());
+
+    let config = ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), ty)])).unwrap();
+    assert_eq!(
+        page(config.parts().get("value").unwrap(), &mut Hooks::default()).unwrap(),
+        markdown
+    );
+}
+
+#[test]
+fn open_enums_reject_unsupported_bases_with_the_enum_identity() {
+    for base in [
+        AttributeType::struct_("Record", Vec::new()),
+        AttributeType::list(AttributeType::string()),
+        AttributeType::map(AttributeType::string()),
+        AttributeType::union(vec![AttributeType::string(), AttributeType::int()]),
+        AttributeType::bool(),
+        AttributeType::duration(),
+        AttributeType::ref_("Alias"),
+    ] {
+        let base_name = base.type_name();
+        let ty = AttributeType::enum_with_base(
+            TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
+            base,
+            None,
+            Vec::new(),
+            None,
+            None,
+        );
+        let mut hooks = Hooks::default();
+        let error = page(&ty, &mut hooks).expect_err("unsupported open-enum base must fail");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "docgen cannot document open enum `provider.Scope.Open` with base `{base_name}`"
+            ),
+            "base: {base_name}"
+        );
+        assert!(hooks.declarations.is_empty());
+    }
+}
+
+#[test]
 fn open_enums_use_the_hooks_scalar_name_without_registering_a_definition() {
     let ty = AttributeType::enum_with_base(
         TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
@@ -424,7 +714,7 @@ fn open_enums_use_the_hooks_scalar_name_without_registering_a_definition() {
     let markdown = page(&ty, &mut hooks).unwrap();
     assert_eq!(
         markdown,
-        "`provider.Scope.Open`\n\n| Type |\n|------|\n| `provider.Scope.Open` |\n"
+        "`provider.Scope.Open (custom validator, DSL transform: Identity)`\n\n| Type |\n|------|\n| `provider.Scope.Open (custom validator, DSL transform: Identity)` |\n"
     );
     assert!(hooks.declarations.is_empty());
 

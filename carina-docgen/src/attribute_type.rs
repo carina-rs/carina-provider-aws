@@ -197,40 +197,45 @@ pub fn scalar_display<K>(
     scalar: ScalarDoc<'_>,
     note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
-    scalar_display_with_name(scalar, None, note)
-}
-
-fn scalar_display_with_name<K>(
-    scalar: ScalarDoc<'_>,
-    name: Option<String>,
-    note: Option<ValidationNote<'_>>,
-) -> TypeDisplay<K> {
-    let (builtin_name, constraints) = match scalar {
+    let (name, refinements, validate, to_dsl) = match scalar {
         ScalarDoc::String {
             pattern,
             length,
             validate,
             to_dsl,
-        } => {
-            let mut constraints = string_constraints(pattern, length);
-            if validate {
-                constraints.push("custom validator".into());
-            }
-            if let Some(transform) = to_dsl {
-                constraints.push(format!("DSL transform: {transform:?}"));
-            }
-            ("String", constraints)
+        } => (
+            "String",
+            string_constraints(pattern, length),
+            validate,
+            to_dsl,
+        ),
+        ScalarDoc::Int { range, validate } => ("Int", number_constraints(range), validate, None),
+        ScalarDoc::Float { range, validate } => {
+            ("Float", number_constraints(range), validate, None)
         }
-        ScalarDoc::Int { range, validate } => ("Int", number_constraints(range, validate)),
-        ScalarDoc::Float { range, validate } => ("Float", number_constraints(range, validate)),
-        ScalarDoc::Bool => ("Bool", Vec::new()),
-        ScalarDoc::Duration => ("Duration", Vec::new()),
+        ScalarDoc::Bool => ("Bool", Vec::new(), false, None),
+        ScalarDoc::Duration => ("Duration", Vec::new(), false, None),
     };
-    let name = name.unwrap_or_else(|| builtin_name.to_string());
-    TypeDisplay::code(if constraints.is_empty() {
+    scalar_text(name.into(), refinements, validate, to_dsl, note)
+}
+
+fn scalar_text<K>(
+    name: String,
+    mut refinements: Vec<String>,
+    validate: bool,
+    to_dsl: Option<&DslTransform>,
+    note: Option<ValidationNote<'_>>,
+) -> TypeDisplay<K> {
+    if validate {
+        refinements.push("custom validator".into());
+    }
+    if let Some(transform) = to_dsl {
+        refinements.push(format!("DSL transform: {transform:?}"));
+    }
+    TypeDisplay::code(if refinements.is_empty() {
         name
     } else {
-        format!("{name} ({})", constraints.join(", "))
+        format!("{name} ({})", refinements.join(", "))
     })
     .with_note(note)
 }
@@ -348,7 +353,8 @@ impl<N: Clone + Eq + Hash, K: Clone> TypeRegistry<N, K> {
 }
 
 /// Compose a type description without rendering any Markdown. Closed enums
-/// and compound declarations register definitions; open enums use scalar names.
+/// and compound declarations register definitions; open enums use scalar names
+/// and constraints.
 /// Inline nodes recurse here with a shared active set.
 pub fn render_attribute_type<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
@@ -389,14 +395,11 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             identity,
             pattern,
             length,
-        } => scalar_display_with_name(
-            ScalarDoc::String {
-                pattern,
-                length,
-                validate: false,
-                to_dsl: None,
-            },
-            Some(hooks.scalar_name(identity)),
+        } => scalar_text(
+            hooks.scalar_name(identity),
+            string_constraints(pattern, length),
+            false,
+            None,
             None,
         ),
         RawShape::String {
@@ -405,38 +408,33 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             length,
             validate,
             to_dsl,
-        } => scalar_display_with_name(
-            ScalarDoc::String {
-                pattern,
-                length,
-                validate: validate.is_some(),
-                to_dsl,
-            },
-            identity.map(|identity| hooks.scalar_name(identity)),
+        } => scalar_text(
+            identity.map_or_else(|| "String".into(), |identity| hooks.scalar_name(identity)),
+            string_constraints(pattern, length),
+            validate.is_some(),
+            to_dsl,
             None,
         ),
         RawShape::Int {
             identity,
             range,
             validate,
-        } => scalar_display_with_name(
-            ScalarDoc::Int {
-                range,
-                validate: validate.is_some(),
-            },
-            identity.map(|identity| hooks.scalar_name(identity)),
+        } => scalar_text(
+            identity.map_or_else(|| "Int".into(), |identity| hooks.scalar_name(identity)),
+            number_constraints(range),
+            validate.is_some(),
+            None,
             None,
         ),
         RawShape::Float {
             identity,
             range,
             validate,
-        } => scalar_display_with_name(
-            ScalarDoc::Float {
-                range,
-                validate: validate.is_some(),
-            },
-            identity.map(|identity| hooks.scalar_name(identity)),
+        } => scalar_text(
+            identity.map_or_else(|| "Float".into(), |identity| hooks.scalar_name(identity)),
+            number_constraints(range),
+            validate.is_some(),
+            None,
             None,
         ),
         RawShape::Bool => scalar_display(ScalarDoc::Bool, None),
@@ -449,7 +447,13 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             validate,
             to_dsl,
         } => match values {
-            None => TypeDisplay::code(hooks.scalar_name(identity)),
+            None => scalar_text(
+                hooks.scalar_name(identity),
+                enum_base_refinements(base, identity)?,
+                validate.is_some(),
+                to_dsl,
+                None,
+            ),
             Some(values) => registry.register(
                 scope,
                 Declaration {
@@ -527,6 +531,71 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     Ok(display)
 }
 
+fn enum_base_refinements<R: PatternForm>(
+    base: &PatternAttributeType<R>,
+    identity: &TypeIdentity,
+) -> Result<Vec<String>> {
+    // Show base refinements because they are part of the declared type, used for annotation
+    // assignability and diagnostics, not because value validation checks them. Omit the base's own
+    // validator and DSL transform because carina never runs them (carina-rs/carina#4300).
+    Ok(match base.raw_shape() {
+        RawShape::String {
+            identity: _,
+            pattern,
+            length,
+            validate: _,
+            to_dsl: _,
+        }
+        | RawShape::Reference {
+            identity: _,
+            pattern,
+            length,
+        } => string_constraints(pattern, length),
+        RawShape::Int {
+            identity: _,
+            range,
+            validate: _,
+        } => number_constraints(range),
+        RawShape::Float {
+            identity: _,
+            range,
+            validate: _,
+        } => number_constraints(range),
+        RawShape::Enum {
+            identity: _,
+            base,
+            values: _,
+            dsl_aliases: _,
+            validate: _,
+            to_dsl: _,
+        } => enum_base_refinements(base, identity)?,
+        // Bool/Duration are not refinable scalars in core's scalar_kind_for_schema_base.
+        RawShape::Bool
+        | RawShape::Duration
+        | RawShape::Struct {
+            name: _,
+            fields: _,
+            field_groups: _,
+        }
+        | RawShape::List {
+            element_type: _,
+            ordered: _,
+            constraints: _,
+        }
+        | RawShape::Map {
+            key: _,
+            value: _,
+            constraints: _,
+        }
+        | RawShape::Union(_)
+        | RawShape::Ref(_)
+        | RawShape::UnloadedSchemaType(_) => bail!(
+            "docgen cannot document open enum `{identity}` with base `{}`",
+            base.type_name()
+        ),
+    })
+}
+
 /// Field-group wording and layout shared by provider documentation.
 pub fn render_field_groups<K: Clone + Eq + Hash + Debug>(
     page: &mut PageBuilder<K>,
@@ -574,13 +643,10 @@ fn string_constraints(pattern: Option<&str>, length: Bounds<u64>) -> Vec<String>
     constraints
 }
 
-fn number_constraints<T: Display>(range: Bounds<T>, validate: bool) -> Vec<String> {
+fn number_constraints<T: Display>(range: Bounds<T>) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(range) = range.filter(|(min, max)| min.is_some() || max.is_some()) {
         constraints.push(format!("range: {}", bounds(range)));
-    }
-    if validate {
-        constraints.push("custom validator".into());
     }
     constraints
 }
