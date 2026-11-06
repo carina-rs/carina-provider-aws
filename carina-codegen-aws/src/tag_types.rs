@@ -7,14 +7,13 @@ use carina_core::schema::AttributeType;
 use carina_smithy::{Shape, ShapeRef, SmithyModel};
 
 use super::{
-    LengthBounds, ResourceDef, ValueTypeOverride, length_from_traits, map_type_code,
-    string_refinement,
+    Bounds, ResourceDef, ValueTypeOverride, length_from_traits, map_type_code, string_refinement,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TagString {
     pattern: Option<String>,
-    length: LengthBounds,
+    length: Bounds<u64>,
 }
 
 impl TagString {
@@ -48,7 +47,7 @@ impl TagString {
 pub struct TagMapType {
     key: TagString,
     value: TagString,
-    length: LengthBounds,
+    length: Bounds<u64>,
 }
 
 impl TagMapType {

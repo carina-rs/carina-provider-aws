@@ -140,6 +140,14 @@ fn ec2_vpn_gateway_codegen_documents_legacy_asns_without_broadening_transit_gate
     ] {
         assert!(docs.contains(value), "VGW docs missing {value}: {docs}");
     }
+    assert!(
+        docs.contains("`; 64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs:"),
+        "ASN validation note must use the shared suffix: {docs}"
+    );
+    assert!(
+        !docs.contains("; Int;"),
+        "the note must not restate the type: {docs}"
+    );
 }
 
 #[test]
@@ -149,17 +157,17 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
             "FlowLog",
             vec![
                 "allowed: 60, 600",
-                "length: 1..=3",
-                "length: 1..=2",
-                "length: 1..=128",
+                "items: 1..=3",
+                "items: 1..=2",
+                "len: 1..=128",
             ],
         ),
         (
             "Subnet",
             vec![
                 "allowed: 44, 48, 52, 56, 60, 64",
-                "Int(16..=28)",
-                "Int(1..=2147483647)",
+                "`Int (range: 16..=28)`",
+                "`Int (range: 1..=2147483647)`",
             ],
         ),
         (
@@ -170,7 +178,7 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
                 "transit_gateway_cidr_blocks",
             ],
         ),
-        ("Vpc", vec!["Int(16..=28)", "Ec2VpcCidrBlock"]),
+        ("Vpc", vec!["`Int (range: 16..=28)`", "Ec2VpcCidrBlock"]),
     ] {
         let Some((_output, generated)) = generate(resource, "markdown") else {
             return;
