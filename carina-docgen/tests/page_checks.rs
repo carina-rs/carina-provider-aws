@@ -139,14 +139,98 @@ fn attribute_reference_entry_allocates_duplicate_heading_slugs() {
 }
 
 #[test]
+fn scalar_compositors_name_declared_identities_and_keep_builtin_names() {
+    let identity = TypeIdentity::bare("Declared");
+    for scalar in [
+        ScalarDoc::String {
+            identity: Some(&identity),
+            pattern: None,
+            length: None,
+            validate: false,
+            to_dsl: None,
+        },
+        ScalarDoc::Int {
+            identity: Some(&identity),
+            range: None,
+            validate: false,
+        },
+        ScalarDoc::Float {
+            identity: Some(&identity),
+            range: None,
+            validate: false,
+        },
+    ] {
+        let mut calls = 0;
+        let display = scalar_display(
+            scalar,
+            |actual| {
+                assert!(std::ptr::eq(actual, &identity));
+                calls += 1;
+                format!("Provider{}", actual.kind)
+            },
+            None,
+        );
+        assert_eq!(calls, 1);
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        page.table(["Type"], [[display.table_cell()]]).unwrap();
+        render_like_registry(&page.finish().unwrap(), |_, _, visible| {
+            assert_eq!(visible, "ProviderDeclaredTypeProviderDeclared");
+        });
+    }
+    for (scalar, name) in [
+        (
+            ScalarDoc::String {
+                identity: None,
+                pattern: None,
+                length: None,
+                validate: false,
+                to_dsl: None,
+            },
+            "String",
+        ),
+        (
+            ScalarDoc::Int {
+                identity: None,
+                range: None,
+                validate: false,
+            },
+            "Int",
+        ),
+        (
+            ScalarDoc::Float {
+                identity: None,
+                range: None,
+                validate: false,
+            },
+            "Float",
+        ),
+        (ScalarDoc::Bool, "Bool"),
+        (ScalarDoc::Duration, "Duration"),
+    ] {
+        let display = scalar_display(
+            scalar,
+            |_| panic!("builtin names must not call the provider's naming hook"),
+            None,
+        );
+        let mut page: PageBuilder<Target> = PageBuilder::new();
+        display.write_to(&mut page);
+        assert_eq!(page.finish().unwrap(), format!("`{name}`"));
+    }
+}
+
+#[test]
 fn type_validation_notes_use_one_literal_suffix_inline_and_in_tables() {
+    let identity = TypeIdentity::bare("Asn");
     let note = "64512..=65534 or 4200000000..=4294967294; [text](#literal) | `literal`";
     let display = scalar_display(
         ScalarDoc::Int {
-            name: Some("Asn"),
+            identity: Some(&identity),
             range: None,
             validate: true,
         },
+        |identity| identity.kind.clone(),
         Some(ValidationNote::new(note)),
     );
     let mut page: PageBuilder<Target> = PageBuilder::new();
@@ -212,12 +296,13 @@ fn type_display_pattern_is_literal_code() {
     let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
     let display = scalar_display(
         ScalarDoc::String {
-            name: None,
+            identity: None,
             pattern: Some(pattern),
             length: None,
             validate: false,
             to_dsl: None,
         },
+        |identity| identity.kind.clone(),
         None,
     );
     let mut page: PageBuilder<Target> = PageBuilder::new();
@@ -237,12 +322,13 @@ fn type_display_pattern_is_literal_code() {
 fn map_length_type_display_keeps_key_constraints_and_value_links() {
     let key = scalar_display(
         ScalarDoc::String {
-            name: None,
+            identity: None,
             pattern: Some("^[a-z]+$"),
             length: Some((Some(1), Some(8))),
             validate: false,
             to_dsl: None,
         },
+        |identity| identity.kind.clone(),
         None,
     );
     let display = map_display(
@@ -282,12 +368,13 @@ fn type_display_keeps_nested_collection_links_outside_code_spans() {
     let string = || {
         scalar_display(
             ScalarDoc::String {
-                name: None,
+                identity: None,
                 pattern: None,
                 length: None,
                 validate: false,
                 to_dsl: None,
             },
+            |identity| identity.kind.clone(),
             None,
         )
     };

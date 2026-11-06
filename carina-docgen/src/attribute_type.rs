@@ -86,23 +86,44 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
 }
 
 /// Semantic scalar data shared by schema trees and discovery-only providers.
-/// `name: None` selects the variant's builtin name; `Some` names a declared
-/// identity. Providers never supply builtin spelling.
+/// `identity: None` selects the variant's builtin name; `Some` refers to a
+/// declared identity, spelled by the provider's scalar naming hook.
+///
+/// Declared scalar names cannot be supplied as free text:
+///
+/// ```compile_fail
+/// use carina_docgen::ScalarDoc;
+/// ScalarDoc::String {
+///     identity: Some("provider wording"),
+///     pattern: None,
+///     length: None,
+///     validate: false,
+///     to_dsl: None,
+/// };
+/// ```
+/// ```compile_fail
+/// use carina_docgen::ScalarDoc;
+/// ScalarDoc::Int { identity: Some("provider wording"), range: None, validate: false };
+/// ```
+/// ```compile_fail
+/// use carina_docgen::ScalarDoc;
+/// ScalarDoc::Float { identity: Some("provider wording"), range: None, validate: false };
+/// ```
 pub enum ScalarDoc<'a> {
     String {
-        name: Option<&'a str>,
+        identity: Option<&'a TypeIdentity>,
         pattern: Option<&'a str>,
         length: Bounds<u64>,
         validate: bool,
         to_dsl: Option<&'a DslTransform>,
     },
     Int {
-        name: Option<&'a str>,
+        identity: Option<&'a TypeIdentity>,
         range: Bounds<i64>,
         validate: bool,
     },
     Float {
-        name: Option<&'a str>,
+        identity: Option<&'a TypeIdentity>,
         range: Bounds<FiniteF64>,
         validate: bool,
     },
@@ -161,13 +182,17 @@ impl<'a> ValidationNote<'a> {
     }
 }
 
+/// Render a scalar using shared wording. Use the same `scalar_name` function as
+/// the provider's [`TypeDocHooks::scalar_name`] implementation; it is called only
+/// for a declared identity, never for a builtin.
 pub fn scalar_display<K>(
     scalar: ScalarDoc<'_>,
+    scalar_name: impl FnOnce(&TypeIdentity) -> String,
     note: Option<ValidationNote<'_>>,
 ) -> TypeDisplay<K> {
-    let (name, constraints) = match scalar {
+    let (identity, builtin_name, constraints) = match scalar {
         ScalarDoc::String {
-            name,
+            identity,
             pattern,
             length,
             validate,
@@ -180,23 +205,26 @@ pub fn scalar_display<K>(
             if let Some(transform) = to_dsl {
                 constraints.push(format!("DSL transform: {transform:?}"));
             }
-            (name.unwrap_or("String"), constraints)
+            (identity, "String", constraints)
         }
         ScalarDoc::Int {
-            name,
+            identity,
             range,
             validate,
-        } => (name.unwrap_or("Int"), number_constraints(range, validate)),
+        } => (identity, "Int", number_constraints(range, validate)),
         ScalarDoc::Float {
-            name,
+            identity,
             range,
             validate,
-        } => (name.unwrap_or("Float"), number_constraints(range, validate)),
-        ScalarDoc::Bool => ("Bool", Vec::new()),
-        ScalarDoc::Duration => ("Duration", Vec::new()),
+        } => (identity, "Float", number_constraints(range, validate)),
+        ScalarDoc::Bool => (None, "Bool", Vec::new()),
+        ScalarDoc::Duration => (None, "Duration", Vec::new()),
     };
+    let name = identity
+        .map(scalar_name)
+        .unwrap_or_else(|| builtin_name.to_string());
     TypeDisplay::code(if constraints.is_empty() {
-        name.to_string()
+        name
     } else {
         format!("{name} ({})", constraints.join(", "))
     })
@@ -359,12 +387,13 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             length,
         } => scalar_display(
             ScalarDoc::String {
-                name: Some(&hooks.scalar_name(identity)),
+                identity: Some(identity),
                 pattern,
                 length,
                 validate: false,
                 to_dsl: None,
             },
+            |identity| hooks.scalar_name(identity),
             None,
         ),
         RawShape::String {
@@ -375,14 +404,13 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             to_dsl,
         } => scalar_display(
             ScalarDoc::String {
-                name: identity
-                    .map(|identity| hooks.scalar_name(identity))
-                    .as_deref(),
+                identity,
                 pattern,
                 length,
                 validate: validate.is_some(),
                 to_dsl,
             },
+            |identity| hooks.scalar_name(identity),
             None,
         ),
         RawShape::Int {
@@ -391,12 +419,11 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             validate,
         } => scalar_display(
             ScalarDoc::Int {
-                name: identity
-                    .map(|identity| hooks.scalar_name(identity))
-                    .as_deref(),
+                identity,
                 range,
                 validate: validate.is_some(),
             },
+            |identity| hooks.scalar_name(identity),
             None,
         ),
         RawShape::Float {
@@ -405,16 +432,23 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             validate,
         } => scalar_display(
             ScalarDoc::Float {
-                name: identity
-                    .map(|identity| hooks.scalar_name(identity))
-                    .as_deref(),
+                identity,
                 range,
                 validate: validate.is_some(),
             },
+            |identity| hooks.scalar_name(identity),
             None,
         ),
-        RawShape::Bool => scalar_display(ScalarDoc::Bool, None),
-        RawShape::Duration => scalar_display(ScalarDoc::Duration, None),
+        RawShape::Bool => scalar_display(
+            ScalarDoc::Bool,
+            |identity| hooks.scalar_name(identity),
+            None,
+        ),
+        RawShape::Duration => scalar_display(
+            ScalarDoc::Duration,
+            |identity| hooks.scalar_name(identity),
+            None,
+        ),
         RawShape::Enum {
             identity,
             base,

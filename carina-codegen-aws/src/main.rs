@@ -5908,10 +5908,31 @@ struct MarkdownEnumKey {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum MarkdownTypePosition {
+    Field(String),
+    Item,
+    Key,
+    Value,
+    Member(usize),
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum MarkdownStructSource {
+    AttributeType(String),
+    // The heading scope and typed path identify a union without inspecting its
+    // contents. Tree IDs distinguish separately discovered override trees.
+    AttributeUnion {
+        tree: usize,
+        path: Vec<MarkdownTypePosition>,
+    },
+    Smithy(String),
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct MarkdownStructKey {
     namespace: String,
     heading_path: Vec<String>,
-    target: String,
+    source: MarkdownStructSource,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -6007,6 +6028,7 @@ fn discover_markdown_override(
 struct MarkdownScope {
     heading_path: Vec<String>,
     namespace: String,
+    type_path: Vec<MarkdownTypePosition>,
 }
 
 struct MarkdownHooks<'store, 'a> {
@@ -6040,10 +6062,16 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
 
     fn child_scope(&self, parent: &MarkdownScope, edge: TypeEdge<'_>) -> MarkdownScope {
         let mut scope = parent.clone();
-        match edge {
-            TypeEdge::Field(name) => scope.heading_path.push(name.to_string()),
-            TypeEdge::Item | TypeEdge::Key | TypeEdge::Value | TypeEdge::Member(_) => {}
-        }
+        scope.type_path.push(match edge {
+            TypeEdge::Field(name) => {
+                scope.heading_path.push(name.to_string());
+                MarkdownTypePosition::Field(name.to_string())
+            }
+            TypeEdge::Item => MarkdownTypePosition::Item,
+            TypeEdge::Key => MarkdownTypePosition::Key,
+            TypeEdge::Value => MarkdownTypePosition::Value,
+            TypeEdge::Member(index) => MarkdownTypePosition::Member(index),
+        });
         scope
     }
 
@@ -6094,7 +6122,7 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                 let key = MarkdownStructKey {
                     namespace: child.namespace.clone(),
                     heading_path: scope.heading_path.clone(),
-                    target: format!("AttributeType:{name}"),
+                    source: MarkdownStructSource::AttributeType(name.to_string()),
                 };
                 if !self.structs.contains_key(&key) {
                     self.structs.insert(
@@ -6129,7 +6157,10 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                 let key = MarkdownStructKey {
                     namespace: scope.namespace.clone(),
                     heading_path: scope.heading_path.clone(),
-                    target: format!("AttributeType:Union:{:?}", declaration.ty),
+                    source: MarkdownStructSource::AttributeUnion {
+                        tree: self.tree,
+                        path: scope.type_path.clone(),
+                    },
                 };
                 if !self.structs.contains_key(&key) {
                     self.structs.insert(
@@ -6184,6 +6215,7 @@ fn discover_markdown_attribute_type(
     let scope = MarkdownScope {
         heading_path: heading_path.to_vec(),
         namespace: namespace.to_string(),
+        type_path: Vec::new(),
     };
     let display = render_attribute_type(attr_type, &scope, &mut hooks, registry, note)?;
     while let Some((key, scope, kind)) = hooks.pending.pop() {
@@ -6490,23 +6522,25 @@ fn generate_markdown_resource(
         } else if is_aws_resource_id_property(extra.name) {
             scalar_display(
                 ScalarDoc::String {
-                    name: Some(&resource_id_display(extra.name)),
+                    identity: Some(&resource_id_identity(extra.name)),
                     pattern: None,
                     length: None,
                     validate: false,
                     to_dsl: None,
                 },
+                declared_scalar_display_name,
                 None,
             )
         } else {
             scalar_display(
                 ScalarDoc::String {
-                    name: None,
+                    identity: None,
                     pattern: None,
                     length: None,
                     validate: false,
                     to_dsl: None,
                 },
+                declared_scalar_display_name,
                 None,
             )
         };
@@ -6592,7 +6626,7 @@ fn generate_markdown_resource(
             .chain(
                 struct_defs
                     .keys()
-                    .filter(|key| !key.target.starts_with("AttributeType:"))
+                    .filter(|key| matches!(key.source, MarkdownStructSource::Smithy(_)))
                     .map(|key| key.heading_path.as_slice()),
             ),
     )
@@ -6903,7 +6937,14 @@ fn markdown_struct_heading_texts(
         .map(|(key, _)| key)
         .map(|key| {
             let base = key.heading_path.join(".");
-            let source = format!("{} {}", key.namespace, key.target);
+            let target = match &key.source {
+                MarkdownStructSource::AttributeType(name) => format!("AttributeType:{name}"),
+                MarkdownStructSource::Smithy(target) => target.clone(),
+                MarkdownStructSource::AttributeUnion { .. } => {
+                    unreachable!("unions have separate headings")
+                }
+            };
+            let source = format!("{} {target}", key.namespace);
             let heading = claim_unique_heading(base, &source, &mut used_slugs);
             (key.clone(), heading)
         })
@@ -7490,44 +7531,50 @@ fn discover_markdown_type(
             }
             scalar_display(
                 ScalarDoc::String {
-                    name: None,
+                    identity: None,
                     pattern: None,
                     length: None,
                     validate: false,
                     to_dsl: None,
                 },
+                declared_scalar_display_name,
                 None,
             )
         }
-        Some(ShapeKind::Boolean) => scalar_display(ScalarDoc::Bool, None),
+        Some(ShapeKind::Boolean) => {
+            scalar_display(ScalarDoc::Bool, declared_scalar_display_name, None)
+        }
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             let range = get_int_range(model, target, field_name);
             if let Some(r) = range {
                 scalar_display(
                     ScalarDoc::Int {
-                        name: None,
+                        identity: None,
                         range: Some((r.min, r.max)),
                         validate: false,
                     },
+                    declared_scalar_display_name,
                     None,
                 )
             } else {
                 scalar_display(
                     ScalarDoc::Int {
-                        name: None,
+                        identity: None,
                         range: None,
                         validate: false,
                     },
+                    declared_scalar_display_name,
                     None,
                 )
             }
         }
         Some(ShapeKind::Float) | Some(ShapeKind::Double) => scalar_display(
             ScalarDoc::Float {
-                name: None,
+                identity: None,
                 range: None,
                 validate: false,
             },
+            declared_scalar_display_name,
             None,
         ),
         Some(ShapeKind::Enum) => {
@@ -7570,22 +7617,24 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        name: None,
+                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
+                    declared_scalar_display_name,
                     None,
                 )
             }
         }
         Some(ShapeKind::IntEnum) => scalar_display(
             ScalarDoc::Int {
-                name: None,
+                identity: None,
                 range: None,
                 validate: false,
             },
+            declared_scalar_display_name,
             None,
         ),
         Some(ShapeKind::List) => {
@@ -7622,12 +7671,13 @@ fn discover_markdown_type(
                 list_display(
                     scalar_display(
                         ScalarDoc::String {
-                            name: None,
+                            identity: None,
                             pattern: None,
                             length: None,
                             validate: false,
                             to_dsl: None,
                         },
+                        declared_scalar_display_name,
                         None,
                     ),
                     true,
@@ -7659,12 +7709,13 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        name: None,
+                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
+                    declared_scalar_display_name,
                     None,
                 )
             };
@@ -7676,12 +7727,13 @@ fn discover_markdown_type(
             map_display(
                 scalar_display(
                     ScalarDoc::String {
-                        name: None,
+                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
+                    declared_scalar_display_name,
                     None,
                 ),
                 value,
@@ -7705,7 +7757,11 @@ fn discover_markdown_type(
                 );
             }
             if kind == Some(ShapeKind::Structure) && shape_name == "AttributeBooleanValue" {
-                return Ok(scalar_display(ScalarDoc::Bool, None));
+                return Ok(scalar_display(
+                    ScalarDoc::Bool,
+                    declared_scalar_display_name,
+                    None,
+                ));
             }
             let structure = if let Some(structure) = model.get_structure(target) {
                 StructRepresentation::from_structure(structure)
@@ -7729,7 +7785,7 @@ fn discover_markdown_type(
             let key = MarkdownStructKey {
                 namespace: child_enum_namespace.clone(),
                 heading_path: heading_path.to_vec(),
-                target: target.to_string(),
+                source: MarkdownStructSource::Smithy(target.to_string()),
             };
             if !struct_defs.contains_key(&key) {
                 discovering_structs.insert(target.to_string(), key.clone());
@@ -7806,12 +7862,13 @@ fn discover_markdown_type(
             } else {
                 scalar_display(
                     ScalarDoc::String {
-                        name: None,
+                        identity: None,
                         pattern: None,
                         length: None,
                         validate: false,
                         to_dsl: None,
                     },
+                    declared_scalar_display_name,
                     None,
                 )
             }
@@ -8029,29 +8086,30 @@ fn snake_to_pascal_type(s: &str) -> String {
     out
 }
 
-/// Get the human-readable display name for a resource ID type.
-fn resource_id_display(prop_name: &str) -> String {
-    match classify_resource_id(prop_name) {
-        ResourceIdKind::VpcId => "VpcId".to_string(),
-        ResourceIdKind::SubnetId => "SubnetId".to_string(),
-        ResourceIdKind::SecurityGroupId => "SecurityGroupId".to_string(),
-        ResourceIdKind::EgressOnlyInternetGatewayId => "EgressOnlyInternetGatewayId".to_string(),
-        ResourceIdKind::InternetGatewayId => "InternetGatewayId".to_string(),
-        ResourceIdKind::RouteTableId => "RouteTableId".to_string(),
-        ResourceIdKind::NatGatewayId => "NatGatewayId".to_string(),
-        ResourceIdKind::VpcPeeringConnectionId => "VpcPeeringConnectionId".to_string(),
-        ResourceIdKind::TransitGatewayId => "TransitGatewayId".to_string(),
-        ResourceIdKind::VpnGatewayId => "VpnGatewayId".to_string(),
-        ResourceIdKind::VpcEndpointId => "VpcEndpointId".to_string(),
-        ResourceIdKind::InstanceId => "InstanceId".to_string(),
-        ResourceIdKind::NetworkInterfaceId => "NetworkInterfaceId".to_string(),
-        ResourceIdKind::AllocationId => "AllocationId".to_string(),
-        ResourceIdKind::PrefixListId => "PrefixListId".to_string(),
-        ResourceIdKind::CarrierGatewayId => "CarrierGatewayId".to_string(),
-        ResourceIdKind::LocalGatewayId => "LocalGatewayId".to_string(),
-        ResourceIdKind::NetworkAclId => "NetworkAclId".to_string(),
-        ResourceIdKind::Generic => "AwsResourceId".to_string(),
-    }
+/// Use the same declared identity as the resource-ID schema constructor.
+fn resource_id_identity(prop_name: &str) -> TypeIdentity {
+    let ty = match classify_resource_id(prop_name) {
+        ResourceIdKind::VpcId => AwsType::VpcId,
+        ResourceIdKind::SubnetId => AwsType::SubnetId,
+        ResourceIdKind::SecurityGroupId => AwsType::SecurityGroupId,
+        ResourceIdKind::EgressOnlyInternetGatewayId => AwsType::EgressOnlyInternetGatewayId,
+        ResourceIdKind::InternetGatewayId => AwsType::InternetGatewayId,
+        ResourceIdKind::RouteTableId => AwsType::RouteTableId,
+        ResourceIdKind::NatGatewayId => AwsType::NatGatewayId,
+        ResourceIdKind::VpcPeeringConnectionId => AwsType::VpcPeeringConnectionId,
+        ResourceIdKind::TransitGatewayId => AwsType::TransitGatewayId,
+        ResourceIdKind::VpnGatewayId => AwsType::VpnGatewayId,
+        ResourceIdKind::VpcEndpointId => AwsType::VpcEndpointId,
+        ResourceIdKind::InstanceId => AwsType::InstanceId,
+        ResourceIdKind::NetworkInterfaceId => AwsType::NetworkInterfaceId,
+        ResourceIdKind::AllocationId => AwsType::AllocationId,
+        ResourceIdKind::PrefixListId => AwsType::PrefixListId,
+        ResourceIdKind::CarrierGatewayId => AwsType::CarrierGatewayId,
+        ResourceIdKind::LocalGatewayId => AwsType::LocalGatewayId,
+        ResourceIdKind::NetworkAclId => AwsType::NetworkAclId,
+        ResourceIdKind::Generic => AwsType::ResourceId,
+    };
+    ty.identity()
 }
 
 // ── Type inference helpers (ported from codegen.rs) ──
@@ -12398,6 +12456,36 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn markdown_union_keys_distinguish_identical_members_at_different_positions() {
+        let member = || AttributeType::union(vec![AttributeType::string(), AttributeType::bool()]);
+        let ty = AttributeType::union(vec![member(), member()]);
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let display = discover_markdown_attribute_type(
+            &ty,
+            &["choice".to_string()],
+            "aws.test",
+            &mut enums,
+            &mut structs,
+            None,
+        )
+        .unwrap();
+        assert_eq!(structs.len(), 3, "each canonical node has a declaration");
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().unwrap();
+        let members: Vec<_> = markdown
+            .lines()
+            .filter(|line| line.starts_with("- [Union(Choice)]"))
+            .collect();
+        assert_eq!(members.len(), 2, "{markdown}");
+        assert_ne!(members[0], members[1], "{markdown}");
+        assert_eq!(markdown.matches("- `String`\n- `Bool`\n").count(), 2);
     }
 
     #[test]

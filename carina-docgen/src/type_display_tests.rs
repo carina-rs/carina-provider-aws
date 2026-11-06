@@ -356,7 +356,8 @@ fn type_display_code_preserves_backticks_spaces_and_pipes() {
 
 #[test]
 fn type_display_text_cannot_introduce_links_or_code() {
-    let display = TypeDisplay::text("[Struct(X)](#absent) and `literal`");
+    let literal = "[Struct(X)](#absent) and `literal`";
+    let display = TypeDisplay::text(literal);
     let mut page: PageBuilder<Target> = PageBuilder::new();
     display.write_to(&mut page);
     page.push_str("\n\n");
@@ -372,7 +373,8 @@ fn type_display_text_cannot_introduce_links_or_code() {
     .write_to(&mut page);
 
     let markdown = page.finish().expect("text never introduces a link");
-    render_like_registry(&markdown, |root, _, _| {
+    render_like_registry(&markdown, |root, _, visible| {
+        assert_eq!(visible, format!("{literal}List<{literal}> (ordered)"));
         assert!(
             root.descendants()
                 .all(|node| !matches!(node.data.borrow().value, NodeValue::Link(_)))
