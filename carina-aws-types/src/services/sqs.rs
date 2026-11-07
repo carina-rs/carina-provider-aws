@@ -37,7 +37,7 @@ pub fn sqs_redrive_allow_policy() -> AttributeType {
                 .with_description("Which source queues may redrive into this queue. `allowAll`: any queue in the account; `denyAll`: none; `byQueue`: only the ARNs in `source_queue_arns`.").build(),
             // CreateQueueRequest$Attributes permits sourceQueueArns only for
             // redrivePermission=byQueue, with up to 10 ARNs. This bound is
-            // conditional; protocol 21 cannot express that condition.
+            // conditional; protocol 23 cannot express that cross-field condition.
             // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
             StructField::optional("source_queue_arns", AttributeType::list(sqs_queue_arn()))
                 .with_provider_name("sourceQueueArns")

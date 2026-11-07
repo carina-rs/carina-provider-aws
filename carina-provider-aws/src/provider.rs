@@ -9,11 +9,11 @@ use carina_aws_types::SendClassification;
 use carina_core::effect::PlanOp;
 use carina_core::provider::{
     AppliedIdentifier, AppliedState, BoxFuture, CreateAttempt, CreateFailure, CreateOutcome,
-    CreateRequest, DeleteRequest, IssuedCreate, Observation, PartialReadDiagnostic, PendingCreate,
-    PendingToken, Poll, PollAttempt, Provider, ProviderError, ProviderReadyDataSource,
-    ProviderReadyResource, ProviderResult, ReadOutcome, ReadRequest, Resume, ResumeAttempt,
-    ResumeCreateRequest, ResumeFailure, ResumeOutcome, ResumedCreate, Sent, UpdateOutcome,
-    UpdatePatch, UpdateRequest,
+    CreateRequest, DeleteAttempt, DeleteRequest, IssuedCreate, Observation, PartialReadDiagnostic,
+    PendingCreate, PendingToken, Poll, PollAttempt, Provider, ProviderError,
+    ProviderReadyDataSource, ProviderReadyResource, ProviderResult, ReadOutcome, ReadRequest,
+    Resume, ResumeAttempt, ResumeCreateRequest, ResumeFailure, ResumeOutcome, ResumedCreate, Sent,
+    UpdateAttempt, UpdateOutcome, UpdatePatch, UpdateRequest,
 };
 use carina_core::resource::{
     AbsoluteBindingAddress, DataSource, NoPlaceholder, Resource, ResourceId, SnapshotState, State,
@@ -4076,6 +4076,7 @@ impl Provider for AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
         request: UpdateRequest,
+        _attempt: UpdateAttempt,
     ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
         let id = id.clone();
         let identifier = identifier.clone();
@@ -4085,23 +4086,19 @@ impl Provider for AwsProvider {
         })
     }
 
-    fn delete(
-        &self,
-        id: &ResourceId,
-        identifier: &AppliedIdentifier,
-        request: DeleteRequest,
-    ) -> BoxFuture<'_, ProviderResult<()>> {
-        let id = id.clone();
-        let identifier = identifier.clone();
+    fn delete(&self, attempt: DeleteAttempt) -> BoxFuture<'_, ProviderResult<()>> {
         Box::pin(async move {
+            let id = attempt.id();
+            let identifier = attempt.identifier();
+            let request = attempt.request();
             let budget = self.operation_budget(id.resource_type.as_str(), OperationKind::Delete);
             drive_operation(
-                &id,
+                id,
                 OperationKind::Delete,
                 budget,
                 self.read_back_budget(id.resource_type.as_str()),
-                self.delete_step(&id, &identifier, &request),
-                |token, _poll_request| self.poll_delete_step(&id, token),
+                self.delete_step(id, identifier, request),
+                |token, _poll_request| self.poll_delete_step(id, token),
                 tokio::time::sleep,
             )
             .await

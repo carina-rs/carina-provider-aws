@@ -23,7 +23,7 @@ fn tags(count: usize) -> Value {
 fn tag_schemas(schema: ResourceSchema) -> [ValidatedResourceSchema; 2] {
     let native = schema.validate().expect("native schema admission");
     let wire = resource_schema_to_protocol(&native).expect("encode schema");
-    let decoded = protocol_to_resource_schema(&wire).expect("decode protocol 22 schema");
+    let decoded = protocol_to_resource_schema(&wire).expect("decode protocol 23 schema");
     [native, decoded]
 }
 

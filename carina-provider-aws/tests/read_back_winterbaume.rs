@@ -17,14 +17,15 @@ use carina_core::executor::{
     self, Applied, ExecutionCheckpointSink, ExecutionEvent, ExecutionObserver, ExecutionOutcome,
     ExecutionResult, LiveExecutionInput,
 };
+use carina_core::input_rules::{InputTypeContext, finalize_plan_for_test};
 use carina_core::plan::Plan;
 use carina_core::provider::{
     AppliedIdentifier, BoxFuture, CreateAttempt, CreateFailure, CreateOutcome, CreateRequest,
-    DeleteRequest, Provider, ProviderReadyDataSource, ProviderResult, ReadBackEnd, ReadOutcome,
-    ReadRequest, ResumeCreateRequest, ResumeFailure, ResumeOutcome, Sent, UpdateOutcome,
-    UpdateRequest,
+    DeleteAttempt, Provider, ProviderReadyDataSource, ProviderResult, ReadBackEnd, ReadOutcome,
+    ReadRequest, ResumeCreateRequest, ResumeFailure, ResumeOutcome, Sent, UpdateAttempt,
+    UpdateOutcome, UpdateRequest,
 };
-use carina_core::replacement::create_permit_for_test;
+use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResourceId, Resource, ResourceId, State, Value,
     absolute_binding_address_for_test,
@@ -144,6 +145,7 @@ impl Provider for FixtureProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
         request: UpdateRequest,
+        _attempt: UpdateAttempt,
     ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
         let id = id.clone();
         let identifier = identifier.clone();
@@ -162,13 +164,8 @@ impl Provider for FixtureProvider {
                 .await
         })
     }
-    fn delete(
-        &self,
-        id: &ResourceId,
-        identifier: &AppliedIdentifier,
-        request: DeleteRequest,
-    ) -> BoxFuture<'_, ProviderResult<()>> {
-        self.aws.delete(id, identifier, request)
+    fn delete(&self, attempt: DeleteAttempt) -> BoxFuture<'_, ProviderResult<()>> {
+        self.aws.delete(attempt)
     }
     fn required_permissions(&self, _id: &ResourceId, _op: PlanOp) -> ProviderResult<Vec<String>> {
         Ok(vec![])
@@ -321,7 +318,9 @@ async fn execute(
     }
     let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
         vec![Box::new(AwsProviderFactory)];
-    let plan = plan.admit(&schemas).expect("admit fixture plan");
+    let plan = finalize_plan_for_test(plan)
+        .check_inputs_with_types(&schemas, &current, &InputTypeContext::empty())
+        .expect("admit fixture plan");
     let input = LiveExecutionInput {
         provider_context: carina_core::parser::ProviderContext::clone(
             &carina_core::parser::LoadedProviderContext::empty_for_test(),
@@ -567,10 +566,12 @@ async fn native_update_read_back_uses_schema_budget_and_retains_host_deadline() 
             )
             .await
             .unwrap();
-            let outcome = provider
-                .update(&resource.id, &AppliedIdentifier::new(ARN).unwrap(), request)
-                .await
-                .unwrap();
+            let outcome = executor::dispatch_update(
+                &provider,
+                update_permit_for_test(AppliedIdentifier::new(ARN).unwrap(), request),
+            )
+            .await
+            .unwrap();
             assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
             assert_eq!(
                 outcome.diagnostic().unwrap().missing_attributes(),

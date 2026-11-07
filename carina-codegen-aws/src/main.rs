@@ -8609,9 +8609,8 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // limits. The FIFO suffix counts within the total 80:
                     // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_CreateQueue.html
                     // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-fifo-queue-message-identifiers.html
-                    // carina 6c5c0c54 / protocol 21 exposes field-presence groups
-                    // and TagsKeyValueCheck, but no value-dependent resource
-                    // rule. Leave the fifo_queue <-> .fifo condition to AWS;
+                    // Protocol 23's scoped input rules cannot express cross-field
+                    // conditions. Leave the fifo_queue <-> .fifo condition to AWS;
                     // do not add a provider-local runtime validator.
                     TypeOverride::RefinedString {
                         pattern: r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",

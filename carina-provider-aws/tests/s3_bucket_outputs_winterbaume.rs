@@ -12,7 +12,7 @@ use carina_core::provider::{
     UpdateRequest,
 };
 use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
-use carina_core::replacement::create_permit_for_test;
+use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
     ConcreteValue, DataSource, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
     Value,
@@ -596,10 +596,12 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
     );
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
-    let outcome = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("the update API succeeded, so a missing read-back must stay successful");
+    let outcome = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("the update API succeeded, so a missing read-back must stay successful");
 
     assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
@@ -673,10 +675,12 @@ async fn update_bucket_permanent_read_back_error_finishes_partial_immediately() 
     );
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
-    let outcome = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("the update API succeeded, so a failed read-back must stay successful");
+    let outcome = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("the update API succeeded, so a failed read-back must stay successful");
 
     assert_eq!(outcome.read_back_end(), ReadBackEnd::ProviderReported);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {

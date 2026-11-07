@@ -115,6 +115,7 @@ impl carina_core::provider::Provider for ComparisonOnlyProvider {
         _id: &carina_core::resource::ResourceId,
         _identifier: &carina_core::provider::AppliedIdentifier,
         _request: carina_core::provider::UpdateRequest,
+        _attempt: carina_core::provider::UpdateAttempt,
     ) -> carina_core::provider::BoxFuture<
         '_,
         carina_core::provider::ProviderResult<carina_core::provider::UpdateOutcome>,
@@ -124,9 +125,7 @@ impl carina_core::provider::Provider for ComparisonOnlyProvider {
 
     fn delete(
         &self,
-        _id: &carina_core::resource::ResourceId,
-        _identifier: &carina_core::provider::AppliedIdentifier,
-        _request: carina_core::provider::DeleteRequest,
+        _attempt: carina_core::provider::DeleteAttempt,
     ) -> carina_core::provider::BoxFuture<'_, carina_core::provider::ProviderResult<()>> {
         panic!("comparison-only provider must not dispatch delete")
     }

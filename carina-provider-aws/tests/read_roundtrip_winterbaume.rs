@@ -16,7 +16,7 @@ use carina_core::provider::{
     NoopNormalizer, PersistedAttributes, Provider, ProviderFactory, ProviderNormalizer,
     RawSavedAttrs, ReadRequest, UpdateRequest,
 };
-use carina_core::replacement::create_permit_for_test;
+use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
     ConcreteValue, Current, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
     Value, into_plan_input_current_map,
@@ -1553,11 +1553,13 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
     );
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
-    let state = provider
-        .update(&id, &applied_identifier(LOG_GROUP_NAME), request)
-        .await
-        .expect("update tags without changing deletion protection")
-        .into_state_for_writeback();
+    let state = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(LOG_GROUP_NAME), request),
+    )
+    .await
+    .expect("update tags without changing deletion protection")
+    .into_state_for_writeback();
 
     assert_eq!(
         state.attributes.get("deletion_protection_enabled"),
@@ -1808,15 +1810,13 @@ async fn account_name_update_sends_put_account_name_and_read_converges() {
     let request =
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
-    let updated = provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect("rename Organizations account")
-        .into_state_for_writeback();
+    let updated = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect("rename Organizations account")
+    .into_state_for_writeback();
 
     assert_eq!(
         observed.lock().expect("account rename state lock").calls,
@@ -1845,15 +1845,13 @@ async fn management_account_rename_omits_account_id() {
     let request =
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
-    let updated = provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect("rename Organizations management account")
-        .into_state_for_writeback();
+    let updated = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect("rename Organizations management account")
+    .into_state_for_writeback();
 
     assert_eq!(
         observed.lock().expect("account rename state lock").calls,
@@ -1878,14 +1876,12 @@ async fn unchanged_account_name_sends_no_put_account_name() {
     let request =
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
-    provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect("unchanged account name update");
+    carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect("unchanged account name update");
 
     assert!(
         observed
@@ -1917,15 +1913,13 @@ async fn account_name_and_tags_update_in_order_and_read_converges() {
     )
     .await;
 
-    let updated = provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect("rename and tag Organizations account")
-        .into_state_for_writeback();
+    let updated = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect("rename and tag Organizations account")
+    .into_state_for_writeback();
 
     let state = observed.lock().expect("account rename state lock");
     assert_eq!(state.operations, vec!["PutAccountName", "TagResource"]);
@@ -1953,14 +1947,12 @@ async fn account_name_access_denied_error_names_required_setup() {
     let request =
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
-    let error = provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect_err("AccessDenied must fail account rename");
+    let error = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect_err("AccessDenied must fail account rename");
     let message = error.to_string();
     assert!(message.contains("missing IAM permission"), "{message}");
     assert!(message.contains("account:PutAccountName"), "{message}");
@@ -1989,14 +1981,12 @@ async fn account_name_non_access_denied_error_has_no_setup_hint() {
     let request =
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
-    let error = provider
-        .update(
-            &desired.id,
-            &applied_identifier(ORGANIZATIONS_ACCOUNT_ID),
-            request,
-        )
-        .await
-        .expect_err("non-AccessDenied must fail account rename");
+    let error = carina_core::executor::dispatch_update(
+        &provider,
+        update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
+    )
+    .await
+    .expect_err("non-AccessDenied must fail account rename");
     let message = error.to_string();
     assert!(message.contains("Failed to rename account"), "{message}");
     assert!(!message.contains("account:PutAccountName"), "{message}");

@@ -1106,7 +1106,7 @@ mod tests {
         let json = carina_plugin_sdk::provider_schema_to_json(cache.witness())
             .expect("guest schema export");
         let exported: proto::ProviderSchemaEnvelope =
-            serde_json::from_str(&json).expect("protocol 21 schema envelope");
+            serde_json::from_str(&json).expect("protocol 23 schema envelope");
         let native_wire = protocol_convert::provider_schema_to_protocol(&native)
             .expect("native schema projection");
         assert_eq!(
