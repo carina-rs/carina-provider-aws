@@ -5,7 +5,8 @@ use anyhow::{Context, Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
     AttributeType, CustomValidator, DslTransform, FieldGroup, ListElements, PatternAttributeType,
-    PatternForm, RawShape, StructField, TypeIdentity, ValidatedConfigSchema,
+    PatternForm, PatternMatch, PatternReason, PatternSpec, PatternSpecDisplay, RawShape,
+    StructField, TypeIdentity, ValidatedConfigSchema,
 };
 use carina_docgen::{
     Declaration, DeclarationKind, DocLink, Heading, PageBuilder, Resolved, TypeDocHooks, TypeEdge,
@@ -146,7 +147,7 @@ fn maps_preserve_entry_bounds_constrained_keys_and_linked_values() {
         );
         let markdown = page(&ty, &mut Hooks::default()).unwrap();
         let inline = format!(
-            "Map\\<``String (pattern: a|`b, len: 1..=8)``, [Struct(X)](#definition)\\>{suffix}"
+            "Map\\<``String (pattern: /a|`b/ (Substring: Preserve the fixture regex search semantics.), len: 1..=8)``, [Struct(X)](#definition)\\>{suffix}"
         );
         assert!(markdown.starts_with(&inline), "{markdown}");
         assert!(
@@ -315,6 +316,39 @@ fn lists_render_item_bounds_uniqueness_and_order() {
 }
 
 #[test]
+fn pattern_constraints_use_core_display_and_preserve_modes_in_table_cells() {
+    let full = PatternSpec::new("^a$", PatternMatch::Full);
+    let substring = PatternSpec::new(
+        "^a$",
+        PatternMatch::Substring {
+            reason: PatternReason::new("Preserve a|b\nsearch semantics.").unwrap(),
+        },
+    );
+    let mut constraints = Vec::new();
+    for (spec, literal) in [
+        (&full, "`String (pattern: /^a$/ (Full))`"),
+        (
+            &substring,
+            "`String (pattern: /^a$/ (Substring: Preserve a|b\\nsearch semantics.))`",
+        ),
+    ] {
+        let ty = AttributeType::refined_string(None, Some(spec.clone()), None, None);
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        let constraint = markdown.lines().next().unwrap();
+        let rendered = PatternSpecDisplay::new(spec).to_string();
+        let expected = format!("`String (pattern: {rendered})`");
+        assert_eq!(constraint, expected);
+        assert_eq!(constraint, literal);
+        assert!(
+            markdown.contains(&format!("| {} |", expected.replace('|', r"\|"))),
+            "{markdown}"
+        );
+        constraints.push(constraint.to_owned());
+    }
+    assert_ne!(constraints[0], constraints[1]);
+}
+
+#[test]
 fn scalars_render_all_refinements_in_github_order() {
     let validator = Arc::new(|_: &carina_core::resource::Value| Ok(()));
     let cases = [
@@ -327,7 +361,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 )),
                 Some((Some(1), Some(8))),
             ),
-            "Id (pattern: ^id$, len: 1..=8)",
+            "Id (pattern: /^id$/ (Full), len: 1..=8)",
         ),
         (
             AttributeType::refined_string(
@@ -339,7 +373,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 None,
                 None,
             ),
-            "String (pattern: ^a$)",
+            "String (pattern: /^a$/ (Full))",
         ),
         (
             AttributeType::refined_string(None, None, Some((None, Some(8))), None),
@@ -356,7 +390,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 validator.clone(),
                 Some(DslTransform::HyphenToUnderscore),
             ),
-            "N (pattern: ^a$, len: 1.., custom validator, DSL transform: HyphenToUnderscore)",
+            "N (pattern: /^a$/ (Full), len: 1.., custom validator, DSL transform: HyphenToUnderscore)",
         ),
         (
             AttributeType::refined_int_with_validator(
@@ -573,7 +607,7 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
                 validate.clone(),
                 Some(DslTransform::HyphenToUnderscore),
             ),
-            "pattern: ^a$, len: 1..=8",
+            "pattern: /^a$/ (Full), len: 1..=8",
         ),
         (
             AttributeType::refined_int_with_validator(
@@ -638,7 +672,7 @@ fn open_enums_preserve_nested_enum_scalar_refinements() {
                 Some((Some(1), Some(8))),
                 None,
             ),
-            "pattern: ^a$, len: 1..=8",
+            "pattern: /^a$/ (Full), len: 1..=8",
         ),
         (
             AttributeType::refined_int(None, Some((Some(-1), Some(8)))),
@@ -701,7 +735,7 @@ fn open_enums_preserve_reference_base_constraints() {
         Some(Arc::new(|_| Ok(()))),
         Some(DslTransform::Identity),
     );
-    let expected = "`provider.Scope.Open (pattern: ^ref-[a-z]+$, len: 5..=32, custom validator, DSL transform: Identity)`";
+    let expected = "`provider.Scope.Open (pattern: /^ref-[a-z]+$/ (Full), len: 5..=32, custom validator, DSL transform: Identity)`";
     let mut hooks = Hooks::default();
     let markdown = page(&ty, &mut hooks).unwrap();
     assert!(markdown.starts_with(expected), "{markdown}");
@@ -797,7 +831,7 @@ fn compiled_shapes_use_the_same_renderer() {
     let ty = config.parts().get("value").unwrap();
     let markdown = page(ty, &mut Hooks::default()).unwrap();
     assert!(
-        markdown.starts_with("Map\\<`String (pattern: ^a$)`, `Bool`\\> (entries: 1..=4)"),
+        markdown.starts_with("Map\\<`String (pattern: /^a$/ (Full))`, `Bool`\\> (entries: 1..=4)"),
         "{markdown}"
     );
 }
@@ -850,11 +884,11 @@ fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
     );
     let markdown = page(&ty, &mut Hooks::default()).unwrap();
     assert!(
-        markdown.starts_with("``String (pattern: a|`b\\n\\t\\u{d})``"),
+        markdown.starts_with("``String (pattern: /a|`b\\n\\t\\u{d}/ (Substring: Preserve the fixture regex search semantics.))``"),
         "{markdown}"
     );
     assert!(
-        markdown.contains("| ``String (pattern: a\\|`b\\n\\t\\u{d})`` |"),
+        markdown.contains("| ``String (pattern: /a\\|`b\\n\\t\\u{d}/ (Substring: Preserve the fixture regex search semantics.))`` |"),
         "{markdown}"
     );
     let odd_slash = AttributeType::refined_string(
@@ -873,7 +907,7 @@ fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
     );
     let markdown = page(&odd_slash, &mut Hooks::default()).unwrap();
     assert!(
-        markdown.contains(r"| `String (pattern: a\`<!---->`\|b)` |"),
+        markdown.contains(r"| `String (pattern: /a\`<!---->`\|b/ (Substring: Preserve the fixture regex search semantics.))` |"),
         "{markdown}"
     );
 }

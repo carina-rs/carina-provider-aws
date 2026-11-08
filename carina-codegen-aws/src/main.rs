@@ -9389,7 +9389,7 @@ mod tests {
         display.write_to(&mut page);
         let markdown = page.finish().unwrap();
         assert!(
-            markdown.contains("`String (pattern: ^[a-z]+$, len: 1..=8)`"),
+            markdown.contains("`String (pattern: /^[a-z]+$/ (Full), len: 1..=8)`"),
             "{markdown}"
         );
         assert!(markdown.contains("(entries: 2..=5)"), "{markdown}");
@@ -9884,7 +9884,7 @@ mod tests {
         let nat_type = vpc_id_type("ec2.NatGateway");
         assert_eq!(
             nat_type,
-            "`VpcId (pattern: ^vpc-[0-9a-f]{8,}$, custom validator)`"
+            "`VpcId (pattern: /^vpc-[0-9a-f]{8,}$/ (Full), custom validator)`"
         );
         assert_eq!(vpc_id_type("ec2.InternetGateway"), nat_type);
     }
@@ -9934,7 +9934,7 @@ mod tests {
         let schema_type = page.finish().unwrap();
         assert_eq!(
             schema_type,
-            "`Arn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$, custom validator)`"
+            "`Arn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$/ (Full), custom validator)`"
         );
         let markdown = generate_markdown_resource(
             &resource,
@@ -10151,7 +10151,9 @@ mod tests {
         )
         .expect("generate Logs markdown");
         assert!(
-            markdown.contains("`String (pattern: ^[.\\-_/#A-Za-z0-9]{1,512}\\z, len: 1..=512)`"),
+            markdown.contains(
+                "`String (pattern: /^[.\\-_/#A-Za-z0-9]{1,512}\\z/ (Full), len: 1..=512)`"
+            ),
             "{markdown}"
         );
         assert!(
@@ -10248,12 +10250,13 @@ mod tests {
         .unwrap();
         assert!(
             markdown.contains(
-                r"`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`"
+                r"`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`"
             ),
             "{markdown}"
         );
         assert!(
-            markdown.contains(r"`String (pattern: ^(?:/|/[\x21-\x7E]+/)\z, len: 1..=512)`"),
+            markdown
+                .contains(r"`String (pattern: /^(?:/|/[\x21-\x7E]+/)\z/ (Full), len: 1..=512)`"),
             "{markdown}"
         );
     }
@@ -10330,12 +10333,12 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (pattern: ^[ -;=?-~]+\z, len: 1..=50)`",
-            r"`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`",
+            r"`String (pattern: /^[ -;=?-~]+\z/ (Full), len: 1..=50)`",
+            r"`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`",
             "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
-            r"`AwsAccountId (pattern: ^\d{12}$, len: 12..=12, custom validator)`",
+            r"`AwsAccountId (pattern: /^\d{12}$/ (Full), len: 12..=12, custom validator)`",
             // #638: Organizations account ARN docs pin all eight supported partitions.
-            r"`OrganizationsAccountArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z)`",
+            r"`OrganizationsAccountArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z/ (Full))`",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -10387,11 +10390,11 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (pattern: ^o-[a-z0-9]{10,32}\z, len: 12..=34)`",
+            r"`String (pattern: /^o-[a-z0-9]{10,32}\z/ (Full), len: 12..=34)`",
             // #638: Management-account ARN docs pin all eight supported partitions.
-            r"`OrganizationsAccountArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z)`",
+            r"`OrganizationsAccountArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z/ (Full))`",
             // #638: Organization ARN docs pin all eight supported partitions.
-            r"`OrganizationsOrganizationArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z)`",
+            r"`OrganizationsOrganizationArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z/ (Full))`",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -10676,7 +10679,7 @@ mod tests {
         let markdown = lifecycle_markdown_fixture();
         assert_eq!(
             markdown
-                .matches("| `date` | `S3LifecycleDate (pattern: ^(?:[0-9]{4}-(?:(?:01\\|03\\|05\\|07\\|08\\|10\\|12)-(?:0[1-9]\\|[12][0-9]\\|3[01])\\|(?:04\\|06\\|09\\|11)-(?:0[1-9]\\|[12][0-9]\\|30)\\|02-(?:0[1-9]\\|1[0-9]\\|2[0-8]))\\|(?:[0-9]{2}(?:0[48]\\|[2468][048]\\|[13579][26])\\|(?:[02468][048]\\|[13579][26])00)-02-29)T00:00:00Z\\z, len: 20..=20, custom validator)` | No |")
+                .matches("| `date` | `S3LifecycleDate (pattern: /^(?:[0-9]{4}-(?:(?:01\\|03\\|05\\|07\\|08\\|10\\|12)-(?:0[1-9]\\|[12][0-9]\\|3[01])\\|(?:04\\|06\\|09\\|11)-(?:0[1-9]\\|[12][0-9]\\|30)\\|02-(?:0[1-9]\\|1[0-9]\\|2[0-8]))\\|(?:[0-9]{2}(?:0[48]\\|[2468][048]\\|[13579][26])\\|(?:[02468][048]\\|[13579][26])00)-02-29)T00:00:00Z\\z/ (Full), len: 20..=20, custom validator)` | No |")
                 .count(),
             2,
             "{markdown}"
@@ -10788,8 +10791,9 @@ mod tests {
             .finish()
             .expect("declared enum aliases produce valid docs");
         assert!(
-            markdown
-                .contains("| `zone` | `Route53HostedZoneId (pattern: ^Z[A-Z0-9]+$, len: ..=32)` |"),
+            markdown.contains(
+                "| `zone` | `Route53HostedZoneId (pattern: /^Z[A-Z0-9]+$/ (Full), len: ..=32)` |"
+            ),
             "{markdown}"
         );
         assert!(
@@ -12574,7 +12578,8 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown.contains("- `Route53HostedZoneId (pattern: ^Z[A-Z0-9]+$, len: ..=32)`"),
+            markdown
+                .contains("- `Route53HostedZoneId (pattern: /^Z[A-Z0-9]+$/ (Full), len: ..=32)`"),
             "{markdown}"
         );
         assert_eq!(structs.len(), 1);
@@ -13009,16 +13014,16 @@ mod tests {
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
         assert!(
-            md.contains("- **Type:** List\\<`IamRoleArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$, custom validator)`\\> (unordered)"),
+            md.contains("- **Type:** List\\<`IamRoleArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$/ (Full), custom validator)`\\> (unordered)"),
             "aggregated outputs must use MarkdownType's list renderer: {md}"
         );
         assert!(
-            md.contains(r"- **Type:** `String (pattern: ^/[\x21-\x7F]*\z, len: 1..=512)`"),
+            md.contains(r"- **Type:** `String (pattern: /^/[\x21-\x7F]*\z/ (Full), len: 1..=512)`"),
             "path_prefix constraint: {md}"
         );
         assert!(
             md.contains(
-                r"- **Type:** List\<`IamRoleName (pattern: ^[A-Za-z0-9_+=,.@-]+\z, len: 1..=64, custom validator)`\> (unordered)"
+                r"- **Type:** List\<`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`\> (unordered)"
             ),
             "names element constraint: {md}"
         );
@@ -13035,7 +13040,7 @@ mod tests {
             .expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
-        assert!(md.contains("- **Type:** `IamRoleArn (pattern: ^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$, custom validator)`"), "{md}");
+        assert!(md.contains("- **Type:** `IamRoleArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$/ (Full), custom validator)`"), "{md}");
     }
 
     #[test]
@@ -14414,14 +14419,14 @@ mod tests {
         let markdown = page.finish().expect("literal regex passes page validation");
         assert_eq!(
             markdown
-                .matches(&format!("`String (pattern: {pattern})`"))
+                .matches(&format!("`String (pattern: /{pattern}/ (Full))`"))
                 .count(),
             3,
             "{markdown}"
         );
         assert!(
             markdown.contains(&format!(
-                "List\\<`String (pattern: {pattern})`\\> (ordered)"
+                "List\\<`String (pattern: /{pattern}/ (Full))`\\> (ordered)"
             )),
             "{markdown}"
         );

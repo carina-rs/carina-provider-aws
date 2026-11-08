@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
     CustomValidator, DslTransform, FieldGroup, FieldGroupKind, ListElements, PatternAttributeType,
-    PatternForm, PatternSpec, PatternStructField, RawShape, TypeIdentity,
+    PatternForm, PatternSpec, PatternSpecDisplay, PatternStructField, RawShape, TypeIdentity,
 };
 
 use crate::{PageBuilder, TypeDisplay};
@@ -635,7 +635,7 @@ fn bounds<T: Display>((min, max): (Option<T>, Option<T>)) -> String {
 fn string_constraints(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(pattern) = pattern {
-        constraints.push(format!("pattern: {}", pattern.as_str()));
+        constraints.push(format!("pattern: {}", PatternSpecDisplay::new(pattern)));
     }
     if let Some(length) = length {
         constraints.push(format!("len: {}", bounds(length)));
