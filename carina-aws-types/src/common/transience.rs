@@ -6,6 +6,7 @@ use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::{ErrorKind, ProvideErrorKind};
 use carina_core::provider::ProviderError;
+use carina_core::provider_text::Retryability;
 
 use super::send_outcome::connector_transience;
 use super::{FinalAttempt, SendClassification, Transience};
@@ -71,10 +72,9 @@ impl Transience {
     /// Read transience captured before provider diagnostic text is made opaque.
     /// Unclassified validation, conversion, and other local errors are permanent.
     pub fn of_provider_error(error: &ProviderError) -> Self {
-        if error.detail().transient {
-            Self::Transient
-        } else {
-            Self::Permanent
+        match error.retryability() {
+            Retryability::Transient => Self::Transient,
+            Retryability::Unclassified => Self::Permanent,
         }
     }
 }
@@ -182,9 +182,15 @@ mod tests {
                     .is::<SdkError<ErrorMetadata, HttpResponse>>()
             );
             let provider = ProviderError::api_error_caused_by("read failed", cause)
-                .with_transient(transience == Transience::Transient);
+                .with_retryability(match transience {
+                    Transience::Transient => Retryability::Transient,
+                    Transience::Permanent => Retryability::Unclassified,
+                });
             let nested = ProviderError::api_error_caused_by("read-back failed", provider)
-                .with_transient(transience == Transience::Transient);
+                .with_retryability(match transience {
+                    Transience::Transient => Retryability::Transient,
+                    Transience::Permanent => Retryability::Unclassified,
+                });
             assert_eq!(Transience::of_provider_error(&nested), transience);
             let nested =
                 carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
@@ -208,9 +214,12 @@ mod tests {
         let transience = Transience::of(&sdk);
         let error = ProviderError::api_error_caused_by("AWS read failed", AwsCause(sdk))
             .with_status(503)
-            .with_transient(transience == Transience::Transient);
+            .with_retryability(match transience {
+                Transience::Transient => Retryability::Transient,
+                Transience::Permanent => Retryability::Unclassified,
+            });
 
-        assert!(error.detail().transient);
+        assert!(error.is_transient());
         assert_eq!(error.detail().status, Some(503));
         assert!(error.detail().cause().unwrap().is::<AwsCause>());
         assert_eq!(Transience::of_provider_error(&error), Transience::Transient);

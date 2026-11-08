@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
 
 use carina_aws_types::{AwsType, elbv2_target_group_grpc_code, elbv2_target_group_http_code};
-use carina_core::provider::CustomTypeDispatchError;
+use carina_core::provider::{
+    CustomTypeDispatchError, ProviderError as CoreProviderError, ProviderErrorKind,
+};
 use carina_core::schema::{
     AssignabilityEdge, AttributeSchema, ReferenceForms, ResourceSchema, ValidatedConfigSchema,
     ValidatedResourceSchema,
 };
+use carina_core::test_utils::provider_text::NativeWireFixture as _;
 use carina_plugin_sdk::types::{
     AppliedIdentifier, CreateRequest, DeleteRequest, ProviderError, ProviderInfo, ReadOutcome,
     ReadRequest, ReferenceScope, Resource, ResourceId, State, TypeIdentity, UpdateRequest, Value,
@@ -184,6 +187,9 @@ fn assert_dispatch(
         let CustomTypeDispatchError::Validation(message) = error else {
             panic!("{text:?}: expected a validation error, got {error:?}");
         };
+        let message = CoreProviderError::from_diagnostic(ProviderErrorKind::InvalidInput, *message)
+            .to_wire()
+            .message;
         assert!(
             message.contains("comma-separated items N or N-N"),
             "{text:?}: {message}"

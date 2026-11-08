@@ -20,7 +20,7 @@ test-utils = []
 carina-core = { workspace = true }
 carina-aws-types = { path = "../carina-aws-types", default-features = false, features = [
     "account", "acm", "cloudwatchlogs", "ec2", "iam", "identitystore",
-    "kms", "organizations", "route53", "s3", "sqs", "sts",
+    "kms", "organizations", "route53", "s3", "sqs", "sts", "guest",
 ] }
 carina-plugin-sdk = { workspace = true }
 carina-provider-protocol = { workspace = true }

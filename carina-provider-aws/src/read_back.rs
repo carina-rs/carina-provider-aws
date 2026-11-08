@@ -90,6 +90,12 @@ impl From<NonEmptyAttributeNames> for Vec<String> {
     }
 }
 
+impl From<NonEmptyAttributeNames> for carina_core::provider::NonEmptyMissingAttributes {
+    fn from(names: NonEmptyAttributeNames) -> Self {
+        names.0.try_into().expect("attribute names are non-empty")
+    }
+}
+
 /// No request values, observed snapshots, retry counters, or clocks are persisted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -499,7 +505,7 @@ mod tests {
             "GetBucket failed",
             std::io::Error::other("transport cause"),
         )
-        .with_transient(true);
+        .with_retryability(carina_core::provider_text::Retryability::Transient);
         let completion = provider.classify_read_back(
             &resource.id,
             AppliedIdentifier::new("bucket").unwrap(),

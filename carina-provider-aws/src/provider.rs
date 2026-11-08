@@ -15,6 +15,7 @@ use carina_core::provider::{
     Resume, ResumeAttempt, ResumeCreateRequest, ResumeFailure, ResumeOutcome, ResumedCreate, Sent,
     UpdateAttempt, UpdateOutcome, UpdatePatch, UpdateRequest,
 };
+use carina_core::provider_text::ProviderDiagnostic;
 use carina_core::resource::{
     AbsoluteBindingAddress, DataSource, NoPlaceholder, Resource, ResourceId, SnapshotState, State,
     StateValueLeaf, Value,
@@ -1078,12 +1079,8 @@ impl AwsIssuedCreate for IssuedCreate {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
-        let Some(diagnostic) = PartialReadDiagnostic::new(reason.into(), missing_attributes.into())
-        else {
-            return Err(self.no_resource(ProviderError::internal(
-                "read-back partial requires missing attributes",
-            )));
-        };
+        let diagnostic =
+            PartialReadDiagnostic::new(ProviderDiagnostic::new(reason), missing_attributes.into());
         Ok(CoreCreateStep::Done(self.partial(attributes, diagnostic)))
     }
 
@@ -1206,12 +1203,8 @@ impl AwsResumedCreate for ResumedCreate {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
-        let Some(diagnostic) = PartialReadDiagnostic::new(reason.into(), missing_attributes.into())
-        else {
-            return Err(self.no_resource(ProviderError::internal(
-                "read-back partial requires missing attributes",
-            )));
-        };
+        let diagnostic =
+            PartialReadDiagnostic::new(ProviderDiagnostic::new(reason), missing_attributes.into());
         Ok(CoreResumeStep::Done(self.partial(attributes, diagnostic)))
     }
 
@@ -3609,7 +3602,7 @@ impl AwsProvider {
                         identifier,
                         snapshots,
                     ),
-                    reason.into(),
+                    ProviderDiagnostic::new(reason),
                     missing_attributes.into(),
                 )))
             }
@@ -4132,6 +4125,51 @@ mod pending_operation_tests {
 
     struct PartialReadProvider;
 
+    #[test]
+    fn native_partial_adapter_keeps_cause_retryability_and_redaction() {
+        use carina_core::provider_text::{ProviderText, Retryability};
+        use carina_core::test_utils::provider_text::{
+            BindProviderText, context, create_attempt_for_test,
+        };
+
+        for retryability in [Retryability::Unclassified, Retryability::Transient] {
+            let id = ResourceId::with_provider_identity("aws", "s3.Bucket", "partial", None);
+            let issued = create_attempt_for_test(id)
+                .issued(identifier("created"), Sent::AllRequestAttributes);
+            let reason = ProviderError::api_error_caused_by(
+                ProviderText::new("read-back-private")
+                    .with_redaction(context(&["read-back-private"]).session().redaction_set()),
+                std::io::Error::other("typed partial cause"),
+            )
+            .with_retryability(retryability);
+            let CoreCreateStep::Done(outcome) = AwsIssuedCreate::partial(
+                issued,
+                HashMap::new(),
+                reason,
+                NonEmptyAttributeNames::try_from(vec!["result".into()]).unwrap(),
+            )
+            .unwrap() else {
+                panic!("partial completion must finish the create")
+            };
+            let partial = outcome.diagnostic().unwrap();
+            assert_eq!(partial.missing_attributes(), ["result"]);
+            assert_eq!(partial.diagnostic().retryability(), retryability);
+            assert!(partial.diagnostic().source_is::<std::io::Error>());
+            assert!(
+                partial
+                    .diagnostic()
+                    .as_cause()
+                    .matches_for_test(
+                        |cause: &std::io::Error| cause.kind() == std::io::ErrorKind::Other
+                    )
+            );
+            let reason = partial.diagnostic().clone().into_host_for_test();
+            assert_eq!(reason.to_string(), "(secret): typed partial cause");
+            assert_eq!(reason.retryability(), retryability);
+            assert!(reason.source_is::<std::io::Error>());
+        }
+    }
+
     impl Provider for PartialReadProvider {
         fn name(&self) -> &str {
             "partial-read-fixture"
@@ -4208,8 +4246,8 @@ mod pending_operation_tests {
                 assert!(reason.detail().cause().unwrap().is::<std::io::Error>());
                 Ok(UpdateOutcome::partial_success(
                     state,
-                    reason.into(),
-                    vec!["result".into()],
+                    ProviderDiagnostic::new(reason),
+                    vec!["result".into()].try_into().unwrap(),
                 ))
             })
         }
