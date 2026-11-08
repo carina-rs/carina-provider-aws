@@ -27,10 +27,10 @@ use carina_codegen_aws::kms_references::{
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{
-    Bounds, Declaration, DeclarationKind, DocLink, Heading, ListConstraints, MapConstraints,
-    PageBuilder, Resolved, ScalarDoc, TableCell, TypeDisplay, TypeDocHooks, TypeEdge, TypeRegistry,
-    ValidationNote, list_display, map_display, render_attribute_type, render_field_groups,
-    scalar_display,
+    Bounds, Declaration, DeclarationKind, DocLink, DocgenError, Heading, HeadingPath,
+    ListConstraints, MapConstraints, MarkdownTypePosition, PageBuilder, Resolved, ScalarDoc,
+    TableCell, TypeDisplay, TypeDocHooks, TypeEdge, TypeRegistry, ValidationNote, list_display,
+    map_display, render_attribute_type, render_field_groups, scalar_display,
 };
 
 mod tag_types;
@@ -327,7 +327,7 @@ fn synthetic_extra_attribute_type(
 impl ValueTypeOverride {
     fn markdown(
         self,
-        heading_path: &[String],
+        heading_path: &HeadingPath,
         namespace: &str,
         enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
         structs: &mut MarkdownTypes,
@@ -5945,17 +5945,8 @@ enum MarkdownEnumSource {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct MarkdownEnumKey {
     namespace: String,
-    heading_path: Vec<String>,
+    heading_path: HeadingPath,
     source: MarkdownEnumSource,
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-enum MarkdownTypePosition {
-    Field(String),
-    Item,
-    Key,
-    Value,
-    Member(usize),
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -5963,17 +5954,14 @@ enum MarkdownStructSource {
     AttributeType(String),
     // The heading scope and typed path identify a union without inspecting its
     // contents. Tree IDs distinguish separately discovered override trees.
-    AttributeUnion {
-        tree: usize,
-        path: Vec<MarkdownTypePosition>,
-    },
+    AttributeUnion { tree: usize, path: HeadingPath },
     Smithy(String),
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct MarkdownStructKey {
     namespace: String,
-    heading_path: Vec<String>,
+    heading_path: HeadingPath,
     source: MarkdownStructSource,
 }
 
@@ -6057,7 +6045,7 @@ fn declared_scalar_display_name(identity: &carina_core::schema::TypeIdentity) ->
 
 fn discover_markdown_override(
     code: &str,
-    heading_path: &[String],
+    heading_path: &HeadingPath,
     namespace: &str,
     enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
     structs: &mut MarkdownTypes,
@@ -6068,9 +6056,8 @@ fn discover_markdown_override(
 
 #[derive(Clone)]
 struct MarkdownScope {
-    heading_path: Vec<String>,
+    heading_path: HeadingPath,
     namespace: String,
-    type_path: Vec<MarkdownTypePosition>,
 }
 
 struct MarkdownHooks<'store, 'a> {
@@ -6104,16 +6091,7 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
 
     fn child_scope(&self, parent: &MarkdownScope, edge: TypeEdge<'_>) -> MarkdownScope {
         let mut scope = parent.clone();
-        scope.type_path.push(match edge {
-            TypeEdge::Field(name) => {
-                scope.heading_path.push(name.to_string());
-                MarkdownTypePosition::Field(name.to_string())
-            }
-            TypeEdge::Item => MarkdownTypePosition::Item,
-            TypeEdge::Key => MarkdownTypePosition::Key,
-            TypeEdge::Value => MarkdownTypePosition::Value,
-            TypeEdge::Member(index) => MarkdownTypePosition::Member(index),
-        });
+        scope.heading_path = scope.heading_path.child(edge);
         scope
     }
 
@@ -6122,6 +6100,7 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
         scope: &MarkdownScope,
         declaration: Declaration<'a, Draft, MarkdownNodeId>,
     ) -> Result<DocLink<MarkdownTarget>> {
+        let heading_path = &scope.heading_path;
         match declaration.kind {
             DeclarationKind::Enum {
                 identity,
@@ -6134,13 +6113,9 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                     .unwrap_or_else(|| scope.namespace.clone());
                 let key = register_markdown_enum(
                     MarkdownEnumSource::AttributeType(identity.to_string()),
-                    scope
-                        .heading_path
-                        .last()
-                        .map(String::as_str)
-                        .unwrap_or(&identity.kind),
+                    heading_path.last_field().unwrap_or(&identity.kind),
                     &identity.kind,
-                    &scope.heading_path,
+                    heading_path,
                     &namespace,
                     values.to_vec(),
                     self.enums,
@@ -6163,7 +6138,7 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                 child.namespace = format!("{}.{name}", scope.namespace);
                 let key = MarkdownStructKey {
                     namespace: child.namespace.clone(),
-                    heading_path: scope.heading_path.clone(),
+                    heading_path: heading_path.clone(),
                     source: MarkdownStructSource::AttributeType(name.to_string()),
                 };
                 if !self.structs.contains_key(&key) {
@@ -6191,17 +6166,16 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
                 })
             }
             DeclarationKind::Union { members } => {
-                let label = scope
-                    .heading_path
-                    .last()
+                let label = heading_path
+                    .last_field()
                     .map(|name| name.to_upper_camel_case())
                     .unwrap_or_else(|| "Value".into());
                 let key = MarkdownStructKey {
                     namespace: scope.namespace.clone(),
-                    heading_path: scope.heading_path.clone(),
+                    heading_path: heading_path.clone(),
                     source: MarkdownStructSource::AttributeUnion {
                         tree: self.tree,
-                        path: scope.type_path.clone(),
+                        path: heading_path.clone(),
                     },
                 };
                 if !self.structs.contains_key(&key) {
@@ -6235,7 +6209,7 @@ impl<'a> TypeDocHooks<'a, Draft> for MarkdownHooks<'_, 'a> {
 /// live in carina-docgen. Targets are reserved before queued children are read.
 fn discover_markdown_attribute_type(
     attr_type: &AttributeType,
-    heading_path: &[String],
+    heading_path: &HeadingPath,
     namespace: &str,
     enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
     structs: &mut MarkdownTypes,
@@ -6255,9 +6229,8 @@ fn discover_markdown_attribute_type(
         pending: Vec::new(),
     };
     let scope = MarkdownScope {
-        heading_path: heading_path.to_vec(),
+        heading_path: heading_path.clone(),
         namespace: namespace.to_string(),
-        type_path: Vec::new(),
     };
     let display = render_attribute_type(attr_type, &scope, &mut hooks, registry, note)?;
     while let Some((key, scope, kind)) = hooks.pending.pop() {
@@ -6508,7 +6481,7 @@ fn generate_markdown_resource(
             res.name,
             &member_ref.target,
             name,
-            std::slice::from_ref(&snake_name),
+            &HeadingPath::root(&snake_name),
             &snake_name,
             &namespace,
             &type_overrides,
@@ -6540,7 +6513,7 @@ fn generate_markdown_resource(
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
         let attr_type = synthetic_extra_attribute_type(res.name, extra.name, &type_overrides)?
             .markdown(
-                std::slice::from_ref(&snake_name),
+                &HeadingPath::root(&snake_name),
                 &namespace,
                 &mut all_enums,
                 &mut struct_defs,
@@ -6567,7 +6540,7 @@ fn generate_markdown_resource(
         let attr_type = if let Some(override_type) = resource_value_override(res.name, &snake_name)
         {
             override_type.markdown(
-                std::slice::from_ref(&snake_name),
+                &HeadingPath::root(&snake_name),
                 &namespace,
                 &mut all_enums,
                 &mut struct_defs,
@@ -6581,7 +6554,7 @@ fn generate_markdown_resource(
         {
             discover_markdown_override(
                 &format!("super::{constructor}()"),
-                std::slice::from_ref(&snake_name),
+                &HeadingPath::root(&snake_name),
                 &namespace,
                 &mut all_enums,
                 &mut struct_defs,
@@ -6592,7 +6565,7 @@ fn generate_markdown_resource(
                 res.name,
                 &member_ref.target,
                 name,
-                std::slice::from_ref(&snake_name),
+                &HeadingPath::root(&snake_name),
                 &snake_name,
                 &namespace,
                 &type_overrides,
@@ -6623,12 +6596,12 @@ fn generate_markdown_resource(
         all_enums
             .keys()
             .filter(|key| !matches!(key.source, MarkdownEnumSource::AttributeType(..)))
-            .map(|key| key.heading_path.as_slice())
+            .map(|key| &key.heading_path)
             .chain(
                 struct_defs
                     .keys()
                     .filter(|key| matches!(key.source, MarkdownStructSource::Smithy(_)))
-                    .map(|key| key.heading_path.as_slice()),
+                    .map(|key| &key.heading_path),
             ),
     )
     .with_context(|| format!("validating Markdown heading paths for aws.{}", res.name))?;
@@ -6721,7 +6694,7 @@ fn generate_markdown_resource(
         page.push_str("- **Type:** ");
         discover_markdown_attribute_type(
             &resource_tag_type(res, model)?.attribute_type(),
-            &["tags".to_string()],
+            &HeadingPath::root("tags"),
             &namespace,
             &mut all_enums,
             &mut struct_defs,
@@ -6761,8 +6734,9 @@ fn write_markdown_type_definitions(
     struct_defs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
     enum_alias_map: &HashMap<&str, Vec<(&str, &str)>>,
 ) -> Result<()> {
+    let union_heading_paths = markdown_union_heading_paths(all_enums, struct_defs)?;
     let enum_heading_texts = markdown_enum_heading_texts(all_enums);
-    let struct_heading_texts = markdown_struct_heading_texts(struct_defs);
+    let struct_heading_texts = markdown_struct_heading_texts(struct_defs, &union_heading_paths);
     // Enum Values section
     //
     // Per naming-conventions design D7, the documented "DSL Identifier" and
@@ -6857,7 +6831,7 @@ fn write_markdown_type_definitions(
         let mut used_slugs = HashSet::new();
         for (key, doc) in unions {
             let heading = claim_unique_heading(
-                format!("{} union", key.heading_path.join(".")),
+                format!("{} union", key.heading_path),
                 &key.namespace,
                 &mut used_slugs,
             );
@@ -6894,11 +6868,7 @@ fn markdown_enum_heading_texts(
     let candidates: Vec<_> = enums
         .iter()
         .map(|(key, enum_doc)| {
-            let base = format!(
-                "{} ({})",
-                key.heading_path.join("."),
-                enum_doc.info.type_name
-            );
+            let base = format!("{} ({})", key.heading_path, enum_doc.info.type_name);
             let identity = match &key.source {
                 MarkdownEnumSource::Smithy { target, type_name } => {
                     format!("{target} {type_name}")
@@ -6934,6 +6904,7 @@ fn markdown_enum_heading_texts(
 
 fn markdown_struct_heading_texts(
     structs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
+    union_heading_paths: &HashSet<HeadingPath>,
 ) -> Vec<(MarkdownStructKey, String)> {
     let mut used_slugs = HashSet::new();
     let mut headings: Vec<_> = structs
@@ -6941,7 +6912,12 @@ fn markdown_struct_heading_texts(
         .filter(|(_, doc)| doc.union_members.is_none())
         .map(|(key, _)| key)
         .map(|key| {
-            let base = key.heading_path.join(".");
+            let path = key.heading_path.to_string();
+            let base = if union_heading_paths.contains(&key.heading_path.visible()) {
+                format!("{path} ({})", markdown_struct_type_name(key))
+            } else {
+                path
+            };
             let target = match &key.source {
                 MarkdownStructSource::AttributeType(name) => format!("AttributeType:{name}"),
                 MarkdownStructSource::Smithy(target) => target.clone(),
@@ -6956,6 +6932,58 @@ fn markdown_struct_heading_texts(
         .collect();
     sort_markdown_headings(&mut headings);
     headings
+}
+
+fn markdown_struct_type_name(key: &MarkdownStructKey) -> &str {
+    match &key.source {
+        MarkdownStructSource::AttributeType(name) => name,
+        MarkdownStructSource::Smithy(target) => SmithyModel::shape_name(target),
+        MarkdownStructSource::AttributeUnion { .. } => {
+            unreachable!("anonymous unions have separate headings")
+        }
+    }
+}
+
+/// Member indices distinguish declarations, never their visible headings.
+/// Named members sharing a visible path must be distinguished by type name.
+fn markdown_union_heading_paths(
+    enums: &BTreeMap<MarkdownEnumKey, MarkdownEnum>,
+    structs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
+) -> Result<HashSet<HeadingPath>> {
+    let declarations = enums
+        .iter()
+        .map(|(key, doc)| (&key.heading_path, doc.info.type_name.as_str()))
+        .chain(
+            structs
+                .iter()
+                .filter(|(_, doc)| doc.union_members.is_none())
+                .map(|(key, _)| (&key.heading_path, markdown_struct_type_name(key))),
+        );
+    let mut by_path: HashMap<HeadingPath, Vec<(&HeadingPath, &str)>> = HashMap::new();
+    for (path, type_name) in declarations {
+        by_path
+            .entry(path.visible())
+            .or_default()
+            .push((path, type_name));
+    }
+    let mut shared_paths = HashSet::new();
+    for (visible_path, declarations) in by_path {
+        if declarations.len() < 2 || !declarations.iter().any(|(path, _)| path.has_union_member()) {
+            continue;
+        }
+        let mut names = HashSet::new();
+        for (path, type_name) in declarations {
+            if !names.insert(type_name) {
+                return Err(DocgenError::AmbiguousUnionHeading {
+                    path: path.clone(),
+                    type_name: type_name.into(),
+                }
+                .into());
+            }
+        }
+        shared_paths.insert(visible_path);
+    }
+    Ok(shared_paths)
 }
 
 fn sort_markdown_headings<K: Ord>(headings: &mut [(K, String)]) {
@@ -7196,7 +7224,7 @@ fn generate_markdown_data_source(
                     name: output.name,
                     attr_type: if let Some(value) = resource_value_override(ds.name, output.name) {
                         value.markdown(
-                            &[output.name.to_string()],
+                            &HeadingPath::root(output.name),
                             &namespace,
                             &mut all_enums,
                             &mut struct_defs,
@@ -7204,7 +7232,7 @@ fn generate_markdown_data_source(
                     } else {
                         discover_markdown_override(
                             output.type_code,
-                            &[output.name.to_string()],
+                            &HeadingPath::root(output.name),
                             &namespace,
                             &mut all_enums,
                             &mut struct_defs,
@@ -7226,7 +7254,7 @@ fn generate_markdown_data_source(
                             (
                                 discover_markdown_attribute_type(
                                     &override_type.attribute_type,
-                                    &[output.name.to_string()],
+                                    &HeadingPath::root(output.name).child(TypeEdge::Item),
                                     &namespace,
                                     &mut all_enums,
                                     &mut struct_defs,
@@ -7238,7 +7266,7 @@ fn generate_markdown_data_source(
                             (
                                 discover_markdown_override(
                                     output.item_type,
-                                    &[output.name.to_string()],
+                                    &HeadingPath::root(output.name).child(TypeEdge::Item),
                                     &namespace,
                                     &mut all_enums,
                                     &mut struct_defs,
@@ -7278,7 +7306,7 @@ fn generate_markdown_data_source(
                 page.push_str("- **Type:** ");
                 override_type
                     .markdown(
-                        &[input.name.to_string()],
+                        &HeadingPath::root(input.name),
                         &namespace,
                         &mut all_enums,
                         &mut struct_defs,
@@ -7288,7 +7316,7 @@ fn generate_markdown_data_source(
             } else if let Some(code) = input.type_override {
                 let ty = discover_markdown_override(
                     code,
-                    &[input.name.to_string()],
+                    &HeadingPath::root(input.name),
                     &namespace,
                     &mut all_enums,
                     &mut struct_defs,
@@ -7325,32 +7353,47 @@ fn generate_markdown_data_source(
 fn validate_markdown_heading_paths<'a>(
     model: &SmithyModel,
     root_targets: &HashMap<String, String>,
-    heading_paths: impl IntoIterator<Item = &'a [String]>,
+    heading_paths: impl IntoIterator<Item = &'a HeadingPath>,
 ) -> Result<()> {
     for path in heading_paths {
-        let Some((root, nested)) = path.split_first() else {
-            anyhow::bail!("Markdown heading path must not be empty");
+        let Some((MarkdownTypePosition::Field(root), nested)) = path.segments().split_first()
+        else {
+            unreachable!("HeadingPath starts at a schema field");
         };
         let mut target = root_targets
-            .get(root)
-            .with_context(|| {
-                format!(
-                    "Markdown heading path `{}` has no root field",
-                    path.join(".")
-                )
-            })?
+            .get(root.as_str())
+            .with_context(|| format!("Markdown heading path `{path}` has no root field"))?
             .clone();
-        let mut parent_path = root.clone();
-
-        for field in nested {
-            target = markdown_nested_field_target(model, &target, field).with_context(|| {
-                format!(
-                    "Markdown heading path `{}` has no field `{field}` below `{parent_path}`",
-                    path.join(".")
-                )
+        for segment in nested {
+            target = match segment {
+                MarkdownTypePosition::Field(field) => {
+                    markdown_nested_field_target(model, &target, field.as_str())
+                }
+                MarkdownTypePosition::Item => match model.get_shape(&target) {
+                    Some(Shape::List(list)) => Ok(list.member.target.clone()),
+                    _ => anyhow::bail!(
+                        "Markdown heading path `{path}` has a list hop at non-list `{target}`"
+                    ),
+                },
+                MarkdownTypePosition::Value => match model.get_shape(&target) {
+                    Some(Shape::Map(map)) => Ok(map.value.target.clone()),
+                    _ => anyhow::bail!(
+                        "Markdown heading path `{path}` has a map-value hop at non-map `{target}`"
+                    ),
+                },
+                MarkdownTypePosition::Key => match model.get_shape(&target) {
+                    Some(Shape::Map(map)) => Ok(map.key.target.clone()),
+                    _ => anyhow::bail!(
+                        "Markdown heading path `{path}` has a map-key hop at non-map `{target}`"
+                    ),
+                },
+                MarkdownTypePosition::Member(index) => anyhow::bail!(
+                    "Markdown heading path `{path}` has an unexpected union-member hop ({index})"
+                ),
+            }
+            .with_context(|| {
+                format!("Markdown heading path `{path}` has no {segment:?} below `{target}`")
             })?;
-            parent_path.push('.');
-            parent_path.push_str(field);
         }
     }
     Ok(())
@@ -7361,44 +7404,35 @@ fn markdown_nested_field_target(
     target: &str,
     field_name: &str,
 ) -> Result<String> {
-    let mut target = target.to_string();
-    loop {
-        let members = match model.get_shape(&target) {
-            Some(Shape::List(list)) => {
-                target.clone_from(&list.member.target);
-                continue;
-            }
-            Some(Shape::Map(map)) => {
-                target.clone_from(&map.value.target);
-                continue;
-            }
-            Some(Shape::Structure(structure)) => &structure.members,
-            Some(Shape::Union(union)) => &union.members,
-            Some(
-                Shape::Service(..)
-                | Shape::Operation(..)
-                | Shape::Enum(..)
-                | Shape::IntEnum(..)
-                | Shape::String(..)
-                | Shape::Boolean(..)
-                | Shape::Integer(..)
-                | Shape::Long(..)
-                | Shape::Float(..)
-                | Shape::Double(..)
-                | Shape::Blob(..)
-                | Shape::Timestamp(..)
-                | Shape::Document(..)
-                | Shape::Resource(..),
-            ) => anyhow::bail!("Smithy shape `{target}` is not a structure or union"),
-            None => anyhow::bail!("Smithy shape `{target}` does not exist"),
-        };
-        return members
-            .iter()
-            .find_map(|(name, member)| {
-                (name.to_snake_case() == field_name).then(|| member.target.clone())
-            })
-            .with_context(|| format!("Smithy struct or union `{target}` has no such member"));
-    }
+    let members = match model.get_shape(target) {
+        Some(Shape::Structure(structure)) => &structure.members,
+        Some(Shape::Union(union)) => &union.members,
+        Some(
+            Shape::Service(..)
+            | Shape::Operation(..)
+            | Shape::List(..)
+            | Shape::Map(..)
+            | Shape::Enum(..)
+            | Shape::IntEnum(..)
+            | Shape::String(..)
+            | Shape::Boolean(..)
+            | Shape::Integer(..)
+            | Shape::Long(..)
+            | Shape::Float(..)
+            | Shape::Double(..)
+            | Shape::Blob(..)
+            | Shape::Timestamp(..)
+            | Shape::Document(..)
+            | Shape::Resource(..),
+        ) => anyhow::bail!("Smithy shape `{target}` is not a structure or union"),
+        None => anyhow::bail!("Smithy shape `{target}` does not exist"),
+    };
+    members
+        .iter()
+        .find_map(|(name, member)| {
+            (name.to_snake_case() == field_name).then(|| member.target.clone())
+        })
+        .with_context(|| format!("Smithy struct or union `{target}` has no field `{field_name}`"))
 }
 
 /// Discover the semantic representation of a type used in markdown docs.
@@ -7413,7 +7447,7 @@ fn discover_markdown_type(
     resource_name: &str,
     target: &str,
     field_name: &str,
-    heading_path: &[String],
+    heading_path: &HeadingPath,
     property_path: &str,
     enum_namespace: &str,
     type_overrides: &HashMap<&str, &str>,
@@ -7635,7 +7669,7 @@ fn discover_markdown_type(
                     resource_name,
                     &list_shape.member.target,
                     field_name,
-                    heading_path,
+                    &heading_path.child(TypeEdge::Item),
                     &kms_references::property_path(property_path, PathSegment::ListElement),
                     enum_namespace,
                     type_overrides,
@@ -7685,7 +7719,7 @@ fn discover_markdown_type(
                     resource_name,
                     &map_shape.value.target,
                     field_name,
-                    heading_path,
+                    &heading_path.child(TypeEdge::Value),
                     &kms_references::property_path(property_path, PathSegment::MapValue),
                     enum_namespace,
                     type_overrides,
@@ -7765,7 +7799,7 @@ fn discover_markdown_type(
             let child_enum_namespace = format!("{enum_namespace}.{shape_name}");
             let key = MarkdownStructKey {
                 namespace: child_enum_namespace.clone(),
-                heading_path: heading_path.to_vec(),
+                heading_path: heading_path.clone(),
                 source: MarkdownStructSource::Smithy(target.to_string()),
             };
             if !struct_defs.contains_key(&key) {
@@ -7774,8 +7808,8 @@ fn discover_markdown_type(
                     .members
                     .iter()
                     .map(|(name, member_ref)| {
-                        let mut child_heading_path = heading_path.to_vec();
-                        child_heading_path.push(name.to_snake_case());
+                        let child_heading_path =
+                            heading_path.child(TypeEdge::Field(&name.to_snake_case()));
                         let field_type = discover_markdown_type(
                             model,
                             resource_name,
@@ -7903,14 +7937,14 @@ fn register_markdown_enum(
     source: MarkdownEnumSource,
     prop_name: &str,
     type_name: &str,
-    heading_path: &[String],
+    heading_path: &HeadingPath,
     namespace: &str,
     values: Vec<String>,
     all_enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
 ) -> MarkdownEnumKey {
     let key = MarkdownEnumKey {
         namespace: namespace.to_string(),
-        heading_path: heading_path.to_vec(),
+        heading_path: heading_path.clone(),
         source,
     };
     all_enums
@@ -9344,7 +9378,7 @@ mod tests {
         );
         let display = discover_markdown_attribute_type(
             &attr_type,
-            &["entries".to_string()],
+            &HeadingPath::root("entries"),
             "aws.test.MapLength",
             &mut BTreeMap::new(),
             &mut MarkdownTypes::default(),
@@ -9515,7 +9549,7 @@ mod tests {
             "test.Fixture",
             "test#Unbounded",
             "Count",
-            &["count".into()],
+            &HeadingPath::root("count"),
             "count",
             "aws.test.Fixture",
             &HashMap::new(),
@@ -9889,7 +9923,7 @@ mod tests {
         assert_eq!(arn.type_code, "super::arn()");
         let schema_display = discover_markdown_override(
             &arn.type_code,
-            &["arn".to_string()],
+            &HeadingPath::root("arn"),
             "aws.s3.Bucket",
             &mut BTreeMap::new(),
             &mut MarkdownTypes::default(),
@@ -10658,7 +10692,7 @@ mod tests {
     fn markdown_struct_field_groups_lifecycle_filter_uses_the_declared_type() {
         let markdown = lifecycle_markdown_fixture();
         let filter = markdown
-            .split("### rules.filter\n")
+            .split("### rules[].filter\n")
             .nth(1)
             .expect("the lifecycle filter must have a field table")
             .split("\n### ")
@@ -10702,7 +10736,7 @@ mod tests {
             let mut structs = MarkdownTypes::default();
             let ty = discover_markdown_attribute_type(
                 &attr_type,
-                &["choices".to_string()],
+                &HeadingPath::root("choices"),
                 "aws.test",
                 &mut enums,
                 &mut structs,
@@ -10740,7 +10774,7 @@ mod tests {
         let mut structs = MarkdownTypes::default();
         discover_markdown_attribute_type(
             &ty,
-            &["target".to_string()],
+            &HeadingPath::root("target"),
             "aws.test",
             &mut enums,
             &mut structs,
@@ -10868,7 +10902,7 @@ mod tests {
             &markdown_data_source_example(source.name),
         )
         .expect("data source struct docs");
-        assert!(markdown.contains("### rules.filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`.\n\n| Field | Type |"), "{markdown}");
+        assert!(markdown.contains("### rules[].filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`.\n\n| Field | Type |"), "{markdown}");
         carina_docgen::check_page(&markdown).expect("valid data source field-group docs");
     }
 
@@ -10888,7 +10922,7 @@ mod tests {
             &markdown_data_source_example(source.name),
         )
         .expect("data source input docs");
-        assert!(markdown.contains("### rules.filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`."), "{markdown}");
+        assert!(markdown.contains("### rules[].filter\n\n**Field groups:**\n\n- At most one of: `prefix`, `tag`, `object_size_greater_than`, `object_size_less_than`, `and`."), "{markdown}");
         carina_docgen::check_page(&markdown).expect("valid input field-group docs");
     }
 
@@ -12520,7 +12554,7 @@ mod tests {
         let mut structs = MarkdownTypes::default();
         let display = discover_markdown_override(
             "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
-            &["zone".to_string()],
+            &HeadingPath::root("zone"),
             "aws.test",
             &mut enums,
             &mut structs,
@@ -12565,7 +12599,7 @@ mod tests {
         let mut structs = MarkdownTypes::default();
         let display = discover_markdown_attribute_type(
             &ty,
-            &["choice".to_string()],
+            &HeadingPath::root("choice"),
             "aws.test",
             &mut enums,
             &mut structs,
@@ -12593,7 +12627,7 @@ mod tests {
         let mut structs = MarkdownTypes::default();
         let display = discover_markdown_override(
             "AttributeType::union(vec![AttributeType::map(AttributeType::union(vec![super::route53_hosted_zone_id(), AttributeType::bool()])), super::cloudfront_hosted_zone_id()])",
-            &["zone".to_string()],
+            &HeadingPath::root("zone"),
             "aws.test",
             &mut enums,
             &mut structs,
@@ -12613,7 +12647,7 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown.contains("- Map\\<`String`, [Union(Zone)](#zone-union--awstest)\\>"),
+            markdown.contains("- Map\\<`String`, [Union(Zone)](#zonekey-union)\\>"),
             "{markdown}"
         );
         assert!(markdown.contains("- `Bool`\n"), "{markdown}");
@@ -13760,6 +13794,378 @@ mod tests {
     }
 
     #[test]
+    fn markdown_smithy_collection_headings_preserve_every_hop() {
+        let model = carina_smithy::parse(r##"{
+            "smithy": "2.0", "shapes": {
+                "test#Tags": {"type":"map", "key":{"target":"smithy.api#String"}, "value":{"target":"test#Outer"}},
+                "test#Outer": {"type":"list", "member":{"target":"test#Inner"}},
+                "test#Inner": {"type":"list", "member":{"target":"test#Entry"}},
+                "test#Entry": {"type":"structure", "members":{"Value":{"target":"test#Kind"}}},
+                "test#Kind": {"type":"enum", "members":{"A":{"target":"smithy.api#Unit", "traits":{"smithy.api#enumValue":"A"}}}}
+            }
+        }"##).unwrap();
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let display = discover_markdown_type(
+            &model,
+            "test.Fixture",
+            "test#Tags",
+            "Tags",
+            &HeadingPath::root("tags"),
+            "tags",
+            "aws.test",
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            &mut enums,
+            &mut structs,
+            &mut HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            structs.keys().next().unwrap().heading_path.to_string(),
+            "tags['<key>'][][]"
+        );
+        assert_eq!(
+            enums.keys().next().unwrap().heading_path.to_string(),
+            "tags['<key>'][][].value"
+        );
+        let roots = HashMap::from([("tags".into(), "test#Tags".into())]);
+        validate_markdown_heading_paths(
+            &model,
+            &roots,
+            structs.keys().map(|key| &key.heading_path),
+        )
+        .unwrap();
+        validate_markdown_heading_paths(&model, &roots, enums.keys().map(|key| &key.heading_path))
+            .unwrap();
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().unwrap();
+        assert!(markdown.contains("[Struct(Entry)](#tagskey)"), "{markdown}");
+        assert!(
+            markdown.contains("[Value](#tagskeyvalue-value)"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_heading_validation_requires_explicit_collection_hops() {
+        let model = markdown_read_shape_override_model();
+        let roots = HashMap::from([(
+            "renewal_summary".into(),
+            "com.amazonaws.acm#RenewalSummary".into(),
+        )]);
+        let list = HeadingPath::root("renewal_summary")
+            .child(TypeEdge::Field("domain_validation_options"));
+        let omitted = list.child(TypeEdge::Field("resource_record"));
+        assert!(validate_markdown_heading_paths(&model, &roots, [&omitted]).is_err());
+        let wrong_kind = list.child(TypeEdge::Value);
+        assert!(validate_markdown_heading_paths(&model, &roots, [&wrong_kind]).is_err());
+    }
+
+    #[test]
+    fn markdown_heading_validation_rejects_union_member_hops() {
+        let model = markdown_read_shape_override_model();
+        let roots = HashMap::from([(
+            "renewal_summary".into(),
+            "com.amazonaws.acm#RenewalSummary".into(),
+        )]);
+        let path = HeadingPath::root("renewal_summary")
+            .child(TypeEdge::Field("domain_validation_options"))
+            .child(TypeEdge::Item)
+            .child(TypeEdge::Member(0))
+            .child(TypeEdge::Field("resource_record"))
+            .child(TypeEdge::Field("type"));
+        let error = validate_markdown_heading_paths(&model, &roots, [&path])
+            .expect_err("Smithy heading paths cannot contain identity-only union members");
+        assert!(
+            error.to_string().contains(&format!("`{path}`")),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains("union-member hop"), "{error:#}");
+    }
+
+    #[test]
+    fn markdown_attribute_map_keys_have_distinct_heading_anchors() {
+        let ty = AttributeType::refined_map(
+            markdown_test_enum("Kind", "A"),
+            markdown_test_enum("Kind", "B"),
+            None,
+        );
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let display = discover_markdown_attribute_type(
+            &ty,
+            &HeadingPath::root("tags"),
+            "aws.test",
+            &mut enums,
+            &mut structs,
+            None,
+        )
+        .unwrap();
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().unwrap();
+        for link in ["[Kind](#tags-keys-kind)", "[Kind](#tagskey-kind)"] {
+            assert!(markdown.contains(link), "{markdown}");
+        }
+        assert!(markdown.contains("### tags keys (Kind)\n"), "{markdown}");
+        assert!(
+            markdown.contains("### tags['\\<key\\>'] (Kind)\n"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_s3_bucket_policy_pins_condition_key_heading() {
+        let resource = resource_defs::s3_resources()
+            .into_iter()
+            .find(|resource| resource.name == "s3.BucketPolicy")
+            .unwrap();
+        let model = carina_smithy::parse(
+            r##"{
+              "smithy": "2.0", "shapes": {
+                "com.amazonaws.s3#PutBucketPolicy": {
+                  "type": "operation", "input": {"target": "com.amazonaws.s3#PutBucketPolicyRequest"}
+                },
+                "com.amazonaws.s3#PutBucketPolicyRequest": {
+                  "type": "structure", "members": {
+                    "Bucket": {"target": "smithy.api#String"},
+                    "Policy": {"target": "smithy.api#String"}
+                  }
+                }
+              }
+            }"##,
+        ).unwrap();
+        let markdown = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        let headings: HashMap<_, _> = markdown
+            .lines()
+            .filter(|line| line.starts_with('#'))
+            .zip(carina_docgen::heading_ids(&markdown))
+            .collect();
+        let key_anchor = headings
+            .get("### policy.statement[].condition keys (ConditionOperator)")
+            .expect("generated condition key heading");
+        let value_anchor = headings
+            .get("### policy.statement[].condition['\\<key\\>']['\\<key\\>'] union")
+            .expect("generated condition value heading");
+        assert_eq!(
+            key_anchor,
+            "policystatementcondition-keys-conditionoperator"
+        );
+        assert!(
+            markdown.contains(&format!("[ConditionOperator](#{key_anchor})")),
+            "{markdown}"
+        );
+        assert_ne!(key_anchor, value_anchor);
+    }
+
+    #[test]
+    fn markdown_map_heading_slug_collisions_use_claim_unique_heading() {
+        let ty = AttributeType::struct_(
+            "Fixture",
+            vec![
+                StructField::optional(
+                    "tags",
+                    AttributeType::map(AttributeType::struct_(
+                        "Entry",
+                        vec![
+                            StructField::optional(
+                                "value",
+                                AttributeType::struct_("Value", Vec::new()),
+                            )
+                            .build(),
+                        ],
+                    )),
+                )
+                .build(),
+                StructField::optional("tagskeyvalue", AttributeType::struct_("Flat", Vec::new()))
+                    .build(),
+            ],
+        );
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let display = discover_markdown_attribute_type(
+            &ty,
+            &HeadingPath::root("fixture"),
+            "aws.test",
+            &mut enums,
+            &mut structs,
+            None,
+        )
+        .unwrap();
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        let markdown = page.finish().unwrap();
+        assert!(
+            markdown.contains("### fixture.tags['\\<key\\>'].value\n"),
+            "{markdown}"
+        );
+        assert!(
+            markdown
+                .contains("### fixture.tagskeyvalue — aws.test.Fixture.Flat AttributeType:Flat\n"),
+            "{markdown}"
+        );
+        for link in [
+            "[Struct(Value)](#fixturetagskeyvalue)",
+            "[Struct(Flat)](#fixturetagskeyvalue--awstestfixtureflat-attributetypeflat)",
+        ] {
+            assert!(markdown.contains(link), "{markdown}");
+        }
+        let ids = carina_docgen::heading_ids(&markdown);
+        assert!(ids.contains(&"fixturetagskeyvalue".into()), "{markdown}");
+        assert!(
+            ids.contains(&"fixturetagskeyvalue--awstestfixtureflat-attributetypeflat".into()),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_acm_headings_preserve_list_element_hops() {
+        let resource = resource_defs::acm_resources().remove(0);
+        let markdown = generate_markdown_resource(
+            &resource,
+            &markdown_read_shape_override_model(),
+            &markdown_resource_example(resource.name),
+        )
+        .unwrap();
+        for heading in [
+            "domain_validation_options[]",
+            "domain_validation_options[].resource_record",
+            "domain_validation_options[].resource_record.type (ResourceRecordType)",
+            "renewal_summary.domain_validation_options[]",
+            "renewal_summary.domain_validation_options[].resource_record",
+            "renewal_summary.domain_validation_options[].resource_record.type (ResourceRecordType)",
+        ] {
+            assert!(
+                markdown
+                    .lines()
+                    .any(|line| line == format!("### {heading}")),
+                "missing heading: {heading}"
+            );
+        }
+    }
+
+    fn markdown_union_member_definitions(members: Vec<AttributeType>) -> Result<String> {
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let ty = AttributeType::union(members);
+        let display = discover_markdown_attribute_type(
+            &ty,
+            &HeadingPath::root("choice"),
+            "aws.test",
+            &mut enums,
+            &mut structs,
+            None,
+        )?;
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new())?;
+        Ok(page.finish()?)
+    }
+
+    fn markdown_test_enum(name: &str, value: &str) -> AttributeType {
+        AttributeType::enum_(
+            TypeIdentity::bare(name),
+            Some(vec![value.into()]),
+            Vec::new(),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn markdown_union_enum_headings_use_member_type_names() {
+        let markdown = markdown_union_member_definitions(vec![
+            markdown_test_enum("EnumA", "A"),
+            markdown_test_enum("EnumB", "B"),
+        ])
+        .unwrap();
+        for heading in ["choice (EnumA)", "choice (EnumB)"] {
+            assert!(
+                markdown
+                    .lines()
+                    .any(|line| line == format!("### {heading}")),
+                "{markdown}"
+            );
+        }
+        assert!(markdown.contains("[EnumA](#choice-enuma)"), "{markdown}");
+        assert!(markdown.contains("[EnumB](#choice-enumb)"), "{markdown}");
+    }
+
+    #[test]
+    fn markdown_union_struct_headings_use_member_type_names() {
+        let markdown = markdown_union_member_definitions(vec![
+            AttributeType::struct_("StructA", Vec::new()),
+            AttributeType::struct_("StructB", Vec::new()),
+        ])
+        .unwrap();
+        for heading in ["choice (StructA)", "choice (StructB)"] {
+            assert!(
+                markdown
+                    .lines()
+                    .any(|line| line == format!("### {heading}")),
+                "{markdown}"
+            );
+        }
+        assert!(
+            markdown.contains("[Struct(StructA)](#choice-structa)"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("[Struct(StructB)](#choice-structb)"),
+            "{markdown}"
+        );
+    }
+
+    #[test]
+    fn markdown_union_rejects_ambiguous_enum_type_names() {
+        let error = markdown_union_member_definitions(vec![
+            markdown_test_enum("Same", "A"),
+            markdown_test_enum("Same", "B"),
+        ])
+        .expect_err("same path and type name cannot distinguish union members");
+        assert!(
+            matches!(
+                error.downcast_ref::<DocgenError>(),
+                Some(DocgenError::AmbiguousUnionHeading { path, type_name })
+                    if path.to_string() == "choice" && type_name == "Same"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn markdown_union_rejects_ambiguous_struct_type_names() {
+        let error = markdown_union_member_definitions(vec![
+            AttributeType::struct_("Same", Vec::new()),
+            AttributeType::struct_("Same", Vec::new()),
+        ])
+        .expect_err("same path and type name cannot distinguish union members");
+        assert!(
+            matches!(
+                error.downcast_ref::<DocgenError>(),
+                Some(DocgenError::AmbiguousUnionHeading { path, type_name })
+                    if path.to_string() == "choice" && type_name == "Same"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn markdown_acm_headings_use_dsl_field_paths() {
         let resource = resource_defs::acm_resources()
             .into_iter()
@@ -13773,10 +14179,10 @@ mod tests {
         .expect("generate certificate markdown");
 
         for heading in [
-            "### domain_validation_options.resource_record.type (ResourceRecordType)",
+            "### domain_validation_options[].resource_record.type (ResourceRecordType)",
             "### `options`",
-            "### domain_validation_options",
-            "### renewal_summary.domain_validation_options",
+            "### domain_validation_options[]",
+            "### renewal_summary.domain_validation_options[]",
         ] {
             assert!(markdown.contains(heading), "missing {heading}:\n{markdown}");
         }
@@ -13935,25 +14341,21 @@ mod tests {
             "renewal_summary".to_string(),
             "com.amazonaws.acm#RenewalSummary".to_string(),
         )]);
-        let valid = [
-            "renewal_summary",
-            "domain_validation_options",
-            "resource_record",
-            "type",
-        ]
-        .map(str::to_string);
+        let valid = HeadingPath::root("renewal_summary")
+            .child(TypeEdge::Field("domain_validation_options"))
+            .child(TypeEdge::Item)
+            .child(TypeEdge::Field("resource_record"))
+            .child(TypeEdge::Field("type"));
 
-        validate_markdown_heading_paths(&model, &root_targets, [valid.as_slice()])
+        validate_markdown_heading_paths(&model, &root_targets, [&valid])
             .expect("every qualified heading segment is a schema field");
 
-        let invalid = [
-            "renewal_summary",
-            "domain_validation",
-            "resource_record",
-            "type",
-        ]
-        .map(str::to_string);
-        let error = validate_markdown_heading_paths(&model, &root_targets, [invalid.as_slice()])
+        let invalid = HeadingPath::root("renewal_summary")
+            .child(TypeEdge::Field("domain_validation"))
+            .child(TypeEdge::Item)
+            .child(TypeEdge::Field("resource_record"))
+            .child(TypeEdge::Field("type"));
+        let error = validate_markdown_heading_paths(&model, &root_targets, [&invalid])
             .expect_err("a Smithy shape name is not a DSL field path");
         assert!(error.to_string().contains("domain_validation"), "{error:#}");
     }
@@ -13986,7 +14388,7 @@ mod tests {
         let mut structs = MarkdownTypes::default();
         let display = discover_markdown_attribute_type(
             &attribute_type,
-            &["name".to_string()],
+            &HeadingPath::root("name"),
             "aws.test",
             &mut enums,
             &mut structs,
@@ -14000,7 +14402,7 @@ mod tests {
         page.push_str("\n");
         discover_markdown_attribute_type(
             &AttributeType::list(attribute_type),
-            &["names".to_string()],
+            &HeadingPath::root("names"),
             "aws.test",
             &mut enums,
             &mut structs,

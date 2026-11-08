@@ -2,6 +2,7 @@
 
 mod attribute_type;
 pub mod example;
+mod heading_path;
 mod type_display;
 
 pub use attribute_type::{
@@ -9,6 +10,7 @@ pub use attribute_type::{
     ScalarDoc, TypeDocHooks, TypeEdge, TypeRegistry, ValidationNote, list_display, map_display,
     render_attribute_type, render_field_groups, scalar_display,
 };
+pub use heading_path::{HeadingField, HeadingPath, MarkdownTypePosition};
 pub use type_display::TypeDisplay;
 use type_display::escape_literal_text;
 
@@ -69,7 +71,9 @@ impl Heading {
         }
         let marker = "#".repeat(usize::from(self.level));
         let content = match self.style {
-            HeadingStyle::Plain => self.content.clone(),
+            // A map path's <key> is literal text, not an HTML tag. Keep it
+            // visible so the registry computes the same slug as the builder.
+            HeadingStyle::Plain => self.content.replace('<', "\\<").replace('>', "\\>"),
             HeadingStyle::Code => render_code_span(&self.content, false, "heading")?,
         };
         Ok(format!("{marker} {content}"))
@@ -507,6 +511,11 @@ fn render_code_span(
 /// An error encountered while constructing or validating a generated page.
 #[derive(Debug, thiserror::Error)]
 pub enum DocgenError {
+    #[error("union members at heading path `{path}` share the type name `{type_name}`")]
+    AmbiguousUnionHeading {
+        path: HeadingPath,
+        type_name: String,
+    },
     #[error("{0}")]
     Build(String),
     #[error("{0}")]
@@ -886,3 +895,6 @@ pub fn heading_slug(text: &str) -> String {
 
 #[cfg(test)]
 mod type_display_tests;
+
+#[cfg(test)]
+mod heading_path_tests;
