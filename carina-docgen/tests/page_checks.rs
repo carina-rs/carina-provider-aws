@@ -443,7 +443,7 @@ fn type_display_pattern_is_literal_code() {
     let markdown = page
         .finish()
         .expect("regex is literal, not a Markdown link");
-    assert!(markdown.contains(&format!("`String (pattern: {pattern})`")));
+    assert!(markdown.contains(&format!("`String (pattern: /{pattern}/ (Full))`")));
     check_page(&markdown).expect("the rendered pattern passes page validation");
 }
 
@@ -478,7 +478,7 @@ fn map_length_type_display_keeps_key_constraints_and_value_links() {
         .unwrap();
     let markdown = page.finish().unwrap();
     assert!(
-        markdown.contains("`String (pattern: ^[a-z]+$, len: 1..=8)`"),
+        markdown.contains("`String (pattern: /^[a-z]+$/ (Full), len: 1..=8)`"),
         "{markdown}"
     );
     assert!(markdown.contains("[Struct(X)](#x)"), "{markdown}");
