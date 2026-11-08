@@ -182,6 +182,69 @@ fn pattern_spec_code(pattern: &PatternSpec) -> String {
     )
 }
 
+/// Serialize core's portable declarations without introducing provider-specific
+/// predicates or changing their scope, target, codes, or pattern semantics.
+fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
+    use carina_core::schema::{CharSet, InputPredicate, InputRuleScope, InputRuleTarget};
+
+    let charset = |set: &CharSet| {
+        format!(
+            "carina_core::schema::CharSet::new({:?}).expect(\"valid input character set\")",
+            set.ranges(),
+        )
+    };
+    let token = |value: &carina_core::schema::NonEmptyString| {
+        format!(
+            "carina_core::schema::NonEmptyString::new({:?}).expect(\"nonempty input token\")",
+            value.as_str(),
+        )
+    };
+    let scope = match rule.scope() {
+        InputRuleScope::CreateOnly => "CreateOnly",
+        InputRuleScope::EveryWrite => "EveryWrite",
+    };
+    let target = match rule.target() {
+        InputRuleTarget::Value(_) => "Value",
+        InputRuleTarget::MapKeys(_) => "MapKeys",
+    };
+    let predicate = match rule.predicate() {
+        InputPredicate::Length { min, max } => format!("Length {{ min: {min:?}, max: {max:?} }}"),
+        InputPredicate::AllowedChars(set) => format!("AllowedChars({})", charset(set)),
+        InputPredicate::FirstChar(set) => format!("FirstChar({})", charset(set)),
+        InputPredicate::LastChar(set) => format!("LastChar({})", charset(set)),
+        InputPredicate::NoSubstring(value) => format!("NoSubstring({})", token(value)),
+        InputPredicate::NoPrefix(value) => format!("NoPrefix({})", token(value)),
+        InputPredicate::ForbiddenPrefix {
+            prefix,
+            ignore_ascii_case,
+        } => format!(
+            "ForbiddenPrefix {{ prefix: {}, ignore_ascii_case: {ignore_ascii_case} }}",
+            token(prefix),
+        ),
+        InputPredicate::NoSuffix(value) => format!("NoSuffix({})", token(value)),
+        InputPredicate::NoAdjacent { left, right } => format!(
+            "NoAdjacent {{ left: {}, right: {} }}",
+            charset(left),
+            charset(right),
+        ),
+        InputPredicate::NotIpv4 => "NotIpv4".to_string(),
+        InputPredicate::Matches(pattern) => format!("Matches({})", pattern_spec_code(pattern)),
+        InputPredicate::NotMatches(pattern) => {
+            format!("NotMatches({})", pattern_spec_code(pattern))
+        }
+    };
+    format!(
+        "carina_core::schema::InputRule::new(\
+         carina_core::schema::InputRuleScope::{scope}, \
+         carina_core::schema::InputRuleTarget::{target}(\
+         carina_core::schema::InputPath::new({:?}).expect(\"valid input path\")), \
+         carina_core::schema::InputRuleCode::new({:?}).expect(\"valid input rule code\"), \
+         carina_core::schema::InputPredicate::{predicate})",
+        rule.path().as_str(),
+        rule.code().as_str(),
+    )
+}
+
 /// Anonymous strings share their Rust literal encoding and schema metadata.
 fn string_refinement(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> ValueTypeOverride {
     let pattern_code = pattern.map_or_else(
@@ -2655,6 +2718,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
              \x20       )\n",
             Description::authored("The tags for the resource.").rust_string_literal(None)
         ));
+    }
+
+    for rule in &res.input_rules {
+        code.push_str(&format!("        .input_rule({})\n", input_rule_code(rule)));
     }
 
     // Tags validator
@@ -9075,6 +9142,36 @@ fn cf_type_name(resource_name: &str) -> &'static str {
 mod tests {
 
     #[test]
+    fn resource_input_rules_are_emitted_generically() {
+        use carina_core::schema::{
+            InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope,
+        };
+
+        let model = string_fixture_model(&[("Description", true)], &[("Description", true)]);
+        let mut resource = provider_fixture_resource("iam.Role", "", &["Description"], vec![]);
+        let baseline = generate_resource(&resource, &model).unwrap();
+        assert!(!baseline.contains(".input_rule("));
+        resource.input_rules.push(InputRule::value(
+            InputRuleScope::EveryWrite,
+            InputPath::new("description").unwrap(),
+            InputRuleCode::new("test.description.pattern").unwrap(),
+            InputPredicate::NotMatches(PatternSpec::new(r"^path\\secret$", PatternMatch::Full)),
+        ));
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert_eq!(generated.matches(".input_rule(").count(), 1, "{generated}");
+        for expected in [
+            "InputRuleScope::EveryWrite",
+            "InputRuleTarget::Value",
+            "InputPath::new(\"description\")",
+            "InputRuleCode::new(\"test.description.pattern\")",
+            "InputPredicate::NotMatches",
+            r#"PatternSpec::new("^path\\\\secret$", carina_core::schema::PatternMatch::Full)"#,
+        ] {
+            assert!(generated.contains(expected), "{expected}: {generated}");
+        }
+    }
+
+    #[test]
     fn map_length_tag_strings_preserve_literal_backslashes() {
         let model = carina_smithy::parse(r##"{
             "smithy":"2.0", "shapes": {
@@ -11625,6 +11722,7 @@ mod tests {
         derived_attributes: Vec<resource_defs::DerivedAttribute>,
     ) -> ResourceDef {
         ResourceDef {
+            input_rules: vec![],
             read_back: resource_defs::ReadBackOverrides::default(),
             name,
             replacement: ReplacementClass::Conflicting,
@@ -11695,6 +11793,7 @@ mod tests {
 
     fn enum_fixture_resource() -> ResourceDef {
         ResourceDef {
+            input_rules: vec![],
             read_back: resource_defs::ReadBackOverrides::default(),
             // Use a registered resource name because generate_resource also
             // emits the provider's closed CloudFormation type mapping.
@@ -13256,6 +13355,7 @@ mod tests {
         source: resource_defs::DerivedSource,
     ) -> ResourceDef {
         ResourceDef {
+            input_rules: vec![],
             read_back: resource_defs::ReadBackOverrides::default(),
             name: "ec2.FromStructFixture",
             // Synthetic fixture does not exercise replacement behavior.
@@ -15575,6 +15675,7 @@ mod tests {
         )
         .expect("parse email type fixture model");
         let resource = ResourceDef {
+            input_rules: vec![],
             read_back: resource_defs::ReadBackOverrides::default(),
             // Use a registered resource name because generate_resource also
             // emits the provider's closed CloudFormation type mapping.
