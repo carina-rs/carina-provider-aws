@@ -59,14 +59,14 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_format", AttributeType::refined_string(None, Some("^\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\}(?: +\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\})*\\z".to_string()), None, None))
+            AttributeSchema::optional("log_format", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\}(?: +\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\})*\\z", carina_core::schema::PatternMatch::Full)), None, None))
                 .create_only()
                 .with_description("The fields to include in the flow log record. List the fields in the order in which they should appear. If you omit this parameter, the flow log is cr...")
                 .with_provider_name("LogFormat")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_group_name", AttributeType::refined_string(None, Some("^[.\\-_/#A-Za-z0-9]{1,512}\\z".to_string()), Some((Some(1), Some(512))), None))
+            AttributeSchema::optional("log_group_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]{1,512}\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(512))), None))
                 .create_only()
                 .with_description("The name of a new or existing CloudWatch Logs log group where Amazon EC2 publishes your flow logs. This parameter is valid only if the destination typ...")
                 .with_provider_name("LogGroupName")
@@ -110,7 +110,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
     None,
     None,
 )).with_description("The resource type for the tag keys associated with the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("ResourceType").build(),
-                    StructField::optional("tag_keys", AttributeType::refined_list(AttributeType::refined_string(None, Some("(?s)^.{1,128}\\z".to_string()), Some((Some(1), Some(128))), None), true, Some((Some(1), Some(2))), carina_core::schema::ListElements::AllowDuplicates)).with_description("The tag keys on your tagged resources to be displayed by the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("TagKeys").build()
+                    StructField::optional("tag_keys", AttributeType::refined_list(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("(?s)^.{1,128}\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(128))), None), true, Some((Some(1), Some(2))), carina_core::schema::ListElements::AllowDuplicates)).with_description("The tag keys on your tagged resources to be displayed by the Flow Logs Amazon EC2 Tags feature fields in your custom log format.").with_provider_name("TagKeys").build()
                     ],
                 ), true, Some((Some(1), Some(3))), carina_core::schema::ListElements::AllowDuplicates))
                 .create_only()

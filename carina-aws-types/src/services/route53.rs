@@ -1,4 +1,5 @@
 use carina_core::schema::AttributeType;
+use carina_core::schema::{PatternMatch, PatternSpec};
 
 /// AWS DNS-name refinement shared by Route 53 inputs and ACM validation CNAMEs.
 /// Labels allow underscores, printable ASCII and octal-escaped bytes; an escape
@@ -14,7 +15,10 @@ use carina_core::schema::AttributeType;
 pub fn route53_dns_name() -> AttributeType {
     AttributeType::refined_string(
         None,
-        Some(r"^(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63}(?:\.(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63})*\.?\z".to_string()),
+        Some(PatternSpec::new(
+            r"^(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63}(?:\.(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63})*\.?\z",
+            PatternMatch::Full,
+        )),
         Some((Some(1), Some(1024))),
         None,
     )

@@ -9,17 +9,20 @@ use carina_aws_types::sdk::s3::types::{
     BucketVersioningStatus, DefaultRetention, ObjectLockConfiguration, ObjectLockRetentionMode,
     ObjectLockRule, VersioningConfiguration,
 };
+use carina_core::executor::delete_permit_for_test;
 use carina_core::provider::{
-    AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, DeleteRequest, NoopNormalizer,
-    Provider, ProviderDirectiveSchema, ProviderError, ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateRequest, HostCreateFailure as CreateFailure,
+    HostCreateOutcome as CreateOutcome, NoopNormalizer, Provider, ReadRequest, UpdateRequest,
 };
-use carina_core::replacement::create_permit_for_test;
+use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
     ConcreteValue, Directives, Resource, ResourceIdentity, ResourceIdentityError, SnapshotState,
     Value,
 };
+use carina_core::schema::SchemaRegistry;
 use carina_provider_aws::{AwsProvider, BoundedSdkConfig};
 use indexmap::IndexMap;
+use std::sync::Arc;
 use winterbaume_core::MockAws;
 use winterbaume_s3::S3Service;
 
@@ -30,29 +33,25 @@ fn applied_identifier(value: &str) -> AppliedIdentifier {
     AppliedIdentifier::new(value).expect("test provider identifier must be non-empty")
 }
 
-fn delete_request() -> DeleteRequest {
-    DeleteRequest::resolve(&Directives::default(), ProviderDirectiveSchema::Unavailable)
-}
-
-fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
-    AwsProvider::from_sdk_config(
+fn provider_from_config(sdk_config: aws_types::SdkConfig) -> Arc<AwsProvider> {
+    Arc::new(AwsProvider::from_sdk_config(
         TEST_REGION.to_string(),
         vec![],
         vec![],
         &BoundedSdkConfig::for_test(sdk_config),
-    )
+    ))
 }
 
 // The guarded facade also stages winterbaume prerequisites. Its conservative
 // lookup never grants resend permission to a possibly sent setup operation.
-async fn provider_with_s3() -> (AwsProvider, S3Client) {
+async fn provider_with_s3() -> (Arc<AwsProvider>, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
     let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
     (provider_from_config(sdk_config), s3_client)
 }
 
-async fn provider_without_services() -> AwsProvider {
+async fn provider_without_services() -> Arc<AwsProvider> {
     let mock = MockAws::builder().build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
     provider_from_config(sdk_config)
@@ -140,16 +139,21 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 }
 
 async fn create_outcome_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(provider)),
+        Box::new(carina_provider_aws::AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
     let (create, _cancellation) =
-        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
+        carina_core::executor::dispatch_create(&boundary, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
@@ -243,7 +247,7 @@ fn object_lock_resource(bucket: &str, rule: Option<Value>) -> Resource {
 }
 
 async fn create_object_lock(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     bucket: &str,
     rule: Option<Value>,
 ) -> SnapshotState {
@@ -566,7 +570,10 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
         };
 
         assert!(
-            matches!(error.provider_error(), ProviderError::InvalidInput(_)),
+            matches!(
+                error.provider_error(),
+                carina_core::provider::HostError::InvalidInput(_)
+            ),
             "{case}: expected InvalidInput, got {error:?}"
         );
         assert_eq!(
@@ -583,10 +590,22 @@ async fn destroy_succeeds_when_no_s3_service_is_registered() {
     let bucket = "carina-object-lock-no-api-delete";
     let id = object_lock_resource(bucket, None).id;
 
-    provider
-        .delete(&id, &applied_identifier(bucket), delete_request())
-        .await
-        .expect("destroy must be a local state-only operation");
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(&provider)),
+        Box::new(carina_provider_aws::AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
+    carina_core::executor::dispatch_delete(
+        &boundary,
+        delete_permit_for_test(
+            id.clone(),
+            applied_identifier(bucket),
+            Directives::default(),
+        ),
+        &SchemaRegistry::new(),
+    )
+    .await
+    .expect("destroy must be a local state-only operation");
 }
 
 #[tokio::test]
@@ -602,10 +621,22 @@ async fn destroy_preserves_remote_configuration_for_later_read() {
     )
     .await;
 
-    provider
-        .delete(&created.id, &applied_identifier(bucket), delete_request())
-        .await
-        .expect("Object Lock destroy should be a no-op");
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(&provider)),
+        Box::new(carina_provider_aws::AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
+    carina_core::executor::dispatch_delete(
+        &boundary,
+        delete_permit_for_test(
+            created.id.clone(),
+            applied_identifier(bucket),
+            Directives::default(),
+        ),
+        &SchemaRegistry::new(),
+    )
+    .await
+    .expect("Object Lock destroy should be a no-op");
     let reread = provider
         .read(&created.id, &applied_identifier(bucket), ReadRequest)
         .await
@@ -628,10 +659,22 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     )
     .await;
 
-    provider
-        .delete(&created.id, &applied_identifier(bucket), delete_request())
-        .await
-        .expect("Object Lock destroy should be a no-op");
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(&provider)),
+        Box::new(carina_provider_aws::AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
+    carina_core::executor::dispatch_delete(
+        &boundary,
+        delete_permit_for_test(
+            created.id.clone(),
+            applied_identifier(bucket),
+            Directives::default(),
+        ),
+        &SchemaRegistry::new(),
+    )
+    .await
+    .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
     let request = create_request_for_test(resource).await;
     let recreate = create_outcome_for_test(&provider, request).await;
@@ -690,17 +733,22 @@ async fn dropping_rule_is_an_in_place_update() {
         Some(retention_rule("GOVERNANCE", "days", 30)),
     )
     .await;
-    let id = created.id.clone();
     let mut desired = resource_from_state(&created);
     desired.attributes.shift_remove("rule");
     let changed_attributes = ["rule".to_string()];
     let request = update_request_for_test(desired, created, &changed_attributes).await;
 
-    let updated = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("dropping rule should update in place")
-        .into_state_for_writeback();
+    let updated = carina_core::executor::dispatch_update(
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(carina_provider_aws::AwsNormalizer),
+            &carina_provider_aws::schemas::schema_registry(),
+        ),
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("dropping rule should update in place")
+    .into_state_for_writeback();
 
     assert_enabled_without_rule(&updated);
 }
@@ -717,18 +765,23 @@ async fn retention_mode_and_period_update_in_place() {
         Some(retention_rule("GOVERNANCE", "days", 30)),
     )
     .await;
-    let id = created.id.clone();
     let replacement_rule = retention_rule("COMPLIANCE", "years", 1);
     let mut desired = resource_from_state(&created);
     desired.set_attr("rule", replacement_rule);
     let changed_attributes = ["rule".to_string()];
     let request = update_request_for_test(desired, created, &changed_attributes).await;
 
-    let updated = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("retention change should update in place")
-        .into_state_for_writeback();
+    let updated = carina_core::executor::dispatch_update(
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(carina_provider_aws::AwsNormalizer),
+            &carina_provider_aws::schemas::schema_registry(),
+        ),
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("retention change should update in place")
+    .into_state_for_writeback();
 
     assert_retention(&updated, "COMPLIANCE", "years", 1);
 }

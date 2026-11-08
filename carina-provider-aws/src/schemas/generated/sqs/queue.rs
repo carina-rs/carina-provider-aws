@@ -19,7 +19,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         .with_description("")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::required("queue_name", AttributeType::refined_string(None, Some("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z".to_string()), Some((Some(1), Some(80))), None))
+            AttributeSchema::required("queue_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(80))), None))
                 .create_only()
                 .identity()
                 .with_description("The name of the new queue. The following limits apply to this name: A queue name can have up to 80 characters. Valid values: alphanumeric characters, ...")

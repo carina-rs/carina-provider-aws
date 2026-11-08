@@ -286,7 +286,7 @@ where
     let aws_message = AwsServiceMessage::new(err.message().map(str::to_owned), &err);
     let request_id = err.request_id().map(str::to_owned);
     let transience = Transience::of(&err);
-    let cause = transience.caused_by(make_cause(aws_message, err));
+    let cause = make_cause(aws_message, err);
 
     let not_found = code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404);
     let mut pe = if append_outcome_unknown {
@@ -301,7 +301,8 @@ where
     } else {
         ProviderError::api_error_caused_by(context, cause)
     }
-    .with_operation(operation);
+    .with_operation(operation)
+    .with_transient(transience == Transience::Transient);
     if let Some(s) = status {
         pe = pe.with_status(s);
     }
@@ -354,7 +355,7 @@ mod tests {
     use carina_aws_types::sdk::iam::error::SdkError;
     use carina_aws_types::sdk::iam::operation::list_roles::ListRolesError;
     use carina_aws_types::sdk::iam::types::error::ServiceFailureException;
-    use carina_core::provider::ProviderError as CoreProviderError;
+    use carina_core::provider::HostError as CoreProviderError;
 
     fn list_roles_service_error_with_meta(
         status: u16,
@@ -409,6 +410,7 @@ mod tests {
             list_roles_service_error_with_meta(403, Some("AccessDenied"), Some(AWS_MESSAGE));
 
         let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -467,6 +469,7 @@ mod tests {
         let sdk_err = SdkError::service_error(inner, raw);
 
         let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let rendered = pe.to_string();
         assert_eq!(
             rendered.matches(AWS_MESSAGE).count(),
@@ -499,6 +502,7 @@ mod tests {
         let sdk_err: SdkError<ListRolesError> = SdkError::construction_failure("dns lookup failed");
 
         let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -522,6 +526,7 @@ mod tests {
         let sdk_err: SdkError<ListRolesError> = SdkError::timeout_error("response timed out");
 
         let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let rendered = pe.to_string();
 
         assert!(
@@ -543,6 +548,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to describe log groups", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
 
         assert_eq!(
             pe.detail().operation.as_deref(),
@@ -559,6 +565,7 @@ mod tests {
             carina_aws_types::sdk::ec2::error::SdkError::timeout_error("response timed out");
 
         let pe = api_error_with_meta("Failed to create VPC", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let rendered = pe.to_string();
 
         assert_eq!(pe.detail().context(), "Failed to create VPC");
@@ -589,6 +596,8 @@ mod tests {
         );
 
         let error = api_error_with_meta("Failed to create VPC", failure);
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         let rendered = error.to_string();
 
         assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
@@ -604,6 +613,7 @@ mod tests {
             carina_aws_types::sdk::ec2::error::SdkError::timeout_error("response timed out");
 
         let pe = api_error_with_meta("Failed to create NAT gateway", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
 
         assert_eq!(pe.detail().context(), "Failed to create NAT gateway");
         assert!(!pe.to_string().contains("may have been applied"));
@@ -621,6 +631,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to describe ACM certificate", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -642,6 +653,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to get IAM role", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -663,6 +675,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to describe security groups", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };
@@ -684,6 +697,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to list IAM roles", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::ApiError(detail) = &pe else {
             panic!("expected ApiError, got {:?}", pe);
         };
@@ -705,6 +719,7 @@ mod tests {
         );
 
         let pe = api_error_with_meta("Failed to head S3 bucket", sdk_err);
+        let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
         let CoreProviderError::NotFound(detail) = &pe else {
             panic!("expected NotFound, got {:?}", pe);
         };

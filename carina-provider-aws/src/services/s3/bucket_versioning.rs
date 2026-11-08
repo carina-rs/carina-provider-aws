@@ -289,6 +289,8 @@ mod tests {
         )
         .expect_err("unrelated InvalidBucketState must remain an error");
 
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(
             error.to_string().contains("another invalid bucket state"),
             "{error}"

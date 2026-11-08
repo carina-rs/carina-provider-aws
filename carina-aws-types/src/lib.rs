@@ -529,7 +529,10 @@ mod tests {
                 identity.map(|id| id.to_string()).as_deref(),
                 Some("aws.AccountId")
             );
-            assert_eq!(pattern, Some(r"^\d{12}$"));
+            assert_eq!(
+                pattern.map(carina_core::schema::PatternSpec::as_str),
+                Some(r"^\d{12}$")
+            );
             assert_eq!(length, Some((Some(12), Some(12))));
         } else {
             panic!("aws_account_id() should be refined String");
@@ -1744,7 +1747,10 @@ mod tests {
         else {
             panic!("expected refined String");
         };
-        assert_eq!(pattern, Some(r"^Z[A-Z0-9]+$"));
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some(r"^Z[A-Z0-9]+$")
+        );
         assert_eq!(length, Some((None, Some(32))));
 
         let schema = rootless(attr);

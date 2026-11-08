@@ -1327,7 +1327,7 @@ mod tests {
         raw: &str,
         key: QueueAttributeName,
         kind: AttrKind,
-        check: impl FnOnce(&SqsAttributeValueError),
+        check: fn(&carina_core::provider_text::ProviderCause<'_>),
     ) {
         let id = queue_resource().id;
         let attributes = HashMap::from([(key.clone(), raw.to_string())]);
@@ -1340,9 +1340,24 @@ mod tests {
             .unwrap()
             .downcast_ref::<SqsAttributeDecodeError>()
             .expect("typed SQS attribute decode error");
-        assert_eq!(decode.attribute, key);
+        let attribute_matches: fn(&SqsAttributeDecodeError) -> bool = match key {
+            QueueAttributeName::VisibilityTimeout => {
+                |error| error.attribute == QueueAttributeName::VisibilityTimeout
+            }
+            QueueAttributeName::FifoQueue => {
+                |error| error.attribute == QueueAttributeName::FifoQueue
+            }
+            QueueAttributeName::RedrivePolicy => {
+                |error| error.attribute == QueueAttributeName::RedrivePolicy
+            }
+            QueueAttributeName::RedriveAllowPolicy => {
+                |error| error.attribute == QueueAttributeName::RedriveAllowPolicy
+            }
+            other => panic!("unsupported decode-test attribute {other:?}"),
+        };
+        assert!(decode.matches_for_test(attribute_matches));
         check(
-            decode
+            &decode
                 .source()
                 .unwrap()
                 .downcast_ref::<SqsAttributeValueError>()
@@ -1363,8 +1378,11 @@ mod tests {
                 QueueAttributeName::VisibilityTimeout,
                 AttrKind::Int,
                 |error| {
-                    assert!(matches!(error, SqsAttributeValueError::Int(_)));
-                    assert!(error.source().unwrap().is::<std::num::ParseIntError>());
+                    assert!(error.matches_for_test::<SqsAttributeValueError>(|error| {
+                        assert!(matches!(error, SqsAttributeValueError::Int(_)));
+                        assert!(error.source().unwrap().is::<std::num::ParseIntError>());
+                        true
+                    }));
                 },
             );
         }
@@ -1378,8 +1396,11 @@ mod tests {
                 QueueAttributeName::FifoQueue,
                 AttrKind::Bool,
                 |error| {
-                    assert!(matches!(error, SqsAttributeValueError::Bool(_)));
-                    assert!(error.source().unwrap().is::<std::str::ParseBoolError>());
+                    assert!(error.matches_for_test::<SqsAttributeValueError>(|error| {
+                        assert!(matches!(error, SqsAttributeValueError::Bool(_)));
+                        assert!(error.source().unwrap().is::<std::str::ParseBoolError>());
+                        true
+                    }));
                 },
             );
         }
@@ -1399,8 +1420,11 @@ mod tests {
         ] {
             for raw in ["{", "1e999"] {
                 assert_attribute_decode_failure(raw, key.clone(), kind, |error| {
-                    assert!(matches!(error, SqsAttributeValueError::RedriveJson(_)));
-                    assert!(error.source().unwrap().is::<serde_json::Error>());
+                    assert!(error.matches_for_test::<SqsAttributeValueError>(|error| {
+                        assert!(matches!(error, SqsAttributeValueError::RedriveJson(_)));
+                        assert!(error.source().unwrap().is::<serde_json::Error>());
+                        true
+                    }));
                 });
             }
         }
@@ -1439,8 +1463,11 @@ mod tests {
         ] {
             for raw in inputs {
                 assert_attribute_decode_failure(raw, key.clone(), kind, |error| {
-                    assert!(matches!(error, SqsAttributeValueError::RedriveShape(_)));
-                    assert!(error.source().unwrap().is::<SqsRedriveShapeError>());
+                    assert!(error.matches_for_test::<SqsAttributeValueError>(|error| {
+                        assert!(matches!(error, SqsAttributeValueError::RedriveShape(_)));
+                        assert!(error.source().unwrap().is::<SqsRedriveShapeError>());
+                        true
+                    }));
                 });
             }
         }
@@ -1451,11 +1478,14 @@ mod tests {
                 QueueAttributeName::RedrivePolicy,
                 AttrKind::RedrivePolicyStruct,
                 |error| {
-                    let SqsAttributeValueError::RedriveShape(shape) = error else {
-                        panic!("expected a redrive shape error");
-                    };
-                    assert!(matches!(shape, SqsRedriveShapeError::MaxReceiveCount(_)));
-                    assert!(shape.source().unwrap().is::<std::num::ParseIntError>());
+                    assert!(error.matches_for_test::<SqsAttributeValueError>(|error| {
+                        let SqsAttributeValueError::RedriveShape(shape) = error else {
+                            panic!("expected a redrive shape error");
+                        };
+                        assert!(matches!(shape, SqsRedriveShapeError::MaxReceiveCount(_)));
+                        assert!(shape.source().unwrap().is::<std::num::ParseIntError>());
+                        true
+                    }));
                 },
             );
         }
@@ -1550,6 +1580,8 @@ mod tests {
                 AttrKind::IamPolicy,
             )
             .expect_err("an invalid policy must fail the read");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert_eq!(
                 error.detail().context(),
                 "Failed to decode SQS queue attribute"
@@ -1558,23 +1590,36 @@ mod tests {
             let decode = cause
                 .downcast_ref::<SqsAttributeDecodeError>()
                 .expect("typed SQS attribute decode error");
-            assert_eq!(decode.attribute, QueueAttributeName::Policy);
-            assert_eq!(
-                decode.to_string(),
-                "failed to decode SQS queue attribute Policy"
+            assert!(decode.matches_for_test::<SqsAttributeDecodeError>(
+                |error| error.attribute == QueueAttributeName::Policy
+            ));
+            assert!(
+                decode.matches_for_test::<SqsAttributeDecodeError>(|decode| {
+                    decode.to_string() == "failed to decode SQS queue attribute Policy"
+                })
             );
             let value_decode = decode
                 .source()
                 .expect("attribute value decode source")
                 .downcast_ref::<SqsAttributeValueError>()
                 .expect("typed attribute value decode error");
-            assert!(matches!(value_decode, SqsAttributeValueError::Policy(_)));
+            assert!(
+                value_decode.matches_for_test::<SqsAttributeValueError>(|error| matches!(
+                    error,
+                    SqsAttributeValueError::Policy(_)
+                ))
+            );
             let policy_decode = value_decode
                 .source()
                 .expect("policy decode source")
                 .downcast_ref::<IamPolicyDecodeError>()
                 .expect("typed policy decode error");
-            assert!(matches!(policy_decode, IamPolicyDecodeError::Json(_)));
+            assert!(
+                policy_decode.matches_for_test::<IamPolicyDecodeError>(|error| matches!(
+                    error,
+                    IamPolicyDecodeError::Json(_)
+                ))
+            );
             assert!(policy_decode.source().unwrap().is::<serde_json::Error>());
         }
     }
@@ -1718,6 +1763,8 @@ mod tests {
             let error = validate_sqs_queue_inputs(&desired.inputs())
                 .expect_err("known SQS conflicts must fail before send");
             assert!(matches!(error, ProviderError::InvalidInput(_)));
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(error.to_string().contains(message), "{error:?}");
             assert!(!error.to_string().contains("private-name"));
             assert!(!error.to_string().contains("arn:aws:sqs"));
@@ -1748,6 +1795,8 @@ mod tests {
             let error = validate_sqs_queue_update_inputs(&to)
                 .expect_err("updates must validate both historical and patched SQS inputs");
             assert!(matches!(error, ProviderError::InvalidInput(_)));
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(error.to_string().contains(message), "{error:?}");
             assert!(to.materialized_attributes().contains_key(name));
         }
@@ -2000,6 +2049,8 @@ mod tests {
 
             let error = validate_sqs_queue_update_inputs(&to)
                 .expect_err("a standard queue must reject the first known FIFO-only input");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(
                 error
                     .to_string()
@@ -2034,7 +2085,11 @@ mod tests {
             .cause()
             .and_then(|cause| cause.downcast_ref::<carina_core::resource::UnavailableSecretError>())
             .expect("consumed historical secrets must keep their typed error");
-        assert_eq!(cause.path(), "aws.sqs.Queue.test.deduplication_scope");
+        assert!(
+            cause.matches_for_test::<carina_core::resource::UnavailableSecretError>(|error| error
+                .path()
+                == "aws.sqs.Queue.test.deduplication_scope")
+        );
     }
 
     #[test]

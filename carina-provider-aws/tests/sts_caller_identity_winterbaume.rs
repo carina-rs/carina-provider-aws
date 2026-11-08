@@ -90,11 +90,13 @@ fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = carina_provider_aws::schemas::schema_registry();
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &[],
                 &schemas,
                 type_checks,

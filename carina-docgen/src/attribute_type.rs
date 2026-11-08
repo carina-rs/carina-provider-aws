@@ -8,7 +8,7 @@ use anyhow::{Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
     CustomValidator, DslTransform, FieldGroup, FieldGroupKind, ListElements, PatternAttributeType,
-    PatternForm, PatternStructField, RawShape, TypeIdentity,
+    PatternForm, PatternSpec, PatternStructField, RawShape, TypeIdentity,
 };
 
 use crate::{PageBuilder, TypeDisplay};
@@ -118,7 +118,7 @@ pub trait TypeDocHooks<'a, R: PatternForm> {
 /// ```
 pub enum ScalarDoc<'a> {
     String {
-        pattern: Option<&'a str>,
+        pattern: Option<&'a PatternSpec>,
         length: Bounds<u64>,
         validate: bool,
         to_dsl: Option<&'a DslTransform>,
@@ -632,10 +632,10 @@ fn bounds<T: Display>((min, max): (Option<T>, Option<T>)) -> String {
     )
 }
 
-fn string_constraints(pattern: Option<&str>, length: Bounds<u64>) -> Vec<String> {
+fn string_constraints(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(pattern) = pattern {
-        constraints.push(format!("pattern: {pattern}"));
+        constraints.push(format!("pattern: {}", pattern.as_str()));
     }
     if let Some(length) = length {
         constraints.push(format!("len: {}", bounds(length)));

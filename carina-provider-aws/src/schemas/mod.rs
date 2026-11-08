@@ -296,10 +296,16 @@ mod tests {
                 .paths
                 .insert((schema.resource_type().to_string(), path.to_string()));
             let mut check =
-                |pattern: Option<&str>, identity: Option<&carina_core::schema::TypeIdentity>| {
-                    let classification =
-                        classify_string(schema.resource_type(), path, name, pattern, description)
-                            .unwrap();
+                |pattern: Option<&carina_core::schema::PatternSpec>,
+                 identity: Option<&carina_core::schema::TypeIdentity>| {
+                    let classification = classify_string(
+                        schema.resource_type(),
+                        path,
+                        name,
+                        pattern.map(carina_core::schema::PatternSpec::as_str),
+                        description,
+                    )
+                    .unwrap();
                     match classification {
                         Some(Classification::Reference { arn_only }) => {
                             assert_eq!(
@@ -315,7 +321,7 @@ mod tests {
                                 carina_aws_types::kms_key_reference_pattern()
                             };
                             assert_eq!(
-                                pattern,
+                                pattern.map(carina_core::schema::PatternSpec::as_str),
                                 Some(expected_pattern),
                                 "{}.{} must use the pattern for arn_only={arn_only}",
                                 schema.resource_type(),
@@ -737,7 +743,10 @@ mod tests {
             identity.map(|id| id.to_string()).as_deref(),
             Some(expected_identity)
         );
-        assert_eq!(pattern, expected_pattern);
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            expected_pattern
+        );
     }
 
     fn assert_refined_int_range(attr: &AttributeType, expected_range: (Option<i64>, Option<i64>)) {

@@ -424,7 +424,10 @@ fn type_display_pattern_is_literal_code() {
     let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
     let display = scalar_display(
         ScalarDoc::String {
-            pattern: Some(pattern),
+            pattern: Some(&carina_core::schema::PatternSpec::new(
+                pattern,
+                carina_core::schema::PatternMatch::Full,
+            )),
             length: None,
             validate: false,
             to_dsl: None,
@@ -448,7 +451,10 @@ fn type_display_pattern_is_literal_code() {
 fn map_length_type_display_keeps_key_constraints_and_value_links() {
     let key = scalar_display(
         ScalarDoc::String {
-            pattern: Some("^[a-z]+$"),
+            pattern: Some(&carina_core::schema::PatternSpec::new(
+                "^[a-z]+$",
+                carina_core::schema::PatternMatch::Full,
+            )),
             length: Some((Some(1), Some(8))),
             validate: false,
             to_dsl: None,

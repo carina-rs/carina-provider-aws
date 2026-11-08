@@ -713,6 +713,8 @@ mod tests {
 
         let error = build_rule(&rid(), schema(), &rule_value)
             .expect_err("present filter.and.tags must be a list");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("filter.and.tags must be a list"));
     }
 

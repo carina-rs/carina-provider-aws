@@ -3,16 +3,19 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+#[path = "support/comparison.rs"]
+mod comparison;
+
 use carina_aws_types::Idempotency;
 use carina_aws_types::sdk::s3::S3Client;
 use carina_core::differ::Diff;
 use carina_core::provider::{
-    AppliedIdentifier, CreateFailure, CreateOutcome, CreateOutcomeKind, CreateRequest,
-    NoopNormalizer, Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind,
-    UpdateRequest,
+    AppliedIdentifier, CreateRequest, HostCreateFailure as CreateFailure,
+    HostCreateOutcome as CreateOutcome, HostCreateOutcomeKind as CreateOutcomeKind, NoopNormalizer,
+    Provider, ProviderReadyDataSource, ReadRequest, UpdateOutcomeKind, UpdateRequest,
 };
 use carina_core::provider::{RawSavedAttrs, ReadBackEnd};
-use carina_core::replacement::create_permit_for_test;
+use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
     ConcreteValue, DataSource, ResolvedResource, Resource, SnapshotState, State, StateValueLeaf,
     Value,
@@ -175,14 +178,15 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
 
 // The guarded facade also stages and inspects winterbaume state. Its conservative
 // lookup never grants resend permission to a possibly sent setup operation.
-async fn provider_with_s3() -> (AwsProvider, S3Client) {
+async fn provider_with_s3() -> (Arc<AwsProvider>, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
     let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
-    (provider_from_config(sdk_config), s3_client)
+    (Arc::new(provider_from_config(sdk_config)), s3_client)
 }
 
-async fn provider_with_namespace_recording_s3() -> (AwsProvider, Arc<NamespaceRecordingS3Service>) {
+async fn provider_with_namespace_recording_s3()
+-> (Arc<AwsProvider>, Arc<NamespaceRecordingS3Service>) {
     let service = Arc::new(NamespaceRecordingS3Service {
         inner: Arc::new(S3Service::new()),
         namespaces: Mutex::new(Vec::new()),
@@ -191,13 +195,13 @@ async fn provider_with_namespace_recording_s3() -> (AwsProvider, Arc<NamespaceRe
         .with_service(Arc::clone(&service))
         .build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    (provider_from_config(sdk_config), service)
+    (Arc::new(provider_from_config(sdk_config)), service)
 }
 
 async fn provider_with_staged_bucket_in_region(
     bucket: &str,
     bucket_region: &str,
-) -> (AwsProvider, Arc<RecordingS3Service>) {
+) -> (Arc<AwsProvider>, Arc<RecordingS3Service>) {
     let s3_service = Arc::new(S3Service::new());
 
     // Winterbaume normally derives a created bucket's stored region from the
@@ -226,7 +230,10 @@ async fn provider_with_staged_bucket_in_region(
         .with_service(Arc::clone(&recording_service))
         .build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    (provider_from_config(sdk_config), recording_service)
+    (
+        Arc::new(provider_from_config(sdk_config)),
+        recording_service,
+    )
 }
 
 async fn provider_with_not_found_read_back(staged_bucket: Option<&str>) -> AwsProvider {
@@ -297,13 +304,13 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
 
 fn assert_no_diff(desired: Resource, current: State<impl StateValueLeaf>) {
     let registry = schema_registry();
-    let router = carina_provider_aws::test_comparison_router();
+    let router = comparison::test_comparison_router();
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("S3 bucket comparison context");
     let saved = RawSavedAttrs::default().lift(&registry);
     let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
-    let result = carina_provider_aws::test_diff(&desired, &current, &saved, None, comparison);
+    let result = comparison::test_diff(&desired, &current, &saved, None, comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -315,11 +322,13 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &[],
                 &schemas,
                 type_checks,
@@ -358,16 +367,21 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
 }
 
 async fn create_outcome_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(provider)),
+        Box::new(AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
     let (create, _cancellation) =
-        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
+        carina_core::executor::dispatch_create(&boundary, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
@@ -388,11 +402,13 @@ async fn update_request_for_test(
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &[],
                 &schemas,
                 type_checks,
@@ -422,11 +438,13 @@ fn ready_data_source_for_test(resource: DataSource) -> ProviderReadyDataSource {
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &[],
                 &schemas,
                 type_checks,
@@ -539,14 +557,14 @@ async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
     assert_no_diff(desired, current);
 }
 
-fn final_read_back_provider(provider: AwsProvider) -> AwsProvider {
-    provider.with_operation_config_for_test(
+fn final_read_back_provider(provider: AwsProvider) -> Arc<AwsProvider> {
+    Arc::new(provider.with_operation_config_for_test(
         RESOURCE_TYPE,
         OperationConfig {
             read_back: ReadBackBudget::from_secs(1),
             ..Default::default()
         },
-    )
+    ))
 }
 
 #[tokio::test(start_paused = true)]
@@ -570,7 +588,12 @@ async fn create_bucket_read_back_not_found_is_partial_success_with_created_ident
         state.attributes().get("bucket"),
         Some(&string(bucket).to_snapshot())
     );
-    assert!(diagnostic.reason().contains("post-apply read-back"));
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("post-apply read-back")
+    );
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
@@ -596,10 +619,16 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
     );
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
-    let outcome = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("the update API succeeded, so a missing read-back must stay successful");
+    let outcome = carina_core::executor::dispatch_update(
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &carina_provider_aws::schemas::schema_registry(),
+        ),
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("the update API succeeded, so a missing read-back must stay successful");
 
     assert_eq!(outcome.read_back_end(), ReadBackEnd::HostDeadline);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
@@ -620,7 +649,12 @@ async fn update_bucket_read_back_not_found_is_partial_success_with_updated_ident
             .to_snapshot()
         )
     );
-    assert!(diagnostic.reason().contains("post-apply read-back"));
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("post-apply read-back")
+    );
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
@@ -645,8 +679,18 @@ async fn create_bucket_permanent_read_back_error_finishes_partial_immediately() 
         state.attributes().get("bucket"),
         Some(&string(bucket).to_snapshot())
     );
-    assert!(diagnostic.reason().contains("post-apply read-back"));
-    assert!(diagnostic.reason().contains("Failed to read bucket"));
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("post-apply read-back")
+    );
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("Failed to read bucket")
+    );
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 
@@ -673,10 +717,16 @@ async fn update_bucket_permanent_read_back_error_finishes_partial_immediately() 
     );
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
-    let outcome = provider
-        .update(&id, &applied_identifier(bucket), request)
-        .await
-        .expect("the update API succeeded, so a failed read-back must stay successful");
+    let outcome = carina_core::executor::dispatch_update(
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &carina_provider_aws::schemas::schema_registry(),
+        ),
+        update_permit_for_test(applied_identifier(bucket), request),
+    )
+    .await
+    .expect("the update API succeeded, so a failed read-back must stay successful");
 
     assert_eq!(outcome.read_back_end(), ReadBackEnd::ProviderReported);
     let UpdateOutcomeKind::PartialSuccess { state, diagnostic } = outcome.kind() else {
@@ -697,8 +747,18 @@ async fn update_bucket_permanent_read_back_error_finishes_partial_immediately() 
             .to_snapshot()
         )
     );
-    assert!(diagnostic.reason().contains("post-apply read-back"));
-    assert!(diagnostic.reason().contains("Failed to read bucket"));
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("post-apply read-back")
+    );
+    assert!(
+        diagnostic
+            .reason()
+            .as_str()
+            .contains("Failed to read bucket")
+    );
     assert!(!diagnostic.missing_attributes().is_empty());
 }
 

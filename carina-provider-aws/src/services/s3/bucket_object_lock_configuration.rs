@@ -527,8 +527,12 @@ mod tests {
             .expect_err("a non-exact closed-enum leaf must be rejected");
     }
 
-    fn assert_original_put_error(error: &ProviderError, expected_code: &str, expected: &str) {
-        let ProviderError::ApiError(detail) = error else {
+    fn assert_original_put_error(
+        error: &carina_core::provider::HostError,
+        expected_code: &str,
+        expected: &str,
+    ) {
+        let carina_core::provider::HostError::ApiError(detail) = error else {
             panic!("expected ApiError, got {error:?}");
         };
 
@@ -566,6 +570,8 @@ mod tests {
             .expect_err("an SDK value with both periods must be rejected");
 
         assert!(matches!(&error, ProviderError::Internal(_)));
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert_eq!(
             error.detail().context(),
             "S3 returned Object Lock default retention with both days and years"
@@ -582,6 +588,8 @@ mod tests {
             .expect_err("an SDK value without a period must be rejected");
 
         assert!(matches!(&error, ProviderError::Internal(_)));
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert_eq!(
             error.detail().context(),
             "S3 returned Object Lock default retention without days or years"
@@ -600,6 +608,8 @@ mod tests {
         )
         .expect_err("versioning rejection must be actionable");
 
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(
             error
                 .to_string()
@@ -618,7 +628,11 @@ mod tests {
         )
         .expect_err("unrelated InvalidBucketState must remain an API error");
 
-        assert_original_put_error(&error, "InvalidBucketState", aws_message);
+        assert_original_put_error(
+            &carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error),
+            "InvalidBucketState",
+            aws_message,
+        );
     }
 
     #[test]
@@ -631,7 +645,11 @@ mod tests {
         )
         .expect_err("the message alone must not trigger versioning mapping");
 
-        assert_original_put_error(&error, "AccessDenied", aws_message);
+        assert_original_put_error(
+            &carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error),
+            "AccessDenied",
+            aws_message,
+        );
     }
 
     #[test]

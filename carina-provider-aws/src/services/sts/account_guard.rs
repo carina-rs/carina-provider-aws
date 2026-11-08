@@ -6,10 +6,11 @@
 //! initialization (before any read/plan/apply mutation) and fails fast
 //! when the credentials in use point at the wrong AWS account.
 
+use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{ConcreteValue, Value};
 
 use crate::AwsProvider;
-use crate::helpers::sdk_error_message;
+use crate::error_helpers::api_error_with_meta;
 
 /// Pure policy check. Returns `Ok(())` when the caller's account is
 /// permitted by the configured allow/forbid lists, otherwise an error
@@ -64,10 +65,10 @@ impl AwsProvider {
     /// `allowed_account_ids` and `forbidden_account_ids` are empty.
     ///
     /// Otherwise calls STS `GetCallerIdentity` and validates the
-    /// returned account against the configured lists, returning an
-    /// error string suitable for surfacing through
+    /// returned account against the configured lists, returning a
+    /// structured error suitable for surfacing through
     /// `CarinaProvider::initialize`.
-    pub async fn verify_account_id(&self) -> Result<(), String> {
+    pub async fn verify_account_id(&self) -> ProviderResult<()> {
         if self.allowed_account_ids.is_empty() && self.forbidden_account_ids.is_empty() {
             return Ok(());
         }
@@ -78,11 +79,13 @@ impl AwsProvider {
             .send()
             .await
             .map_err(|e| {
-                sdk_error_message("Failed to get STS caller identity for account guard", &e)
+                api_error_with_meta("Failed to get STS caller identity for account guard", e)
             })?;
 
         let account_id = response.account().ok_or_else(|| {
-            "STS GetCallerIdentity returned no account ID; cannot enforce account guard".to_string()
+            ProviderError::api_error(
+                "STS GetCallerIdentity returned no account ID; cannot enforce account guard",
+            )
         })?;
 
         check_account_id(
@@ -90,6 +93,7 @@ impl AwsProvider {
             &self.allowed_account_ids,
             &self.forbidden_account_ids,
         )
+        .map_err(ProviderError::invalid_input)
     }
 }
 

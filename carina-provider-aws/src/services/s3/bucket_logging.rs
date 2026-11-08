@@ -336,6 +336,8 @@ mod tests {
 
         let error = build_key_format(&id(), schema(), &value)
             .expect_err("a present simple_prefix must be a map");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("simple_prefix must be a map"));
     }
 }

@@ -329,6 +329,8 @@ mod tests {
             Ok(_) => panic!("invalid ip_protocol must not fall back to -1"),
             Err(error) => error,
         };
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(
             error
                 .to_string()

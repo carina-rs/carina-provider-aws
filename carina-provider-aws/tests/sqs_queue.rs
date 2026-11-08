@@ -118,7 +118,7 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
         };
         assert!(identity.is_none());
         assert_eq!(
-            pattern,
+            pattern.map(carina_core::schema::PatternSpec::as_str),
             Some(r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z")
         );
         assert_eq!(length, Some((Some(1), Some(80))));

@@ -43,7 +43,11 @@ fn iam_role_refinements_use_named_name_and_anonymous_path() {
                 expected_identity,
                 "{field}"
             );
-            assert_eq!(pattern, Some(expected_pattern), "{field}");
+            assert_eq!(
+                pattern.map(carina_core::schema::PatternSpec::as_str),
+                Some(expected_pattern),
+                "{field}"
+            );
             assert_eq!(length, Some((Some(1), Some(maximum))), "{field}");
         }
     }

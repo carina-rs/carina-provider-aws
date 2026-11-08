@@ -7,7 +7,9 @@
 
 use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::resource::{ConcreteValue, Value};
-use carina_core::schema::{AttributeType, DslTransform, TypeIdentity, legacy_validator};
+use carina_core::schema::{
+    AttributeType, DslTransform, PatternMatch, PatternSpec, TypeIdentity, legacy_validator,
+};
 
 use crate::{
     arn_partition_pattern, arn_regex, validate_arn, validate_availability_zone,
@@ -31,7 +33,10 @@ pub const ACM_CERTIFICATE_REQUEST_DOMAIN_RULE: &str = "Labels with -- in positio
 fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> AttributeType {
     AttributeType::refined_string_with_validator(
         identity,
-        Some(ACM_CERTIFICATE_DOMAIN_NAME_PATTERN.to_string()),
+        Some(PatternSpec::new(
+            ACM_CERTIFICATE_DOMAIN_NAME_PATTERN,
+            PatternMatch::Full,
+        )),
         Some((Some(1), Some(maximum as u64))),
         legacy_validator(move |value| {
             let Value::Concrete(ConcreteValue::String(domain)) = value else {
@@ -95,13 +100,13 @@ fn validate_acm_validation_url(value: &str) -> Result<(), String> {
 
 fn validated_string(
     identity: TypeIdentity,
-    pattern: &str,
+    pattern: PatternSpec,
     length: Option<(Option<u64>, Option<u64>)>,
     validator: fn(&str) -> Result<(), String>,
 ) -> AttributeType {
     AttributeType::refined_string_with_validator(
         identity,
-        Some(pattern.to_string()),
+        Some(pattern),
         length,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
@@ -116,10 +121,10 @@ fn validated_string(
 
 fn metadata_string(
     identity: TypeIdentity,
-    pattern: &str,
+    pattern: PatternSpec,
     length: Option<(Option<u64>, Option<u64>)>,
 ) -> AttributeType {
-    AttributeType::refined_string(Some(identity), Some(pattern.to_string()), length, None)
+    AttributeType::refined_string(Some(identity), Some(pattern), length, None)
 }
 
 /// Construct an identity-bearing Int restricted to the given allowed values.
@@ -295,7 +300,7 @@ fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> Attribu
     let pattern = format!("^{prefix}-[0-9a-f]{{8,}}$");
     AttributeType::refined_string_with_validator(
         identity,
-        Some(pattern),
+        Some(PatternSpec::new(pattern, PatternMatch::Full)),
         None,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
@@ -308,10 +313,14 @@ fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> Attribu
     )
 }
 
-fn iam_arn(identity: TypeIdentity, pattern: &str, resource_prefix: &'static str) -> AttributeType {
+fn iam_arn(
+    identity: TypeIdentity,
+    pattern: PatternSpec,
+    resource_prefix: &'static str,
+) -> AttributeType {
     AttributeType::refined_string_with_validator(
         identity,
-        Some(pattern.to_string()),
+        Some(pattern),
         None,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
@@ -376,7 +385,7 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
         // LifecycleExpiration$Date and Transition$Date always use midnight UTC.
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_Transition.html
-        S3_LIFECYCLE_DATE_PATTERN,
+        PatternSpec::new(S3_LIFECYCLE_DATE_PATTERN, PatternMatch::Full),
         Some((Some(20), Some(20))),
         |value| {
             let parsed = DateTime::from_str(value, Format::DateTime)
@@ -722,7 +731,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            &arn_regex("[^:]+:.*$"),
+            PatternSpec::new(arn_regex("[^:]+:.*$"), PatternMatch::Full),
             None,
             validate_arn,
         ),
@@ -735,7 +744,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^[a-z-]+-[0-9a-f]{8,}$",
+            PatternSpec::new("^[a-z-]+-[0-9a-f]{8,}$", PatternMatch::Full),
             None,
             validate_aws_resource_id,
         ),
@@ -748,7 +757,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^\\d{12}$",
+            PatternSpec::new("^\\d{12}$", PatternMatch::Full),
             Some((Some(12), Some(12))),
             validate_aws_account_id,
         ),
@@ -777,7 +786,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^[a-z]+[0-9]+-az[0-9]+$",
+            PatternSpec::new("^[a-z]+[0-9]+-az[0-9]+$", PatternMatch::Full),
             None,
             validate_availability_zone_id,
         ),
@@ -799,7 +808,7 @@ define_aws_type_catalog! {
         valid_sample: "example-role",
         has_validator: true,
         constructor: |identity| validated_string(
-            identity, IAM_NAME_PATTERN, Some((Some(1), Some(64))), validate_iam_role_name,
+            identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(64))), validate_iam_role_name,
         ),
     },
     /// IAM policy name, including inline policies. Smithy policyNameType in
@@ -812,7 +821,7 @@ define_aws_type_catalog! {
         valid_sample: "example-policy",
         has_validator: true,
         constructor: |identity| validated_string(
-            identity, IAM_NAME_PATTERN, Some((Some(1), Some(128))), validate_iam_policy_name,
+            identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(128))), validate_iam_policy_name,
         ),
     },
     /// IAM role ID.
@@ -823,7 +832,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^AROA[A-Z0-9]+$",
+            PatternSpec::new("^AROA[A-Z0-9]+$", PatternMatch::Full),
             None,
             validate_iam_role_id,
         ),
@@ -836,7 +845,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| iam_arn(
             identity,
-            &arn_regex("iam::[^:]*:role/.+$"),
+            PatternSpec::new(arn_regex("iam::[^:]*:role/.+$"), PatternMatch::Full),
             "role/",
         ),
     },
@@ -848,7 +857,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| iam_arn(
             identity,
-            &arn_regex("iam::[^:]*:policy/.+$"),
+            PatternSpec::new(arn_regex("iam::[^:]*:policy/.+$"), PatternMatch::Full),
             "policy/",
         ),
     },
@@ -860,7 +869,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex("iam::[^:]*:oidc-provider/.+$"),
+            PatternSpec::new(arn_regex("iam::[^:]*:oidc-provider/.+$"), PatternMatch::Full),
             None,
         ),
     },
@@ -872,11 +881,11 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            &[
+            PatternSpec::new([
                 "^((arn:",
                 arn_partition_pattern(),
                 ":kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$",
-            ].concat(),
+            ].concat(), PatternMatch::Full),
             None,
             validate_kms_key_id,
         ),
@@ -888,7 +897,7 @@ define_aws_type_catalog! {
         valid_sample: "alias/aws/sqs",
         constructor: |identity| AttributeType::reference(
             identity,
-            Some(crate::kms_key_reference_pattern().to_string()),
+            Some(PatternSpec::new(crate::kms_key_reference_pattern(), PatternMatch::Full)),
             Some((Some(1), Some(2048))),
         ),
     },
@@ -900,7 +909,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            crate::kms_key_arn_pattern(),
+            PatternSpec::new(crate::kms_key_arn_pattern(), PatternMatch::Full),
             None,
             validate_kms_key_arn,
         ),
@@ -913,7 +922,7 @@ define_aws_type_catalog! {
         has_validator: true,
         constructor: |identity| validated_string(
             identity,
-            "^ipam-pool-[0-9a-f]{8,}$",
+            PatternSpec::new("^ipam-pool-[0-9a-f]{8,}$", PatternMatch::Full),
             None,
             validate_ipam_pool_id,
         ),
@@ -926,7 +935,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^Z[A-Z0-9]+$",
+            PatternSpec::new("^Z[A-Z0-9]+$", PatternMatch::Full),
             Some((None, Some(32))),
         ),
     },
@@ -978,7 +987,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex(r"acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z"),
+            PatternSpec::new(arn_regex(r"acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z"), PatternMatch::Full),
             Some((Some(20), Some(2048))),
         ),
     },
@@ -1005,7 +1014,7 @@ define_aws_type_catalog! {
         valid_sample: "http://example.com/.well-known/pki-validation/token.txt",
         has_validator: true,
         constructor: |identity| validated_string(
-            identity, ACM_VALIDATION_URL_PATTERN, None, validate_acm_validation_url,
+            identity, PatternSpec::new(ACM_VALIDATION_URL_PATTERN, PatternMatch::Full), None, validate_acm_validation_url,
         ),
     },
     /// ACM's com.amazonaws.acm#RecordType enum in acm.json contains only CNAME.
@@ -1065,7 +1074,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex(r"sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z"),
+            PatternSpec::new(arn_regex(r"sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z"), PatternMatch::Full),
             None,
         ),
     },
@@ -1107,7 +1116,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            "^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            PatternSpec::new("^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", PatternMatch::Full),
             None,
         ),
     },
@@ -1117,7 +1126,7 @@ define_aws_type_catalog! {
         kind: "Id",
         valid_sample: "12345678-1234-1234-1234-123456789abc",
         has_validator: false,
-        constructor: |identity| metadata_string(identity, "^.{1,64}$", None),
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^.{1,64}$", PatternMatch::Full), None),
     },
     /// IAM Identity Center instance ARN.
     SsoInstanceArn => sso_instance_arn {
@@ -1127,7 +1136,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex("sso:::instance/.+$"),
+            PatternSpec::new(arn_regex("sso:::instance/.+$"), PatternMatch::Full),
             None,
         ),
     },
@@ -1139,7 +1148,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex("sso:::permissionSet/.+$"),
+            PatternSpec::new(arn_regex("sso:::permissionSet/.+$"), PatternMatch::Full),
             None,
         ),
     },
@@ -1151,7 +1160,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            r"^(id|emailAddress|uri)=.+(\s*,\s*(id|emailAddress|uri)=.+)*$",
+            PatternSpec::new(r"^(id|emailAddress|uri)=.+(\s*,\s*(id|emailAddress|uri)=.+)*$", PatternMatch::Full),
             None,
         ),
     },
@@ -1177,7 +1186,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex("s3:::.+$"),
+            PatternSpec::new(arn_regex("s3:::.+$"), PatternMatch::Full),
             None,
         ),
     },
@@ -1189,7 +1198,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex("sts:.*$"),
+            PatternSpec::new(arn_regex("sts:.*$"), PatternMatch::Full),
             None,
         ),
     },
@@ -1228,7 +1237,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"),
+            PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"), PatternMatch::Full),
             None,
         ),
     },
@@ -1250,7 +1259,7 @@ define_aws_type_catalog! {
         has_validator: false,
         constructor: |identity| metadata_string(
             identity,
-            &arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z"),
+            PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z"), PatternMatch::Full),
             None,
         ),
     },
@@ -1306,7 +1315,7 @@ define_aws_type_catalog! {
         valid_sample: "carina-security-group",
         has_validator: true,
         constructor: |identity| validated_string(
-            identity, EC2_SECURITY_GROUP_NAME_PATTERN, Some((Some(1), Some(255))),
+            identity, PatternSpec::new(EC2_SECURITY_GROUP_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(255))),
             validate_ec2_security_group_name,
         ),
     },
@@ -1573,14 +1582,30 @@ mod tests {
     }
 
     fn test_string_constructor(identity: TypeIdentity) -> AttributeType {
-        metadata_string(identity, ".*", None)
+        metadata_string(
+            identity,
+            PatternSpec::new(
+                ".*",
+                PatternMatch::Substring {
+                    reason: carina_core::schema::PatternReason::new(
+                        "Preserve the test catalog search pattern, including newline inputs.",
+                    )
+                    .unwrap(),
+                },
+            ),
+            None,
+        )
     }
 
     fn test_int_constructor(
         identity: TypeIdentity,
         _allowed_values: &'static [i64],
     ) -> AttributeType {
-        metadata_string(identity, "^[0-9]+$", None)
+        metadata_string(
+            identity,
+            PatternSpec::new("^[0-9]+$", PatternMatch::Full),
+            None,
+        )
     }
 
     crate::define_aws_type_catalog! {
@@ -1685,7 +1710,10 @@ mod tests {
                 panic!("{expected} must be a validated, identity-bearing String");
             };
             assert_eq!(actual, &identity);
-            assert_eq!(pattern, Some(r"^[A-Za-z0-9_+=,.@-]+\z"));
+            assert_eq!(
+                pattern.map(PatternSpec::as_str),
+                Some(r"^[A-Za-z0-9_+=,.@-]+\z")
+            );
             assert_eq!(length, Some((Some(1), Some(maximum))));
             for valid in [
                 sample.to_string(),
@@ -2002,7 +2030,7 @@ mod tests {
                 }
                 // Include ARN alternatives in rows such as KMS IDs and references,
                 // even when their primary sample is an alias or a bare key ID.
-                row.identity().kind == "Arn" || pattern.is_some_and(|p| p.contains("arn:"))
+                row.identity().kind == "Arn" || pattern.is_some_and(|p| p.as_str().contains("arn:"))
             })
             .collect();
         let missing: Vec<_> = expected_rows.difference(&selected_rows).copied().collect();
@@ -2018,8 +2046,9 @@ mod tests {
                 RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
                 _ => panic!("{row:?} must be a String or Reference ARN row"),
             };
-            let regex = regex::Regex::new(pattern.expect("ARN row must declare a pattern"))
-                .expect("valid ARN row pattern");
+            let regex =
+                regex::Regex::new(pattern.expect("ARN row must declare a pattern").as_str())
+                    .expect("valid ARN row pattern");
             let sample = AwsType::ALL
                 .iter()
                 .map(|candidate| candidate.valid_sample())
@@ -2113,7 +2142,10 @@ mod tests {
         let expected_pattern =
             crate::arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z");
         // #638: Organizations pattern text follows the shared Partition set.
-        assert_eq!(pattern, Some(expected_pattern.as_str()));
+        assert_eq!(
+            pattern.map(PatternSpec::as_str),
+            Some(expected_pattern.as_str())
+        );
     }
 
     #[test]
@@ -2176,7 +2208,10 @@ mod tests {
         let expected_pattern =
             crate::arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z");
         // #638: Organizations pattern text follows the shared Partition set.
-        assert_eq!(pattern, Some(expected_pattern.as_str()));
+        assert_eq!(
+            pattern.map(PatternSpec::as_str),
+            Some(expected_pattern.as_str())
+        );
     }
 
     #[test]

@@ -201,7 +201,7 @@ pub(crate) fn invalid_read_back(
     let error = error.for_resource(id.clone());
     CreateCompletion::Failed {
         identifier,
-        observation: Observation::ReadFailed(ProviderError::from_wire(error.to_wire())),
+        observation: Observation::ReadFailed(error.clone()),
         error,
     }
 }
@@ -491,15 +491,15 @@ mod tests {
 
     #[tokio::test]
     async fn transient_read_back_error_retains_source() {
-        use carina_aws_types::Transience;
         use carina_core::provider::{AppliedIdentifier, ProviderError};
         use carina_core::resource::Resource;
         let provider = provider().await;
         let resource: Resource = Resource::with_provider("aws", "s3.Bucket", "test", None);
         let error = ProviderError::api_error_caused_by(
             "GetBucket failed",
-            Transience::Transient.caused_by(std::io::Error::other("transport cause")),
-        );
+            std::io::Error::other("transport cause"),
+        )
+        .with_transient(true);
         let completion = provider.classify_read_back(
             &resource.id,
             AppliedIdentifier::new("bucket").unwrap(),
@@ -530,6 +530,8 @@ mod tests {
             panic!("expected terminal partial")
         };
         assert!(reason.detail().cause().is_some());
+        let reason =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(reason);
         assert!(reason.to_string().contains("transport cause"));
     }
 
@@ -551,7 +553,11 @@ mod tests {
                 std::io::Error::other("throttling text is not a classification"),
             ),
         ] {
-            let message = error.to_string();
+            let message =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                    error.clone(),
+                )
+                .to_string();
             let completion = provider.classify_read_back(
                 &resource.id,
                 AppliedIdentifier::new("bucket").unwrap(),
@@ -580,6 +586,10 @@ mod tests {
             expected.sort();
             assert_eq!(Vec::<String>::from(missing_attributes), expected);
             assert!(reason.detail().cause().is_some());
+            let reason =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                    reason,
+                );
             assert!(reason.to_string().contains(&message));
         }
     }

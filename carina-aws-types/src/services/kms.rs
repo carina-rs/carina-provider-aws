@@ -1,3 +1,4 @@
+use carina_core::schema::{PatternMatch, PatternSpec};
 use std::sync::LazyLock;
 
 use crate::{arn_partition_pattern, arn_regex, validate_service_arn};
@@ -6,7 +7,7 @@ use crate::{arn_partition_pattern, arn_regex, validate_service_arn};
 pub fn kms_key_arn_reference() -> carina_core::schema::AttributeType {
     carina_core::schema::AttributeType::reference(
         crate::AwsType::KmsKeyReference.identity(),
-        Some(kms_key_arn_pattern().to_string()),
+        Some(PatternSpec::new(kms_key_arn_pattern(), PatternMatch::Full)),
         Some((Some(0), Some(256))),
     )
 }

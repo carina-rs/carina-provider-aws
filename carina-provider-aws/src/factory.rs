@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use carina_core::provider::{
     BoxFuture, CanonicalProviderConfigAttributes, InitializeOutcome, InitializeOutcomeMint,
-    ProviderError, ProviderFactory, ProviderInitialization, ProviderNormalizer,
-    ProviderReadyConfig, ProviderResult,
+    ProviderError, ProviderFactory, ProviderInitialization, ProviderNormalizer, ProviderResult,
+    ProviderSession, ProviderValidationInputs,
 };
 use carina_core::schema::{
     ValidatedConfigSchema, ValidatedProviderSchemaWitness, ValidatedResourceSchema,
@@ -48,6 +48,7 @@ impl ProviderFactory for AwsProviderFactory {
     fn validate_config(
         &self,
         attributes: &CanonicalProviderConfigAttributes,
+        _inputs: &ProviderValidationInputs,
     ) -> ProviderResult<()> {
         // Cross-account guardrail: when `assume_role.role_arn` parses to
         // an account id that is not in `allowed_account_ids` (when that
@@ -67,17 +68,23 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_provider(
         &self,
-        _binding: Option<&str>,
-        config: &ProviderReadyConfig,
+        session: &ProviderSession,
         _initialize_outcome: InitializeOutcomeMint,
     ) -> BoxFuture<'_, ProviderResult<ProviderInitialization>> {
-        // `_binding` is intentionally unused: the AWS factory does not
+        // The session's binding is intentionally unused: the AWS factory does not
         // cache instances, so each call already produces an
         // independent `AwsProvider`. The host uses the binding name
         // as a cache key in `WasmProviderFactory`; for in-process
         // factories the constructed-fresh shape is enough.
         use crate::services::sts::account_guard::extract_string_list;
         use crate::services::sts::assume_role::extract_assume_role;
+        let Some(config) = session.configuration() else {
+            return Box::pin(async {
+                Err(ProviderError::invalid_input(
+                    "AWS provider configuration is required",
+                ))
+            });
+        };
         let attributes = config.attributes();
         let region = carina_core::utils::extract_region_from_attrs(attributes, "ap-northeast-1");
         let allowed = extract_string_list(attributes.get("allowed_account_ids"));
@@ -99,8 +106,7 @@ impl ProviderFactory for AwsProviderFactory {
 
     fn create_normalizer(
         &self,
-        _binding: Option<&str>,
-        _config: &ProviderReadyConfig,
+        _session: &ProviderSession,
     ) -> BoxFuture<'_, ProviderResult<Box<dyn ProviderNormalizer>>> {
         Box::pin(async { Ok(Box::new(AwsNormalizer) as Box<dyn ProviderNormalizer>) })
     }

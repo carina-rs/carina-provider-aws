@@ -266,7 +266,11 @@ mod tests {
         let raw = Response::new(StatusCode::try_from(403).unwrap(), SdkBody::empty());
         let sdk_error = SdkError::service_error(inner, raw);
 
-        let rendered = describe_user_api_error(USER_ID, IDENTITY_STORE_ID, sdk_error).to_string();
+        let rendered =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                describe_user_api_error(USER_ID, IDENTITY_STORE_ID, sdk_error),
+            )
+            .to_string();
 
         assert_eq!(
             rendered.lines().next(),

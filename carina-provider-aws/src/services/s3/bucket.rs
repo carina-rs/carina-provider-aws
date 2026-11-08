@@ -802,6 +802,10 @@ mod tests {
                 );
                 assert!(requests[0].0.contains("versions"));
                 let error = result.expect_err("missing version ID must fail cleanup");
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 let message = error.to_string();
                 assert!(message.contains("version ID"), "{message}");
                 assert!(message.contains("missing-version"), "{message}");

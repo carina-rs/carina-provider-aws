@@ -384,6 +384,8 @@ mod tests {
             .expect_err("provider-owned create-token tags must be rejected");
 
         assert_eq!(error.variant_name(), "invalid_input");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains(EC2_CREATE_TOKEN_TAG));
     }
 
@@ -433,6 +435,8 @@ mod tests {
             .await
             .expect_err("reserved tag update must fail");
 
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains(EC2_CREATE_TOKEN_TAG));
         let bodies = service.request_bodies.lock().expect("request-body lock");
         assert!(

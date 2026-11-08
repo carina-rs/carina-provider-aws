@@ -841,6 +841,7 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
     use carina_aws_types::sdk::acm::error::SdkError;
+    use carina_core::test_utils::provider_text::NativeWireFixture as _;
 
     fn acm_schema() -> &'static CompiledResourceSchema {
         crate::test_resource_schema("acm.Certificate")
@@ -889,6 +890,8 @@ mod tests {
                 .map(|resource_id| resource_id.identity.as_str()),
             Some("test-cert")
         );
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("final attempt throttled"));
     }
 

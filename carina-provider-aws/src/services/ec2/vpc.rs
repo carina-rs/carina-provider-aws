@@ -355,6 +355,8 @@ mod tests {
             Some(16),
         )
         .expect_err("an explicit CIDR and generated netmask conflict");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("cidr_block"));
         assert!(error.to_string().contains("ipv4_netmask_length"));
     }

@@ -803,11 +803,10 @@ mod tests {
     use super::*;
     use carina_core::provider::ProviderErrorKind;
     use indexmap::IndexMap;
+    use std::error::Error;
 
     #[test]
     fn role_read_policy_url_decode_failure_keeps_its_typed_cause() {
-        use std::error::Error;
-
         let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
         for raw in ["%FF", r#"{"Version":"%FF","Statement":[]}"#] {
             let error = decode_assume_role_policy_document(&id, Some(raw))
@@ -819,15 +818,18 @@ mod tests {
                 .unwrap()
                 .downcast_ref::<IamPolicyDecodeError>()
                 .expect("typed IAM policy decode error");
-            assert!(matches!(decode, IamPolicyDecodeError::UrlDecode(_)));
+            assert!(
+                decode.matches_for_test::<IamPolicyDecodeError>(|error| matches!(
+                    error,
+                    IamPolicyDecodeError::UrlDecode(_)
+                ))
+            );
             assert!(decode.source().unwrap().is::<std::string::FromUtf8Error>());
         }
     }
 
     #[test]
     fn role_read_policy_json_failure_keeps_its_typed_cause() {
-        use std::error::Error;
-
         let id = ResourceId::with_provider_identity("aws", "iam.Role", "test", None);
         for raw in [
             "",
@@ -845,7 +847,12 @@ mod tests {
                 .unwrap()
                 .downcast_ref::<IamPolicyDecodeError>()
                 .expect("typed IAM policy decode error");
-            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(
+                decode.matches_for_test::<IamPolicyDecodeError>(|error| matches!(
+                    error,
+                    IamPolicyDecodeError::Json(_)
+                ))
+            );
             assert!(decode.source().unwrap().is::<serde_json::Error>());
         }
     }
@@ -889,8 +896,6 @@ mod tests {
 
     #[test]
     fn policy_json_rejects_out_of_range_numbers_with_a_typed_source() {
-        use std::error::Error;
-
         for json in [
             "1e999",
             "-1e999",
@@ -1213,6 +1218,7 @@ mod tests {
     fn resolve_iam_policy_attr_errors_when_missing() {
         let r = make_resource(None);
         let err = resolve_iam_policy_attr(&r, "policy").expect_err("missing");
+        let err = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(err);
         assert!(format!("{}", err).contains("policy is required"));
     }
 
@@ -1220,6 +1226,7 @@ mod tests {
     fn resolve_iam_policy_attr_errors_on_non_string_non_map() {
         let r = make_resource(Some(Value::Concrete(ConcreteValue::Bool(true))));
         let err = resolve_iam_policy_attr(&r, "policy").expect_err("invalid type");
+        let err = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(err);
         assert!(format!("{}", err).contains("policy is required"));
     }
 

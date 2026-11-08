@@ -754,6 +754,8 @@ mod tests {
             let error = build_expiration(&rid(), &value)
                 .expect_err("out-of-range days must not wrap into a valid expiration");
             assert!(matches!(error, ProviderError::InvalidInput(_)), "{error:?}");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(error.to_string().contains("days"), "{error}");
         }
     }
@@ -908,6 +910,8 @@ mod tests {
 
         let error = build_rule(&rid(), schema(), &rule_value)
             .expect_err("present filter.and.tags must be a list");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("filter.and.tags must be a list"));
     }
 

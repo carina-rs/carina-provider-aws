@@ -25,7 +25,7 @@ route53 = ["dep:aws-sdk-route53"]
 s3 = ["dep:aws-sdk-s3"]
 sqs = ["dep:aws-sdk-sqs"]
 sts = ["dep:aws-sdk-sts"]
-test-utils = ["dep:carina-plugin-sdk", "carina-plugin-sdk/test-utils", "dep:wasi"]
+test-utils = ["dep:carina-plugin-sdk", "dep:wasi"]
 
 [dev-dependencies]
 carina-core = { workspace = true, features = ["test-utils"] }
