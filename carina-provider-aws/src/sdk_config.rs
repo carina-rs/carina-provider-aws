@@ -229,7 +229,8 @@ mod tests {
     #[tokio::test]
     async fn kms_reference_routing_keeps_assumed_credentials_and_qualified_arn_scope() {
         use carina_aws_types::AwsType;
-        use carina_provider_protocol::types::{ReferenceOutcome, ReferenceRequest, TypeIdentity};
+        use carina_plugin_sdk::types::ReferenceOutcome;
+        use carina_provider_protocol::types::{ReferenceRequest, TypeIdentity};
         use std::sync::{Arc, Mutex};
         use winterbaume_core::{MockAws, MockRequest, MockResponse, MockService};
 
@@ -309,7 +310,7 @@ mod tests {
             value: value.into(),
         };
         let results = provider
-            .resolve_references(vec![
+            .resolve_guest_references(vec![
                 request("alias/instance"),
                 request("arn:aws:kms:eu-west-1:999999999999:alias/customer"),
             ])

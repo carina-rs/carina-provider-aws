@@ -3,11 +3,11 @@
 use crate::{AwsProvider, BoundedSdkConfig};
 use carina_aws_types::Idempotency;
 use carina_aws_types::kms_reference::{
-    DescribeKeyClient, DescribeKeyFailure, describe_key_failure, resolve_reference_batch,
+    DescribeKeyClient, DescribeKeyFailure, describe_key_failure,
 };
 use carina_aws_types::sdk::kms;
 use carina_core::provider::BoxFuture;
-use carina_provider_protocol::types::{ReferenceError, ReferenceOutcome, ReferenceRequest};
+use carina_provider_protocol::types::ReferenceRequest;
 
 const PROVIDER_NAME: &str = "aws";
 
@@ -66,11 +66,22 @@ impl DescribeKeyClient for KmsClient {
 }
 
 impl AwsProvider {
-    /// Resolve one positional batch in the initialized instance's scope.
-    pub async fn resolve_references(
+    /// Resolve guest requests without flattening errors before SDK encoding.
+    pub async fn resolve_guest_references(
         &self,
         requests: Vec<ReferenceRequest>,
-    ) -> Vec<Result<ReferenceOutcome, ReferenceError>> {
-        resolve_reference_batch(&self.kms_client, PROVIDER_NAME, &self.region, requests).await
+    ) -> Vec<
+        Result<
+            carina_plugin_sdk::types::ReferenceOutcome,
+            carina_plugin_sdk::types::ReferenceError,
+        >,
+    > {
+        carina_aws_types::kms_reference::resolve_guest_reference_batch(
+            &self.kms_client,
+            PROVIDER_NAME,
+            &self.region,
+            requests,
+        )
+        .await
     }
 }

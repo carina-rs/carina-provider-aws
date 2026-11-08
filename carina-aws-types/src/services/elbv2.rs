@@ -27,9 +27,9 @@ pub(crate) fn elbv2_matcher_codes(identity: TypeIdentity, min: u16, max: u16) ->
         None,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_matcher_codes(value.expose_plaintext(), min, max)
+                validate_matcher_codes(value.expose_plaintext(), min, max).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         }),
         None,

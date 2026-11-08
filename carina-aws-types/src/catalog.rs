@@ -47,9 +47,9 @@ fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> AttributeT
                 regex::Regex::new(ACM_CERTIFICATE_DOMAIN_NAME_PATTERN).expect("ACM domain pattern")
             });
             if domain.len() > maximum || !PATTERN.is_match(domain) {
-                return Err(format!(
-                    "expected an ACM wildcard FQDN of 1..={maximum} octets"
-                ));
+                return Err(
+                    format!("expected an ACM wildcard FQDN of 1..={maximum} octets").into(),
+                );
             }
             for label in domain.strip_prefix("*.").unwrap_or(domain).split('.') {
                 if label.as_bytes().get(2..4) == Some(b"--") {
@@ -110,9 +110,9 @@ fn validated_string(
         length,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validator(value.expose_plaintext())
+                validator(value.expose_plaintext()).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         }),
         None,
@@ -141,12 +141,13 @@ pub fn validated_int_enum(identity: TypeIdentity, valid_values: &'static [i64]) 
                 if valid_values.contains(value) {
                     Ok(())
                 } else {
-                    Err(format!(
-                        "Value {value} is not valid; allowed values are: {valid_values:?}"
-                    ))
+                    Err(
+                        format!("Value {value} is not valid; allowed values are: {valid_values:?}")
+                            .into(),
+                    )
                 }
             } else {
-                Err("Expected integer".to_string())
+                Err("Expected integer".into())
             }
         }),
     )
@@ -158,7 +159,7 @@ fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> AttributeType
         Some((values.first().copied(), values.last().copied())),
         legacy_validator(move |value| match value {
             Value::Concrete(ConcreteValue::Int(value)) if values.contains(value) => Ok(()),
-            _ => Err(format!("expected one of the integer values {values:?}")),
+            _ => Err(format!("expected one of the integer values {values:?}").into()),
         }),
     )
 }
@@ -208,7 +209,9 @@ fn ec2_cidr_type(
         None,
         None,
         legacy_validator(move |value| match value {
-            Value::Concrete(ConcreteValue::String(value)) => validate(value.expose_plaintext()),
+            Value::Concrete(ConcreteValue::String(value)) => {
+                validate(value.expose_plaintext()).map_err(Into::into)
+            }
             _ => Err("expected a CIDR string".into()),
         }),
         None,
@@ -304,9 +307,9 @@ fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> Attribu
         None,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_prefixed_resource_id(value.expose_plaintext(), prefix)
+                validate_prefixed_resource_id(value.expose_plaintext(), prefix).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         }),
         None,
@@ -324,9 +327,9 @@ fn iam_arn(
         None,
         legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_iam_arn(value.expose_plaintext(), resource_prefix)
+                validate_iam_arn(value.expose_plaintext(), resource_prefix).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         }),
         None,
@@ -343,9 +346,9 @@ fn validated_open_enum(
         vec![],
         Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validator(value.expose_plaintext())
+                validator(value.expose_plaintext()).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         })),
         Some(DslTransform::HyphenToUnderscore),
@@ -362,8 +365,9 @@ fn availability_zone_type(identity: TypeIdentity) -> AttributeType {
                 let value = value.expose_plaintext();
                 validate_availability_zone(value)
                     .map_err(|reason| format!("Invalid availability zone '{value}': {reason}"))
+                    .map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         })),
         Some(DslTransform::HyphenToUnderscore),
@@ -443,14 +447,13 @@ fn organizations_account_email_type(identity: TypeIdentity) -> AttributeType {
                 let email = value.expose_plaintext();
                 if !(6..=64).contains(&email.chars().count()) {
                     return Err(
-                        "Organizations account email must be between 6 and 64 characters"
-                            .to_string(),
+                        "Organizations account email must be between 6 and 64 characters".into(),
                     );
                 }
                 // This is the same public function used by core's Email type.
-                carina_core::schema::validate_email(email)
+                carina_core::schema::validate_email(email).map_err(Into::into)
             } else {
-                Err("Expected string".to_string())
+                Err("Expected string".into())
             }
         }),
         None,

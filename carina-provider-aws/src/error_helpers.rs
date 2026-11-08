@@ -27,6 +27,7 @@
 //! promoting it to `pub` here.
 
 use carina_core::provider::ProviderError;
+use carina_core::provider_text::Retryability;
 use thiserror::Error;
 
 use carina_aws_types::{Idempotency, SendClassification, Transience};
@@ -302,7 +303,10 @@ where
         ProviderError::api_error_caused_by(context, cause)
     }
     .with_operation(operation)
-    .with_transient(transience == Transience::Transient);
+    .with_retryability(match transience {
+        Transience::Transient => Retryability::Transient,
+        Transience::Permanent => Retryability::Unclassified,
+    });
     if let Some(s) = status {
         pe = pe.with_status(s);
     }
@@ -381,6 +385,39 @@ mod tests {
         SdkError::service_error(inner, raw)
     }
 
+    #[test]
+    fn api_error_with_meta_keeps_retryability_and_original_sdk_cause() {
+        use carina_core::provider_text::ProviderDiagnostic;
+
+        for (status, code, expected) in [
+            (403, "AccessDenied", Retryability::Unclassified),
+            (400, "ValidationException", Retryability::Unclassified),
+            (400, "ThrottlingException", Retryability::Transient),
+            (429, "Unmodeled", Retryability::Transient),
+            (503, "Unmodeled", Retryability::Transient),
+        ] {
+            let error = api_error_with_meta(
+                "Failed to list IAM roles",
+                operation_service_error_with_meta(
+                    status,
+                    Some(code),
+                    Some("AWS failure"),
+                    ListRolesError::generic,
+                ),
+            );
+            assert_eq!(error.retryability(), expected, "{status} {code}");
+            let diagnostic = ProviderDiagnostic::new(error);
+            assert!(diagnostic.source_is::<SdkError<ListRolesError>>());
+            assert!(
+                diagnostic
+                    .as_cause()
+                    .matches_for_test(|sdk: &SdkError<ListRolesError>| sdk
+                        .as_service_error()
+                        .is_some())
+            );
+        }
+    }
+
     fn operation_service_error_with_meta<E>(
         status: u16,
         code: Option<&str>,
@@ -415,10 +452,29 @@ mod tests {
             panic!("expected ApiError, got {:?}", pe);
         };
 
-        assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("iam.ListRoles")
+        );
         assert_eq!(detail.status, Some(403));
-        assert_eq!(detail.code(), Some("AccessDenied"));
-        assert_eq!(detail.request_id.as_deref(), Some("test-request-id"));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some("AccessDenied")
+        );
+        assert_eq!(
+            detail
+                .request_id
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("test-request-id")
+        );
         assert_eq!(detail.context(), "Failed to list IAM roles");
         assert!(detail.cause().is_some());
 
@@ -508,9 +564,17 @@ mod tests {
         };
 
         assert_eq!(detail.context(), "Failed to list IAM roles");
-        assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("iam.ListRoles")
+        );
         assert_eq!(detail.status, None);
-        assert_eq!(detail.code(), None);
+        assert_eq!(detail.code().as_ref().map(|text| text.as_str()), None);
         assert_eq!(detail.request_id, None);
         // Cause is preserved so the renderer's fallback path surfaces
         // the transport-level diagnostic.
@@ -551,7 +615,12 @@ mod tests {
         let pe = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(pe);
 
         assert_eq!(
-            pe.detail().operation.as_deref(),
+            pe.detail()
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
             Some("cloudwatchlogs.DescribeLogGroups")
         );
         assert!(!pe.to_string().contains(OUTCOME_UNKNOWN_NOTE));
@@ -602,7 +671,10 @@ mod tests {
 
         assert!(rendered.contains(OUTCOME_UNKNOWN_NOTE), "{rendered}");
         assert_eq!(error.detail().status, Some(429));
-        assert_eq!(error.detail().code(), Some("RequestLimitExceeded"));
+        assert_eq!(
+            error.detail().code().as_ref().map(|text| text.as_str()),
+            Some("RequestLimitExceeded")
+        );
     }
 
     #[test]
@@ -636,9 +708,20 @@ mod tests {
             panic!("expected NotFound, got {:?}", pe);
         };
 
-        assert_eq!(detail.operation.as_deref(), Some("acm.DescribeCertificate"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("acm.DescribeCertificate")
+        );
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code(), Some("ResourceNotFoundException"));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some("ResourceNotFoundException")
+        );
     }
 
     #[test]
@@ -658,9 +741,20 @@ mod tests {
             panic!("expected NotFound, got {:?}", pe);
         };
 
-        assert_eq!(detail.operation.as_deref(), Some("iam.GetRole"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("iam.GetRole")
+        );
         assert_eq!(detail.status, Some(404));
-        assert_eq!(detail.code(), Some("NoSuchEntity"));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some("NoSuchEntity")
+        );
     }
 
     #[test]
@@ -681,11 +775,19 @@ mod tests {
         };
 
         assert_eq!(
-            detail.operation.as_deref(),
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
             Some("ec2.DescribeSecurityGroups")
         );
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code(), Some("InvalidGroup.NotFound"));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some("InvalidGroup.NotFound")
+        );
     }
 
     #[test]
@@ -702,9 +804,20 @@ mod tests {
             panic!("expected ApiError, got {:?}", pe);
         };
 
-        assert_eq!(detail.operation.as_deref(), Some("iam.ListRoles"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("iam.ListRoles")
+        );
         assert_eq!(detail.status, Some(400));
-        assert_eq!(detail.code(), Some("ValidationException"));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some("ValidationException")
+        );
     }
 
     #[test]
@@ -724,8 +837,16 @@ mod tests {
             panic!("expected NotFound, got {:?}", pe);
         };
 
-        assert_eq!(detail.operation.as_deref(), Some("s3.HeadBucket"));
+        assert_eq!(
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
+            Some("s3.HeadBucket")
+        );
         assert_eq!(detail.status, Some(404));
-        assert_eq!(detail.code(), None);
+        assert_eq!(detail.code().as_ref().map(|text| text.as_str()), None);
     }
 }

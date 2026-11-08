@@ -537,10 +537,18 @@ mod tests {
         };
 
         assert_eq!(
-            detail.operation.as_deref(),
+            detail
+                .operation
+                .as_ref()
+                .map(|text| text.as_diagnostic())
+                .as_ref()
+                .map(|text| text.as_str()),
             Some("s3.PutObjectLockConfiguration")
         );
-        assert_eq!(detail.code(), Some(expected_code));
+        assert_eq!(
+            detail.code().as_ref().map(|text| text.as_str()),
+            Some(expected_code)
+        );
         let rendered = error.to_string();
         assert!(
             rendered.contains(expected),

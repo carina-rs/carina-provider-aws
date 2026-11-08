@@ -179,7 +179,11 @@ mod guest {
             let proto::CreateVerdict::NotCreated(error) = *verdict else {
                 panic!("validation must report NotCreated: {verdict:?}");
             };
-            assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+            let error = error.to_wire();
+            assert_eq!(
+                error.kind,
+                carina_provider_protocol::types::ProviderErrorKind::InvalidInput
+            );
             assert_eq!(error.resource_id.as_ref(), Some(&id));
             assert!(error.message.contains(message), "{error:?}");
             assert!(!error.message.contains("private-name"));
@@ -206,11 +210,17 @@ mod guest {
                         }],
                     },
                 };
-                let error = provider.update(&id, &identifier, request).expect_err(
-                    "guest update must validate unchanged historical cross-field inputs",
-                );
+                let error = provider
+                    .update(&id, &identifier, request)
+                    .expect_err(
+                        "guest update must validate unchanged historical cross-field inputs",
+                    )
+                    .to_wire();
                 assert_eq!(service.requests.load(Ordering::Relaxed), 0);
-                assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+                assert_eq!(
+                    error.kind,
+                    carina_provider_protocol::types::ProviderErrorKind::InvalidInput
+                );
                 assert_eq!(error.resource_id.as_ref(), Some(&id));
                 assert!(error.message.contains(message), "{error:?}");
             }
@@ -276,8 +286,13 @@ mod guest {
         };
         let result = provider.update(&id, &identifier, request);
         assert_eq!(service.requests.load(Ordering::Relaxed), 0);
-        let error = result.expect_err("guest update must validate the reconstructed target");
-        assert_eq!(error.kind, proto::ProviderErrorKind::InvalidInput);
+        let error = result
+            .expect_err("guest update must validate the reconstructed target")
+            .to_wire();
+        assert_eq!(
+            error.kind,
+            carina_provider_protocol::types::ProviderErrorKind::InvalidInput
+        );
         assert_eq!(error.resource_id.as_ref(), Some(&id));
         assert!(
             error
@@ -497,6 +512,7 @@ mod guest {
                 assert!(
                     in_flight
                         .error
+                        .to_wire()
                         .cause
                         .as_deref()
                         .unwrap()
@@ -531,6 +547,7 @@ mod guest {
                     assert!(
                         in_flight
                             .error
+                            .to_wire()
                             .cause
                             .as_deref()
                             .unwrap()
@@ -557,6 +574,7 @@ mod guest {
                     assert!(
                         in_flight
                             .error
+                            .to_wire()
                             .cause
                             .as_deref()
                             .unwrap()
@@ -632,7 +650,10 @@ mod guest {
                     attributes,
                 } if !populated => {
                     assert_eq!(identifier.as_str(), ARN);
-                    assert_eq!(diagnostic.missing_attributes, ["domain_validation_options"]);
+                    assert_eq!(
+                        diagnostic.missing_attributes(),
+                        ["domain_validation_options"]
+                    );
                     assert!(!attributes.contains_key("domain_validation_options"));
                 }
                 other => panic!("unexpected final resume: {other:?}"),
@@ -672,7 +693,10 @@ mod guest {
             panic!("final poll must be partial")
         };
         assert_eq!(identifier.as_str(), ARN);
-        assert_eq!(diagnostic.missing_attributes, ["domain_validation_options"]);
+        assert_eq!(
+            diagnostic.missing_attributes(),
+            ["domain_validation_options"]
+        );
         assert_eq!(service.requests.load(Ordering::Relaxed), 1);
     }
 

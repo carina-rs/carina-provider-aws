@@ -1,10 +1,11 @@
 #![cfg(feature = "test-utils")]
 
 use carina_aws_types::kms_reference::{
-    DescribeKeyClient, DescribeKeyFailure, resolve_kms_key_reference,
+    DescribeKeyClient, DescribeKeyFailure, resolve_core_reference_batch,
 };
 use carina_core::provider::BoxFuture;
-use carina_provider_protocol::types::ReferenceError;
+use carina_core::references::{ReferenceError, ReferenceRequest};
+use carina_core::test_utils::provider_text::NativeWireFixture as _;
 
 struct DeniedClient;
 
@@ -27,11 +28,21 @@ impl DescribeKeyClient for DeniedClient {
 
 #[tokio::test]
 async fn fake_failure_constructor_preserves_classification_and_metadata() {
-    let Err(ReferenceError::AccessDenied(error)) =
-        resolve_kms_key_reference(&DeniedClient, "awscc", "us-east-1", "alias/test").await
-    else {
+    let Err(ReferenceError::AccessDenied(error)) = resolve_core_reference_batch(
+        &DeniedClient,
+        "awscc",
+        "us-east-1",
+        &[ReferenceRequest {
+            ty: carina_aws_types::AwsType::KmsKeyReference.identity(),
+            value: "alias/test".into(),
+        }],
+    )
+    .await
+    .pop()
+    .unwrap() else {
         panic!("fake access denial must reach the resolver caller");
     };
+    let error = error.to_wire();
     assert_eq!(error.cause.as_deref(), Some("fake access denied"));
     assert_eq!(error.code.as_deref(), Some("AccessDeniedException"));
     assert_eq!(error.status, Some(403));
