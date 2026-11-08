@@ -4,6 +4,10 @@
 //! Each `DataSourceDef` describes a read-only data source with optional user-supplied lookup inputs.
 //! These definitions are consumed by the `smithy-codegen` binary.
 
+use carina_core::schema::{
+    CharSet, InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope, NonEmptyString,
+};
+
 /// An additional writable field not present in the create operation input.
 /// Used to add fields from the read structure or synthetic fields.
 pub struct ExtraField {
@@ -246,6 +250,8 @@ impl ReadBackOverrides {
 
 /// Defines how to map an AWS API resource to a Carina schema.
 pub struct ResourceDef {
+    /// Portable desired-input rules, emitted on the resource schema unchanged.
+    pub input_rules: Vec<InputRule>,
     /// Explicit post-mutation completeness declarations and host budget.
     pub read_back: ReadBackOverrides,
     /// Carina DSL resource name (e.g., "ec2.Vpc")
@@ -1174,6 +1180,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc
         ResourceDef {
             name: "ec2.Vpc",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // With ipv4_ipam_pool_id and an explicit cidr_block, a replacement driven
             // by another create-only change (e.g. instance_tenancy) requests the same
@@ -1223,6 +1230,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.subnet
         ResourceDef {
             name: "ec2.Subnet",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // An availability-zone replacement can retain an overlapping CIDR.
             replacement: ReplacementClass::Conflicting,
@@ -1278,6 +1286,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.internet_gateway
         ResourceDef {
             name: "ec2.InternetGateway",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A replacement changes the create-only VPC attachment target.
             replacement: ReplacementClass::Coexisting,
@@ -1317,6 +1326,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.route_table
         ResourceDef {
             name: "ec2.RouteTable",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Route tables have no uniqueness constraint between instances.
             replacement: ReplacementClass::Coexisting,
@@ -1350,6 +1360,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.route
         ResourceDef {
             name: "ec2.Route",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Route table ID and destination CIDR form the uniqueness key.
             replacement: ReplacementClass::Coexisting,
@@ -1401,6 +1412,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group
         ResourceDef {
             name: "ec2.SecurityGroup",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Group names are user-chosen and unique within a VPC.
             replacement: ReplacementClass::UniqueName("GroupName"),
@@ -1434,6 +1446,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group_ingress
         ResourceDef {
             name: "ec2.SecurityGroupIngress",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A description-only replacement would duplicate the rule tuple.
             replacement: ReplacementClass::Conflicting,
@@ -1495,6 +1508,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.security_group_egress
         ResourceDef {
             name: "ec2.SecurityGroupEgress",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A description-only replacement would duplicate the rule tuple.
             replacement: ReplacementClass::Conflicting,
@@ -1556,6 +1570,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.egress_only_internet_gateway
         ResourceDef {
             name: "ec2.EgressOnlyInternetGateway",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A replacement changes the create-only VPC attachment target.
             replacement: ReplacementClass::Coexisting,
@@ -1597,6 +1612,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.eip
         ResourceDef {
             name: "ec2.Eip",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // address is a user-chosen create-only value; with it pinned, a
             // domain/public_ipv4_pool change re-allocates an address the original
@@ -1638,6 +1654,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.flow_log
         ResourceDef {
             name: "ec2.FlowLog",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Coexistence on the same resource and destination is unverified.
             replacement: ReplacementClass::Conflicting,
@@ -1692,6 +1709,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.nat_gateway
         ResourceDef {
             name: "ec2.NatGateway",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // An Elastic IP allocation can back only one NAT gateway.
             replacement: ReplacementClass::Conflicting,
@@ -1744,6 +1762,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.subnet_route_table_association
         ResourceDef {
             name: "ec2.SubnetRouteTableAssociation",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A subnet can have only one route table association.
             replacement: ReplacementClass::Conflicting,
@@ -1777,6 +1796,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.transit_gateway
         ResourceDef {
             name: "ec2.TransitGateway",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Transit gateways have no uniqueness constraint between instances.
             replacement: ReplacementClass::Coexisting,
@@ -1831,6 +1851,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.transit_gateway_attachment
         ResourceDef {
             name: "ec2.TransitGatewayAttachment",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // subnet_ids/options are also create-only, so a replacement can keep
             // the same (transit gateway, VPC) pair, and AWS rejects a second
@@ -1877,6 +1898,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_endpoint
         ResourceDef {
             name: "ec2.VpcEndpoint",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Duplicate service endpoints can conflict on private DNS or routes.
             replacement: ReplacementClass::Conflicting,
@@ -1930,6 +1952,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_gateway_attachment
         ResourceDef {
             name: "ec2.VpcGatewayAttachment",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A VPC can have only one internet gateway attached.
             replacement: ReplacementClass::Conflicting,
@@ -1974,6 +1997,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpc_peering_connection
         ResourceDef {
             name: "ec2.VpcPeeringConnection",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // A peer_owner_id-only change keeps the same VPC pair, and AWS allows
             // one active peering per pair.
@@ -2035,6 +2059,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
         // ec2.vpn_gateway
         ResourceDef {
             name: "ec2.VpnGateway",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // VPN gateways have no uniqueness constraint between instances.
             replacement: ReplacementClass::Coexisting,
@@ -2163,6 +2188,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         // organizations.organization
         ResourceDef {
             name: "organizations.Organization",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // An AWS account can belong to only one organization.
             replacement: ReplacementClass::Conflicting,
@@ -2201,6 +2227,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
         // organizations.account
         ResourceDef {
             name: "organizations.Account",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Email is globally unique, and account removal is not a plain delete.
             replacement: ReplacementClass::Conflicting,
@@ -2246,6 +2273,75 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // s3.bucket
         ResourceDef {
             name: "s3.Bucket",
+            // CreateBucket measured 2026-11-08T02:44Z, carina-test-004, us-east-1
+            // and ap-northeast-1: every forbidden name rejected in both regions;
+            // valid controls created and deleted. Legacy names remain readable
+            // and importable, so these rules apply only to creation.
+            // The namespace-dependent -an suffix is carina-rs/carina#4263.
+            input_rules: {
+                let alphanumeric = CharSet::new([('a', 'z'), ('0', '9')]).unwrap();
+                let dot = CharSet::new([('.', '.')]).unwrap();
+                let token = |value: &str| NonEmptyString::new(value).unwrap();
+                let rule = |code: &str, predicate| {
+                    InputRule::value(
+                        InputRuleScope::CreateOnly,
+                        InputPath::new("bucket").unwrap(),
+                        InputRuleCode::new(format!("s3.bucket.{code}")).unwrap(),
+                        predicate,
+                    )
+                };
+                vec![
+                    rule(
+                        "length",
+                        InputPredicate::Length {
+                            min: Some(3),
+                            max: Some(63),
+                        },
+                    ),
+                    rule(
+                        "allowed_chars",
+                        InputPredicate::AllowedChars(
+                            CharSet::new([('a', 'z'), ('0', '9'), ('.', '.'), ('-', '-')]).unwrap(),
+                        ),
+                    ),
+                    rule(
+                        "first_char",
+                        InputPredicate::FirstChar(alphanumeric.clone()),
+                    ),
+                    rule("last_char", InputPredicate::LastChar(alphanumeric)),
+                    rule(
+                        "no_adjacent_dots",
+                        InputPredicate::NoAdjacent {
+                            left: dot.clone(),
+                            right: dot,
+                        },
+                    ),
+                    rule("not_ipv4", InputPredicate::NotIpv4),
+                    rule("no_prefix_xn", InputPredicate::NoPrefix(token("xn--"))),
+                    rule(
+                        "no_prefix_sthree",
+                        InputPredicate::NoPrefix(token("sthree-")),
+                    ),
+                    rule(
+                        "no_prefix_amzn_s3_demo",
+                        InputPredicate::NoPrefix(token("amzn-s3-demo-")),
+                    ),
+                    rule(
+                        "no_suffix_s3alias",
+                        InputPredicate::NoSuffix(token("-s3alias")),
+                    ),
+                    rule(
+                        "no_suffix_ol_s3",
+                        InputPredicate::NoSuffix(token("--ol-s3")),
+                    ),
+                    rule("no_suffix_mrap", InputPredicate::NoSuffix(token(".mrap"))),
+                    rule("no_suffix_x_s3", InputPredicate::NoSuffix(token("--x-s3"))),
+                    rule(
+                        "no_suffix_table_s3",
+                        InputPredicate::NoSuffix(token("--table-s3")),
+                    ),
+                ]
+            },
             read_back: ReadBackOverrides::default(),
             // bucket_namespace is create-only; account-regional bucket names must end in
             // "-<account-id>-<region>-an" (AWS S3 user guide "Namespaces for general
@@ -2343,6 +2439,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // DeleteBucketPolicy.
         ResourceDef {
             name: "s3.BucketPolicy",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2394,6 +2491,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // PutBucketVersioning with Status=Suspended.
         ResourceDef {
             name: "s3.BucketVersioning",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2461,6 +2559,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetObjectLockConfiguration. AWS exposes no disable or delete API.
         ResourceDef {
             name: "s3.BucketObjectLockConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2535,6 +2634,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // API; "destroying" the resource resets the ACL to "private".
         ResourceDef {
             name: "s3.BucketAcl",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2589,6 +2689,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketOwnershipControls / DeleteBucketOwnershipControls.
         ResourceDef {
             name: "s3.BucketOwnershipControls",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2641,6 +2742,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketEncryption / DeleteBucketEncryption.
         ResourceDef {
             name: "s3.BucketServerSideEncryptionConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2697,6 +2799,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetBucketReplication / DeleteBucketReplication.
         ResourceDef {
             name: "s3.BucketReplicationConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2756,6 +2859,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // DeleteBucketLifecycle.
         ResourceDef {
             name: "s3.BucketLifecycleConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2805,6 +2909,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // Maps to PutBucketWebsite / GetBucketWebsite / DeleteBucketWebsite.
         ResourceDef {
             name: "s3.BucketWebsiteConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2875,6 +2980,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // S3 bucket. Maps to PutBucketCors / GetBucketCors / DeleteBucketCors.
         ResourceDef {
             name: "s3.BucketCorsConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -2927,6 +3033,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // empty configuration (Terraform parity).
         ResourceDef {
             name: "s3.BucketNotificationConfiguration",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -3019,6 +3126,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // BucketLoggingStatus (Terraform parity).
         ResourceDef {
             name: "s3.BucketLogging",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -3085,6 +3193,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
         // GetPublicAccessBlock / DeletePublicAccessBlock.
         ResourceDef {
             name: "s3.BucketPublicAccessBlock",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Bucket is a parent reference; replacement targets another bucket.
             replacement: ReplacementClass::Coexisting,
@@ -3237,6 +3346,7 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
 pub fn acm_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "acm.Certificate",
+        input_rules: vec![],
         read_back: ReadBackOverrides {
             await_attributes: vec![AwaitReadBackAttribute {
                 attribute: "domain_validation_options",
@@ -3353,6 +3463,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
         // in a nested ChangeBatch, not as top-level input parameters.
         ResourceDef {
             name: "route53.RecordSet",
+            input_rules: vec![],
             read_back: ReadBackOverrides::default(),
             // Create is UPSERT and names compare case-insensitively and without
             // a trailing dot, so an equivalent name overwrites the original and
@@ -3463,6 +3574,7 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
 pub fn iam_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "iam.Role",
+        input_rules: vec![],
         read_back: ReadBackOverrides::default(),
         // RoleName is the user-chosen name, unique within the account.
         replacement: ReplacementClass::UniqueName("RoleName"),
@@ -3508,6 +3620,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
 pub fn logs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "logs.LogGroup",
+        input_rules: vec![],
         read_back: ReadBackOverrides::default(),
         // LogGroupName is the user-chosen unique log group name.
         replacement: ReplacementClass::UniqueName("LogGroupName"),
@@ -3579,6 +3692,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
 pub fn sqs_resources() -> Vec<ResourceDef> {
     vec![ResourceDef {
         name: "sqs.Queue",
+        input_rules: vec![],
         read_back: ReadBackOverrides::default(),
         // Temporary-name generation appends "-<suffix>" without preserving the
         // mandatory ".fifo" suffix, so CreateQueue rejects the replacement;
