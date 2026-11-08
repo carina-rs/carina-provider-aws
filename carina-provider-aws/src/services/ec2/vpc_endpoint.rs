@@ -293,7 +293,6 @@ mod tests {
     use super::*;
     use crate::services::iam::role::IamPolicyDecodeError;
     use carina_core::provider::ProviderErrorKind;
-    use std::error::Error;
 
     #[test]
     fn endpoint_read_policy_decode_failure_keeps_its_typed_cause() {
@@ -313,7 +312,12 @@ mod tests {
                 .unwrap()
                 .downcast_ref::<IamPolicyDecodeError>()
                 .expect("typed IAM policy decode error");
-            assert!(matches!(decode, IamPolicyDecodeError::Json(_)));
+            assert!(
+                decode.matches_for_test::<IamPolicyDecodeError>(|error| matches!(
+                    error,
+                    IamPolicyDecodeError::Json(_)
+                ))
+            );
             assert!(decode.source().unwrap().is::<serde_json::Error>());
         }
     }

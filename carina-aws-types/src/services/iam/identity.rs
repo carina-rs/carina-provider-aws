@@ -1,4 +1,5 @@
 use carina_core::schema::AttributeType;
+use carina_core::schema::{PatternMatch, PatternSpec};
 
 fn validate_iam_name(name: &str, maximum: usize) -> Result<(), String> {
     if name.is_empty() || name.len() > maximum {
@@ -31,7 +32,10 @@ pub fn validate_iam_policy_name(name: &str) -> Result<(), String> {
 pub fn iam_path() -> AttributeType {
     AttributeType::refined_string(
         None,
-        Some(r"^(?:/|/[\x21-\x7E]+/)\z".to_string()),
+        Some(PatternSpec::new(
+            r"^(?:/|/[\x21-\x7E]+/)\z",
+            PatternMatch::Full,
+        )),
         Some((Some(1), Some(512))),
         None,
     )
@@ -43,7 +47,7 @@ pub fn iam_path() -> AttributeType {
 pub fn iam_path_prefix() -> AttributeType {
     AttributeType::refined_string(
         None,
-        Some(r"^/[\x21-\x7F]*\z".to_string()),
+        Some(PatternSpec::new(r"^/[\x21-\x7F]*\z", PatternMatch::Full)),
         Some((Some(1), Some(512))),
         None,
     )
@@ -86,7 +90,7 @@ mod tests {
                 panic!("IAM path must be a String");
             };
             assert!(identity.is_none() && validate.is_none());
-            assert_eq!(pattern, Some(expected));
+            assert_eq!(pattern.map(PatternSpec::as_str), Some(expected));
             assert_eq!(length, Some((Some(1), Some(512))));
             let admitted = crate::tests::rootless(attr);
             for valid in [

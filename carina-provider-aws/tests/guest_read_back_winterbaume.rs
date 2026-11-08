@@ -363,13 +363,16 @@ mod guest {
         fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
             self.inner.provider_config_attribute_types()
         }
-        fn validate_config(&self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
+        fn validate_config(
+            &self,
+            attrs: &BTreeMap<String, proto::Value>,
+        ) -> Result<(), proto::ProviderError> {
             self.inner.validate_config(attrs)
         }
         fn initialize(
             &mut self,
             attrs: &BTreeMap<String, proto::Value>,
-        ) -> Result<proto::ReferenceScope, String> {
+        ) -> Result<proto::ReferenceScope, proto::ProviderError> {
             self.inner.initialize(attrs)
         }
         fn read(

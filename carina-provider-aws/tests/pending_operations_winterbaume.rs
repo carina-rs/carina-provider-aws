@@ -3,6 +3,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use carina_core::test_utils::provider_text::NativeWireFixture as _;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,8 +14,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aws_smithy_runtime_api::client::http::{HttpClient, SharedHttpConnector, http_client_fn};
 use carina_core::provider::{
-    AppliedIdentifier, AppliedState, CreateFailure, CreateRequest, DeleteRequest, Observation,
-    PatchOp, ProviderDirectiveSchema, ProviderError, ReadOutcome, Sent, UpdatePatch,
+    AppliedIdentifier, AppliedState, CreateRequest, DeleteRequest,
+    HostCreateFailure as CreateFailure, Observation, PatchOp, ProviderDirectiveSchema,
+    ProviderError, ReadOutcome, Sent, UpdatePatch,
 };
 use carina_core::replacement::create_permit_for_test;
 use carina_core::resource::{
@@ -230,7 +232,10 @@ impl AwsIssuedCreate for TestIssuedCreate {
     ) -> Result<Self::Step, Self::Verdict> {
         Ok(TestCreateStep::Partial {
             state: TestAppliedState::new(self.id, self.identifier, attributes),
-            reason: reason.to_string(),
+            reason: carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                reason,
+            )
+            .to_string(),
             missing_attributes: missing_attributes.into(),
         })
     }
@@ -382,7 +387,10 @@ impl AwsResumedCreate for TestResumedCreate {
         Ok(TestResumeStep::Partial {
             identifier: self.identifier,
             attributes,
-            reason: reason.to_string(),
+            reason: carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                reason,
+            )
+            .to_string(),
             missing_attributes: missing_attributes.into(),
         })
     }
@@ -968,16 +976,18 @@ fn empty_describe_flow_logs_response() -> &'static str {
 </DescribeFlowLogsResponse>"#
 }
 
-fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
-    AwsProvider::from_sdk_config(
+fn provider_from_config(sdk_config: aws_types::SdkConfig) -> Arc<AwsProvider> {
+    Arc::new(AwsProvider::from_sdk_config(
         REGION.to_string(),
         vec![],
         vec![],
         &BoundedSdkConfig::for_test(sdk_config),
-    )
+    ))
 }
 
-async fn provider_with_ec2(describe_states: &[&str]) -> (AwsProvider, Arc<ScriptedEc2Service>) {
+async fn provider_with_ec2(
+    describe_states: &[&str],
+) -> (Arc<AwsProvider>, Arc<ScriptedEc2Service>) {
     let service = Arc::new(ScriptedEc2Service::new(describe_states));
     let mock = MockAws::builder()
         .with_service(Arc::clone(&service))
@@ -990,7 +1000,7 @@ async fn provider_with_ec2_failures(
     describe_states: &[&str],
     reject_create: bool,
     reject_tags: bool,
-) -> (AwsProvider, Arc<ScriptedEc2Service>) {
+) -> (Arc<AwsProvider>, Arc<ScriptedEc2Service>) {
     let service = Arc::new(ScriptedEc2Service::new_with_failures(
         describe_states,
         reject_create,
@@ -1003,7 +1013,7 @@ async fn provider_with_ec2_failures(
     (provider_from_config(sdk_config), service)
 }
 
-async fn provider_with_partial_flow_log() -> AwsProvider {
+async fn provider_with_partial_flow_log() -> Arc<AwsProvider> {
     let mock = MockAws::builder()
         .with_service(PartialFlowLogEc2Service)
         .build();
@@ -1011,7 +1021,7 @@ async fn provider_with_partial_flow_log() -> AwsProvider {
     provider_from_config(sdk_config)
 }
 
-async fn provider_with_tagged_flow_logs(identifiers: &[&str]) -> AwsProvider {
+async fn provider_with_tagged_flow_logs(identifiers: &[&str]) -> Arc<AwsProvider> {
     let mock = MockAws::builder()
         .with_service(TaggedFlowLogEc2Service {
             identifiers: identifiers
@@ -1025,7 +1035,7 @@ async fn provider_with_tagged_flow_logs(identifiers: &[&str]) -> AwsProvider {
 
 async fn provider_with_acm(
     request_result: AcmRequestResult,
-) -> (AwsProvider, Arc<Mutex<Vec<String>>>) {
+) -> (Arc<AwsProvider>, Arc<Mutex<Vec<String>>>) {
     let request_bodies = Arc::new(Mutex::new(Vec::new()));
     let mock = MockAws::builder()
         .with_service(ScriptedAcmService {
@@ -1044,7 +1054,7 @@ async fn provider_with_acm(
 
 async fn provider_with_recording_post_send_failure(
     expected_body_fragment: &'static str,
-) -> (AwsProvider, Arc<Mutex<Vec<String>>>) {
+) -> (Arc<AwsProvider>, Arc<Mutex<Vec<String>>>) {
     let request_bodies = Arc::new(Mutex::new(Vec::new()));
     let connector = RecordingPostSendFailure {
         expected_body_fragment,
@@ -1057,13 +1067,13 @@ async fn provider_with_recording_post_send_failure(
     (provider_from_config(config), request_bodies)
 }
 
-async fn provider_without_services() -> AwsProvider {
+async fn provider_without_services() -> Arc<AwsProvider> {
     let mock = MockAws::builder().build();
     let sdk_config = mock.sdk_config(REGION).await;
     provider_from_config(sdk_config)
 }
 
-async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> AwsProvider {
+async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> Arc<AwsProvider> {
     let describe_calls = Arc::new(AtomicUsize::new(0));
     let mock = MockAws::builder()
         .with_service(TaggedVpcEc2Service {
@@ -1079,7 +1089,7 @@ async fn provider_with_tagged_vpcs(identifiers: &[&str]) -> AwsProvider {
     provider_from_config(mock.sdk_config(REGION).await)
 }
 
-async fn provider_with_tagged_vpc_discovery_error() -> AwsProvider {
+async fn provider_with_tagged_vpc_discovery_error() -> Arc<AwsProvider> {
     let describe_calls = Arc::new(AtomicUsize::new(0));
     let mock = MockAws::builder()
         .with_service(TaggedVpcEc2Service {
@@ -1092,7 +1102,7 @@ async fn provider_with_tagged_vpc_discovery_error() -> AwsProvider {
     provider_from_config(mock.sdk_config(REGION).await)
 }
 
-async fn provider_with_unbounded_tagged_vpc_pages() -> (AwsProvider, Arc<AtomicUsize>) {
+async fn provider_with_unbounded_tagged_vpc_pages() -> (Arc<AwsProvider>, Arc<AtomicUsize>) {
     let describe_calls = Arc::new(AtomicUsize::new(0));
     let mock = MockAws::builder()
         .with_service(TaggedVpcEc2Service {
@@ -1110,7 +1120,7 @@ async fn provider_with_unbounded_tagged_vpc_pages() -> (AwsProvider, Arc<AtomicU
 
 async fn provider_with_post_send_failure(
     expected_action: &'static str,
-) -> (AwsProvider, Arc<AtomicUsize>) {
+) -> (Arc<AwsProvider>, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let connector = PostSendVpcFailure {
         calls: Arc::clone(&calls),
@@ -1260,11 +1270,13 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &[],
                 &schemas,
                 type_checks,
@@ -1278,12 +1290,17 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
 }
 
 async fn create_state_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(provider)),
+        Box::new(carina_provider_aws::AwsNormalizer),
+        &carina_provider_aws::schemas::schema_registry(),
+    );
     let (create, _cancellation) =
-        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
+        carina_core::executor::dispatch_create(&boundary, create_permit_for_test(request));
     create
         .await
         .map(|outcome| carina_core::executor::complete_create_for_writeback(outcome, accepted).0)
@@ -2043,7 +2060,10 @@ async fn tagged_vpc_discovery_error_consumes_final_attempt_and_keeps_cause() {
             .map(|resource_id| resource_id.identity.as_str()),
         Some("outcome-unknown")
     );
-    let rendered = verdict.provider_error().to_string();
+    let rendered = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+        verdict.provider_error().clone(),
+    )
+    .to_string();
     assert!(
         rendered.contains("UnauthorizedOperation"),
         "rendered discovery error should include the AWS error code"
@@ -2071,7 +2091,10 @@ async fn tagged_vpc_exhaustion_keeps_the_original_send_failure_summary() {
         .expect_err("final discovery must retain the ambiguous send metadata");
 
     assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
-    let rendered = verdict.provider_error().to_string();
+    let rendered = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+        verdict.provider_error().clone(),
+    )
+    .to_string();
     assert!(
         rendered.contains("ec2.CreateVpc"),
         "rendered create error should include the operation name"
@@ -2138,7 +2161,10 @@ async fn tagged_vpc_poll_with_two_matches_stays_in_flight() {
         .expect_err("multiple matches cannot choose an identifier safely");
 
     assert!(matches!(verdict, TestCreateVerdict::InFlight { .. }));
-    let rendered = verdict.provider_error().to_string();
+    let rendered = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+        verdict.provider_error().clone(),
+    )
+    .to_string();
     assert!(
         rendered.contains("vpc-0553-a"),
         "rendered discovery error should include the first matching identifier"
@@ -2894,7 +2920,9 @@ async fn read_back_final_attempt_returns_partial_with_exact_missing_attributes()
     }
 }
 
-async fn scripted_acm(describes: &[AcmDescribeResult]) -> (AwsProvider, Arc<ScriptedAcmService>) {
+async fn scripted_acm(
+    describes: &[AcmDescribeResult],
+) -> (Arc<AwsProvider>, Arc<ScriptedAcmService>) {
     let service = Arc::new(ScriptedAcmService {
         request_result: AcmRequestResult::Success,
         request_bodies: Arc::new(Mutex::new(Vec::new())),
@@ -3148,7 +3176,14 @@ async fn permanent_update_read_back_error_finishes_partial_on_initial_step_and_p
         let mut expected = schema.attributes().keys().cloned().collect::<Vec<_>>();
         expected.sort();
         assert_eq!(diagnostic.missing_attributes(), expected);
-        assert!(diagnostic.reason().contains("AccessDeniedException"));
+        assert!(
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                diagnostic.clone()
+            )
+            .reason()
+            .as_str()
+            .contains("AccessDeniedException")
+        );
         let carina_core::provider::UpdateOutcomeKind::PartialSuccess { state, .. } = done.kind()
         else {
             panic!("expected partial update")
@@ -3333,8 +3368,20 @@ async fn acm_failed_read_back_is_terminal_failure_without_exhausting_budget() {
         panic!("FAILED preserves the certificate: {error:?}")
     };
     assert_eq!(reported.identifier.as_str(), ACM_CERTIFICATE_ARN);
-    assert!(reported.error.to_string().contains("DOMAIN_NOT_ALLOWED"));
-    assert!(!reported.error.to_string().contains("budget"));
+    assert!(
+        carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+            reported.error.clone()
+        )
+        .to_string()
+        .contains("DOMAIN_NOT_ALLOWED")
+    );
+    assert!(
+        !carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+            reported.error.clone()
+        )
+        .to_string()
+        .contains("budget")
+    );
     assert!(matches!(
         reported.observation,
         Observation::Read(ReadOutcome::Found { .. })
@@ -3731,6 +3778,7 @@ async fn acm_failed_read_back_resume_stays_terminal() {
     let TestResumeVerdict::IdentifierReported(error) = error else {
         unreachable!()
     };
+    let error = carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
     assert!(error.to_string().contains("DOMAIN_NOT_ALLOWED"));
     assert_eq!(service.request_bodies.lock().unwrap().len(), 1);
 }

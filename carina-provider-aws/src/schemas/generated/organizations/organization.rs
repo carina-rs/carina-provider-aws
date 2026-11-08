@@ -43,7 +43,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("id", AttributeType::refined_string(None, Some("^o-[a-z0-9]{10,32}\\z".to_string()), Some((Some(12), Some(34))), None))
+            AttributeSchema::provider_populated("id", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^o-[a-z0-9]{10,32}\\z", carina_core::schema::PatternMatch::Full)), Some((Some(12), Some(34))), None))
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase lette... (read-only)")
                 .with_provider_name("Id")
                 .build(),

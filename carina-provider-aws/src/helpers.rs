@@ -795,13 +795,19 @@ mod tests {
             .get_attr("token")
             .expect_err("a consumed historical secret requires plaintext");
         assert!(matches!(&error, ProviderError::InvalidInput(_)));
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("token"), "{error}");
         let cause = error
             .detail()
             .cause()
             .and_then(|cause| cause.downcast_ref::<carina_core::resource::UnavailableSecretError>())
             .expect("the unavailable snapshot error must remain typed");
-        assert_eq!(cause.path(), "aws.ec2.Vpc.secret.token");
+        assert!(
+            cause.matches_for_test::<carina_core::resource::UnavailableSecretError>(|error| error
+                .path()
+                == "aws.ec2.Vpc.secret.token")
+        );
         assert!(resource.materialized_attributes().is_empty());
         assert_eq!(resource.get_attr("cidr_block").unwrap(), Some(&cidr));
         assert_eq!(resource.materialized_attributes().len(), 1);
@@ -1002,6 +1008,8 @@ mod tests {
         let resource = make_test_resource(vec![("validation_method", "dns")]);
         let error = optional_enum_attr(&resource, schema, "validation_method")
             .expect_err("an invalid closed-enum member must not become None");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         let rendered = error.to_string();
         let reason = "does not exactly match a declared API value";
 

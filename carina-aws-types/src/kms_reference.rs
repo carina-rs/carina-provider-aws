@@ -327,6 +327,7 @@ mod tests {
     use aws_credential_types::provider::error::CredentialsError;
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::{body::SdkBody, error::ErrorMetadata};
+    use carina_core::test_utils::provider_text::{BindProviderText as _, NativeWireFixture as _};
     use carina_provider_protocol::types::{ReferenceError, ReferenceOutcome};
     use std::sync::Mutex;
 
@@ -590,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn core_batch_maps_wire_failures_and_preserves_their_sources_and_metadata() {
-        use carina_core::provider::ProviderError as CoreProviderError;
+        use carina_core::provider::HostError as CoreProviderError;
         use carina_core::references::{
             ReferenceError as CoreError, ReferenceOutcome as CoreOutcome,
         };
@@ -615,6 +616,26 @@ mod tests {
                     &[core_request("alias/customer")],
                 )
                 .await;
+                let results = results
+                    .into_iter()
+                    .map(|result| match result {
+                        Ok(CoreOutcome::Resolved(value)) => Ok(CoreOutcome::Resolved(value)),
+                        Ok(CoreOutcome::NotFound(error)) => {
+                            Ok(CoreOutcome::NotFound(error.into_host_for_test()))
+                        }
+                        Err(CoreError::AccessDenied(error)) => Err(CoreError::AccessDenied(
+                            error.as_ref().clone().into_host_for_test().into(),
+                        )),
+                        Err(CoreError::Transient(error)) => Err(CoreError::Transient(
+                            error.as_ref().clone().into_host_for_test().into(),
+                        )),
+                        Err(CoreError::InvalidReference(error)) => {
+                            Err(CoreError::InvalidReference(
+                                error.as_ref().clone().into_host_for_test().into(),
+                            ))
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 assert_eq!(results.len(), 1);
                 let (actual, error) = match &results[0] {
                     Ok(CoreOutcome::NotFound(error)) => ("not-found", error),

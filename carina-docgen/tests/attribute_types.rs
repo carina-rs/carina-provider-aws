@@ -129,7 +129,15 @@ fn maps_preserve_entry_bounds_constrained_keys_and_linked_values() {
         let ty = AttributeType::refined_map(
             AttributeType::refined_string(
                 None,
-                Some("a|`b".into()),
+                Some(carina_core::schema::PatternSpec::new(
+                    "a|`b",
+                    carina_core::schema::PatternMatch::Substring {
+                        reason: carina_core::schema::PatternReason::new(
+                            "Preserve the fixture regex search semantics.",
+                        )
+                        .unwrap(),
+                    },
+                )),
                 Some((Some(1), Some(8))),
                 None,
             ),
@@ -313,13 +321,24 @@ fn scalars_render_all_refinements_in_github_order() {
         (
             AttributeType::reference(
                 TypeIdentity::bare("Id"),
-                Some("^id$".into()),
+                Some(carina_core::schema::PatternSpec::new(
+                    "^id$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
                 Some((Some(1), Some(8))),
             ),
             "Id (pattern: ^id$, len: 1..=8)",
         ),
         (
-            AttributeType::refined_string(None, Some("^a$".into()), None, None),
+            AttributeType::refined_string(
+                None,
+                Some(carina_core::schema::PatternSpec::new(
+                    "^a$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
+                None,
+                None,
+            ),
             "String (pattern: ^a$)",
         ),
         (
@@ -329,7 +348,10 @@ fn scalars_render_all_refinements_in_github_order() {
         (
             AttributeType::refined_string_with_validator(
                 TypeIdentity::bare("N"),
-                Some("^a$".into()),
+                Some(carina_core::schema::PatternSpec::new(
+                    "^a$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
                 Some((Some(1), None)),
                 validator.clone(),
                 Some(DslTransform::HyphenToUnderscore),
@@ -458,9 +480,21 @@ fn open_enums_without_constraints_render_only_the_declared_name() {
 #[test]
 fn open_enums_preserve_string_base_constraints_like_declared_strings() {
     for (pattern, length) in [
-        (Some("^a$".to_string()), None),
+        (
+            Some(carina_core::schema::PatternSpec::new(
+                "^a$",
+                carina_core::schema::PatternMatch::Full,
+            )),
+            None,
+        ),
         (None, Some((Some(1), Some(8)))),
-        (Some("^a$".to_string()), Some((Some(1), Some(8)))),
+        (
+            Some(carina_core::schema::PatternSpec::new(
+                "^a$",
+                carina_core::schema::PatternMatch::Full,
+            )),
+            Some((Some(1), Some(8))),
+        ),
     ] {
         let identity = TypeIdentity::new(Some("provider"), ["Scope"], "Name");
         let validate = Arc::new(|_: &carina_core::resource::Value| Ok(()));
@@ -531,7 +565,10 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
         (
             AttributeType::refined_string_with_validator(
                 TypeIdentity::new(Some("provider"), ["Scope"], "Text"),
-                Some("^a$".into()),
+                Some(carina_core::schema::PatternSpec::new(
+                    "^a$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
                 Some((Some(1), Some(8))),
                 validate.clone(),
                 Some(DslTransform::HyphenToUnderscore),
@@ -592,7 +629,15 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
 fn open_enums_preserve_nested_enum_scalar_refinements() {
     for (base, refinements) in [
         (
-            AttributeType::refined_string(None, Some("^a$".into()), Some((Some(1), Some(8))), None),
+            AttributeType::refined_string(
+                None,
+                Some(carina_core::schema::PatternSpec::new(
+                    "^a$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
+                Some((Some(1), Some(8))),
+                None,
+            ),
             "pattern: ^a$, len: 1..=8",
         ),
         (
@@ -645,7 +690,10 @@ fn open_enums_preserve_reference_base_constraints() {
         TypeIdentity::new(Some("provider"), ["Scope"], "Open"),
         AttributeType::reference(
             TypeIdentity::new(Some("provider"), ["Scope"], "Reference"),
-            Some("^ref-[a-z]+$".into()),
+            Some(carina_core::schema::PatternSpec::new(
+                "^ref-[a-z]+$",
+                carina_core::schema::PatternMatch::Full,
+            )),
             Some((Some(5), Some(32))),
         ),
         None,
@@ -732,7 +780,15 @@ fn compiled_shapes_use_the_same_renderer() {
     let config = ValidatedConfigSchema::validate(BTreeMap::from([(
         "value".into(),
         AttributeType::refined_map(
-            AttributeType::refined_string(None, Some("^a$".into()), None, None),
+            AttributeType::refined_string(
+                None,
+                Some(carina_core::schema::PatternSpec::new(
+                    "^a$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
+                None,
+                None,
+            ),
             AttributeType::bool(),
             Some((Some(1), Some(4))),
         ),
@@ -778,7 +834,20 @@ fn nesting_limit_missing_aliases_and_alias_only_cycles_are_errors() {
 
 #[test]
 fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
-    let ty = AttributeType::refined_string(None, Some("a|`b\n\t\r".into()), None, None);
+    let ty = AttributeType::refined_string(
+        None,
+        Some(carina_core::schema::PatternSpec::new(
+            "a|`b\n\t\r",
+            carina_core::schema::PatternMatch::Substring {
+                reason: carina_core::schema::PatternReason::new(
+                    "Preserve the fixture regex search semantics.",
+                )
+                .unwrap(),
+            },
+        )),
+        None,
+        None,
+    );
     let markdown = page(&ty, &mut Hooks::default()).unwrap();
     assert!(
         markdown.starts_with("``String (pattern: a|`b\\n\\t\\u{d})``"),
@@ -788,7 +857,20 @@ fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
         markdown.contains("| ``String (pattern: a\\|`b\\n\\t\\u{d})`` |"),
         "{markdown}"
     );
-    let odd_slash = AttributeType::refined_string(None, Some(r"a\|b".into()), None, None);
+    let odd_slash = AttributeType::refined_string(
+        None,
+        Some(carina_core::schema::PatternSpec::new(
+            r"a\|b",
+            carina_core::schema::PatternMatch::Substring {
+                reason: carina_core::schema::PatternReason::new(
+                    "Preserve the fixture regex search semantics.",
+                )
+                .unwrap(),
+            },
+        )),
+        None,
+        None,
+    );
     let markdown = page(&odd_slash, &mut Hooks::default()).unwrap();
     assert!(
         markdown.contains(r"| `String (pattern: a\`<!---->`\|b)` |"),

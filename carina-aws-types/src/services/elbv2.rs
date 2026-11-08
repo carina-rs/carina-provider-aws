@@ -1,5 +1,6 @@
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{AttributeType, TypeIdentity, legacy_validator};
+use carina_core::schema::{PatternMatch, PatternSpec};
 
 // Real-AWS probe by the awscc agent in carina-test-001, 2026-11-04:
 // HTTP 0200, 200-0299, 200,0302 and gRPC 00-05, 0,05 were rejected.
@@ -10,10 +11,10 @@ use carina_core::schema::{AttributeType, TypeIdentity, legacy_validator};
 pub fn elbv2_health_check_port() -> AttributeType {
     AttributeType::refined_string(
         None,
-        Some(
-            r"^(?:traffic-port|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\z"
-                .to_string(),
-        ),
+        Some(PatternSpec::new(
+            r"^(?:traffic-port|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\z",
+            PatternMatch::Full,
+        )),
         None,
         None,
     )
@@ -86,8 +87,8 @@ mod tests {
             panic!("ELBv2 health-check port must be a patterned String");
         };
         assert!(identity.is_none() && validate.is_none() && length.is_none());
-        assert!(pattern.starts_with('^'));
-        assert!(pattern.ends_with(r"\z"));
+        assert!(pattern.as_str().starts_with('^'));
+        assert!(pattern.as_str().ends_with(r"\z"));
         let admitted = crate::tests::rootless(attr);
         for valid in ["traffic-port", "1", "80", "8080", "65535"] {
             let value = Value::Concrete(ConcreteValue::String(valid.to_string().into()));
@@ -146,7 +147,7 @@ mod tests {
         else {
             panic!("health-check port pattern");
         };
-        let regex = regex::Regex::new(pattern).expect("valid port regex");
+        let regex = regex::Regex::new(pattern.as_str()).expect("valid port regex");
         for port in 0..=65536 {
             assert_eq!(
                 regex.is_match(&port.to_string()),

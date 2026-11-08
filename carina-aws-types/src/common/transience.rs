@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::fmt;
 
 use aws_runtime::retries::classifiers::{THROTTLING_ERRORS, TRANSIENT_ERRORS};
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
@@ -69,48 +68,14 @@ impl Transience {
         }
     }
 
-    /// Retain the classification when a typed diagnostic wraps the SDK error.
-    /// Its display and source chain stay the same as the supplied cause.
-    pub fn caused_by(self, cause: impl Error + Send + Sync + 'static) -> impl Error + Send + Sync {
-        ClassifiedCause {
-            transience: self,
-            cause: Box::new(cause),
-        }
-    }
-
-    /// Recover typed transience from a provider diagnostic, including nesting.
+    /// Read transience captured before provider diagnostic text is made opaque.
     /// Unclassified validation, conversion, and other local errors are permanent.
     pub fn of_provider_error(error: &ProviderError) -> Self {
-        let mut cause: Option<&(dyn Error + 'static)> = Some(error);
-        while let Some(error) = cause {
-            if let Some(classified) = error.downcast_ref::<ClassifiedCause>() {
-                return classified.transience;
-            }
-            // ProviderError owns its diagnostic cause without exposing Error::source.
-            cause = match error.downcast_ref::<ProviderError>() {
-                Some(provider) => provider.detail().cause().map(|cause| cause as &dyn Error),
-                None => error.source(),
-            };
+        if error.detail().transient {
+            Self::Transient
+        } else {
+            Self::Permanent
         }
-        Self::Permanent
-    }
-}
-
-#[derive(Debug)]
-struct ClassifiedCause {
-    transience: Transience,
-    cause: Box<dyn Error + Send + Sync>,
-}
-
-impl fmt::Display for ClassifiedCause {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.cause.fmt(f)
-    }
-}
-
-impl Error for ClassifiedCause {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.cause.source()
     }
 }
 
@@ -120,6 +85,7 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::ErrorMetadata;
+    use std::fmt;
 
     fn response(status: u16) -> HttpResponse {
         HttpResponse::new(status.try_into().unwrap(), SdkBody::empty())
@@ -207,7 +173,7 @@ mod tests {
     fn provider_transience_survives_nested_diagnostics_without_changing_sources() {
         for transience in [Transience::Transient, Transience::Permanent] {
             let sdk = SdkError::timeout_error("original SDK timeout");
-            let cause = transience.caused_by(AwsCause(sdk));
+            let cause = AwsCause(sdk);
             assert_eq!(cause.to_string(), "AWS read failed");
             assert!(
                 cause
@@ -215,9 +181,15 @@ mod tests {
                     .unwrap()
                     .is::<SdkError<ErrorMetadata, HttpResponse>>()
             );
-            let provider = ProviderError::api_error_caused_by("read failed", cause);
-            let nested = ProviderError::api_error_caused_by("read-back failed", provider);
+            let provider = ProviderError::api_error_caused_by("read failed", cause)
+                .with_transient(transience == Transience::Transient);
+            let nested = ProviderError::api_error_caused_by("read-back failed", provider)
+                .with_transient(transience == Transience::Transient);
             assert_eq!(Transience::of_provider_error(&nested), transience);
+            let nested =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                    nested,
+                );
             assert!(nested.to_string().contains("original SDK timeout"));
         }
         let unclassified = ProviderError::api_error("throttling timeout connection reset");
@@ -225,5 +197,22 @@ mod tests {
             Transience::of_provider_error(&unclassified),
             Transience::Permanent
         );
+    }
+
+    #[test]
+    fn transient_aws_error_is_classified_from_structured_detail() {
+        let sdk = SdkError::service_error(
+            ErrorMetadata::builder().code("RequestTimeout").build(),
+            response(503),
+        );
+        let transience = Transience::of(&sdk);
+        let error = ProviderError::api_error_caused_by("AWS read failed", AwsCause(sdk))
+            .with_status(503)
+            .with_transient(transience == Transience::Transient);
+
+        assert!(error.detail().transient);
+        assert_eq!(error.detail().status, Some(503));
+        assert!(error.detail().cause().unwrap().is::<AwsCause>());
+        assert_eq!(Transience::of_provider_error(&error), Transience::Transient);
     }
 }

@@ -90,7 +90,10 @@ fn iam_roles_path_prefix_accepts_infra_prefixes_without_requiring_a_trailing_sla
             panic!("path_prefix must remain a String");
         };
         assert!(identity.is_none());
-        assert_eq!(pattern, Some(r"^/[\x21-\x7F]*\z"));
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some(r"^/[\x21-\x7F]*\z")
+        );
         assert_eq!(length, Some((Some(1), Some(512))));
         let prefix = schema.effective_attribute("path_prefix").unwrap();
         for valid in [

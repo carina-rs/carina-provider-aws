@@ -586,11 +586,15 @@ mod tests {
                 let schemas = crate::schemas::schema_registry();
                 let factories: Vec<Box<dyn ProviderFactory>> =
                     vec![Box::new(crate::AwsProviderFactory)];
+                let fixture_normalizer = carina_core::test_utils::provider_text::normalizer(
+                    "aws",
+                    Box::new(AwsNormalizer),
+                );
                 let preparation = ProviderPreparationContext::new(
                     &bindings,
                     &module_gate,
                     &configs,
-                    &AwsNormalizer,
+                    &fixture_normalizer,
                     &factories,
                     &schemas,
                     type_checks,
@@ -926,6 +930,8 @@ mod tests {
                 .normalize_desired(&mut resources)
                 .await
                 .expect_err("decidable conflicts must fail native normalization");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(error.to_string().contains(message), "{error:?}");
         }
     }

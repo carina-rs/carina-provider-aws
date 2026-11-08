@@ -77,7 +77,10 @@ async fn normalize(resource: Resource) -> Result<ProviderResource, String> {
     AwsNormalizer
         .normalize_desired(&mut resources)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(e)
+                .to_string()
+        })?;
     Ok(resources.remove(0))
 }
 
@@ -332,7 +335,10 @@ fn route53_hosted_zone_id_reuses_the_existing_catalog_row() {
             identity,
             &carina_aws_types::AwsType::Route53HostedZoneId.identity()
         );
-        assert_eq!(pattern, Some("^Z[A-Z0-9]+$"));
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some("^Z[A-Z0-9]+$")
+        );
         assert_eq!(length, Some((None, Some(32))));
         for value in ["Z1", "Z123EXAMPLE", &format!("Z{}", "A".repeat(31))] {
             assert!(id.validate(&string(value)).is_ok(), "{value}");
@@ -951,7 +957,10 @@ fn route53_hosted_zone_identity_does_not_admit_a_foreign_provider_identity() {
                         ["route53", "HostedZone"],
                         "Id",
                     )),
-                    Some("^Z[A-Z0-9]+$".into()),
+                    Some(carina_core::schema::PatternSpec::new(
+                        "^Z[A-Z0-9]+$",
+                        carina_core::schema::PatternMatch::Full,
+                    )),
                     Some((None, Some(32))),
                     None,
                 ),
@@ -1139,7 +1148,10 @@ fn route53_infra_foreign_zone_ids_are_rejected_with_or_without_interpolation() {
                 ["route53", "HostedZone"],
                 "Id",
             )),
-            Some("^Z[A-Z0-9]+$".into()),
+            Some(carina_core::schema::PatternSpec::new(
+                "^Z[A-Z0-9]+$",
+                carina_core::schema::PatternMatch::Full,
+            )),
             Some((None, Some(32))),
             None,
         );

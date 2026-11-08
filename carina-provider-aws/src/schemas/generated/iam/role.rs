@@ -74,7 +74,7 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$".to_string()), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*$".to_string()), Some((Some(0), Some(256))), None), Some((Some(0), Some(50)))))
+            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(0), Some(256))), None), Some((Some(0), Some(50)))))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),

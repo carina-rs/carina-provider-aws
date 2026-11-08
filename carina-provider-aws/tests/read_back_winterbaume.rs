@@ -182,7 +182,10 @@ impl ExecutionObserver for Observer {
     }
 }
 
-async fn fixture(populated: &[bool], read_back_seconds: u64) -> (FixtureProvider, Arc<AcmService>) {
+async fn fixture(
+    populated: &[bool],
+    read_back_seconds: u64,
+) -> (Arc<FixtureProvider>, Arc<AcmService>) {
     let service = Arc::new(AcmService {
         populated: Mutex::new(populated.iter().copied().collect()),
         absent: std::sync::atomic::AtomicBool::new(false),
@@ -203,13 +206,13 @@ async fn fixture(populated: &[bool], read_back_seconds: u64) -> (FixtureProvider
             },
         );
     (
-        FixtureProvider {
+        Arc::new(FixtureProvider {
             aws,
             sleeps: Mutex::new(vec![]),
             ends: Mutex::new(vec![]),
             sinks: Mutex::new(HashMap::new()),
             suspend_create: false,
-        },
+        }),
         service,
     )
 }
@@ -273,7 +276,7 @@ fn schemas() -> SchemaRegistry {
     registry
 }
 async fn execute(
-    provider: &FixtureProvider,
+    provider: &Arc<FixtureProvider>,
     resources: Vec<Resource>,
     bindings: ResolvedBindings,
     current: HashMap<ResourceId, Current>,
@@ -321,6 +324,13 @@ async fn execute(
     let plan = finalize_plan_for_test(plan)
         .check_inputs_with_types(&schemas, &current, &InputTypeContext::empty())
         .expect("admit fixture plan");
+    let fixture_normalizer =
+        carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(provider)),
+        Box::new(AwsNormalizer),
+        &schemas,
+    );
     let input = LiveExecutionInput {
         provider_context: carina_core::parser::ProviderContext::clone(
             &carina_core::parser::LoadedProviderContext::empty_for_test(),
@@ -334,7 +344,7 @@ async fn execute(
         bindings,
         managed_current: current,
         data_source_values: ExecutableDataSourceValues::empty(),
-        normalizer: &AwsNormalizer,
+        normalizer: &fixture_normalizer,
         provider_configs: &[],
         factories: &factories,
         schemas: &schemas,
@@ -343,7 +353,7 @@ async fn execute(
         checkpoint_sink: ExecutionCheckpointSink::noop(),
     };
     match Box::pin(executor::execute_live_plan_for_test(
-        provider,
+        &boundary,
         input,
         observer,
         ShutdownToken::running(),
@@ -549,11 +559,13 @@ async fn native_update_read_back_uses_schema_budget_and_retains_host_deadline() 
             let schemas = schemas();
             let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
                 vec![Box::new(AwsProviderFactory)];
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &schemas,
                 type_checks,
@@ -566,8 +578,13 @@ async fn native_update_read_back_uses_schema_budget_and_retains_host_deadline() 
             )
             .await
             .unwrap();
+            let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+                Box::new(Arc::clone(&provider)),
+                Box::new(AwsNormalizer),
+                &schemas,
+            );
             let outcome = executor::dispatch_update(
-                &provider,
+                &boundary,
                 update_permit_for_test(AppliedIdentifier::new(ARN).unwrap(), request),
             )
             .await
@@ -597,11 +614,13 @@ async fn checked_create(resource: Resource) -> CreateRequest {
             let schemas = schemas();
             let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
                 vec![Box::new(AwsProviderFactory)];
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &schemas,
                 type_checks,
@@ -616,16 +635,21 @@ async fn checked_create(resource: Resource) -> CreateRequest {
 
 #[tokio::test]
 async fn native_read_back_transient_failure_preserves_continuation() {
-    use carina_core::provider::CreateFailureKind;
+    use carina_core::provider::HostCreateFailureKind as CreateFailureKind;
     use carina_plugin_sdk::PhasedToken;
     use carina_provider_aws::AwsCreateToken;
 
     let (mut provider, service) = fixture(&[false], 120).await;
-    provider.suspend_create = true;
+    Arc::get_mut(&mut provider).unwrap().suspend_create = true;
     let resource = certificate();
     let request = checked_create(resource.clone()).await;
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(&provider)),
+        Box::new(AwsNormalizer),
+        &schemas(),
+    );
     let (call, _cancellation) =
-        executor::dispatch_create(&provider, create_permit_for_test(request));
+        executor::dispatch_create(&boundary, create_permit_for_test(request));
     let CreateFailureKind::InFlight { pending, error } = call.await.unwrap_err().into_kind() else {
         panic!("a transient poll failure must preserve read-back")
     };
@@ -654,15 +678,22 @@ async fn native_read_back_transient_failure_preserves_continuation() {
 #[tokio::test]
 async fn native_resume_read_back_uses_schema_budget_without_replaying_create() {
     let (mut first, _) = fixture(&[false], 1).await;
-    first.suspend_create = true;
+    Arc::get_mut(&mut first).unwrap().suspend_create = true;
     let resource = certificate();
     let request = checked_create(resource.clone()).await;
-    let (call, _cancellation) = executor::dispatch_create(&first, create_permit_for_test(request));
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(&first)),
+        Box::new(AwsNormalizer),
+        &schemas(),
+    );
+    let (call, _cancellation) =
+        executor::dispatch_create(&boundary, create_permit_for_test(request));
     let error = call.await.unwrap_err();
-    let carina_core::provider::CreateFailureKind::InFlight { pending, .. } = error.into_kind()
+    let carina_core::provider::HostCreateFailureKind::InFlight { pending, .. } = error.into_kind()
     else {
         panic!("expected persisted read-back")
     };
+    drop(boundary);
     drop(first);
     let (fresh, service) = fixture(&[false, false], 1).await;
     let resume = ResumeCreateRequest::for_test(pending, checked_create(resource).await).unwrap();

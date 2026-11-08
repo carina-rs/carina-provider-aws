@@ -16,6 +16,9 @@ use carina_provider_protocol::OperationStep;
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_provider_protocol::types as proto;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use carina_core::test_utils::provider_text::NativeWireFixture as _;
+
 #[cfg(any(target_arch = "wasm32", test))]
 use carina_core::protocol_convert;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -125,6 +128,19 @@ fn partial_create_attributes_to_proto(
 ) -> Result<BTreeMap<String, proto::Value>, CoreProviderError> {
     protocol_convert::try_core_to_protocol_value_map(attributes)
         .map_err(|error| protocol_output_error("failed to encode partial create result", error))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn partial_read_diagnostic_to_proto(
+    reason: CoreProviderError,
+    missing_attributes: NonEmptyAttributeNames,
+) -> proto::PartialReadDiagnostic {
+    // Keep the complete reason opaque until the guest protocol encoding seam.
+    let text = CoreProviderError::from_text(reason.kind(), reason.into());
+    proto::PartialReadDiagnostic {
+        reason: text.to_wire().message,
+        missing_attributes: missing_attributes.into(),
+    }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -282,10 +298,7 @@ impl AwsIssuedCreate for GuestPolledIssuedCreate {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
-                proto::PartialReadDiagnostic {
-                    reason: reason.to_string(),
-                    missing_attributes: missing_attributes.into(),
-                },
+                partial_read_diagnostic_to_proto(reason, missing_attributes),
             )),
             Err(error) => {
                 let error = error.to_wire();
@@ -360,10 +373,7 @@ impl AwsIssuedCreate for GuestIssuedCreate {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
-                proto::PartialReadDiagnostic {
-                    reason: reason.to_string(),
-                    missing_attributes: missing_attributes.into(),
-                },
+                partial_read_diagnostic_to_proto(reason, missing_attributes),
             )),
             Err(error) => {
                 let error = error.to_wire();
@@ -459,10 +469,7 @@ impl AwsResumedCreate for GuestResumedCreate {
         match partial_create_attributes_to_proto(&attributes) {
             Ok(attributes) => Ok(self.0.partial(
                 attributes,
-                proto::PartialReadDiagnostic {
-                    reason: reason.to_string(),
-                    missing_attributes: missing_attributes.into(),
-                },
+                partial_read_diagnostic_to_proto(reason, missing_attributes),
             )),
             Err(error) => {
                 let error = error.to_wire();
@@ -587,7 +594,10 @@ impl CarinaProvider for AwsProcessProvider {
         carina_provider_aws::AwsProviderFactory.provider_config_attribute_types()
     }
 
-    fn validate_config(&self, attrs: &BTreeMap<String, proto::Value>) -> Result<(), String> {
+    fn validate_config(
+        &self,
+        attrs: &BTreeMap<String, proto::Value>,
+    ) -> Result<(), proto::ProviderError> {
         // Region format/value validation is handled by the host via
         // `provider_config_attribute_types`. The provider-specific check
         // we add here is the cross-account guardrail: when `assume_role`
@@ -598,12 +608,18 @@ impl CarinaProvider for AwsProcessProvider {
             check_cross_account, extract_assume_role,
         };
         let core_attrs = protocol_convert::protocol_to_core_value_map(attrs).map_err(|error| {
-            protocol_input_error("failed to decode provider configuration", error).to_string()
+            Self::convert_error(protocol_input_error(
+                "failed to decode provider configuration",
+                error,
+            ))
         })?;
-        let assume_role = extract_assume_role(core_attrs.get("assume_role"))?;
+        let assume_role = extract_assume_role(core_attrs.get("assume_role"))
+            .map_err(|message| Self::convert_error(CoreProviderError::invalid_input(message)))?;
         if let Some(ar) = &assume_role {
             let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
-            check_cross_account(&ar.role_arn, &allowed)?;
+            check_cross_account(&ar.role_arn, &allowed).map_err(|message| {
+                Self::convert_error(CoreProviderError::invalid_input(message))
+            })?;
         }
         Ok(())
     }
@@ -611,21 +627,24 @@ impl CarinaProvider for AwsProcessProvider {
     fn initialize(
         &mut self,
         attrs: &BTreeMap<String, proto::Value>,
-    ) -> Result<proto::ReferenceScope, String> {
+    ) -> Result<proto::ReferenceScope, proto::ProviderError> {
         use carina_provider_aws::services::sts::account_guard::extract_string_list;
         use carina_provider_aws::services::sts::assume_role::extract_assume_role;
         let core_attrs: indexmap::IndexMap<_, _> =
             protocol_convert::protocol_to_core_value_map(attrs)
                 .map_err(|error| {
-                    protocol_input_error("failed to decode provider configuration", error)
-                        .to_string()
+                    Self::convert_error(protocol_input_error(
+                        "failed to decode provider configuration",
+                        error,
+                    ))
                 })?
                 .into_iter()
                 .collect();
         let region = carina_core::utils::extract_region_from_attrs(&core_attrs, "ap-northeast-1");
         let allowed = extract_string_list(core_attrs.get("allowed_account_ids"));
         let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
-        let assume_role = extract_assume_role(core_attrs.get("assume_role"))?;
+        let assume_role = extract_assume_role(core_attrs.get("assume_role"))
+            .map_err(|message| Self::convert_error(CoreProviderError::invalid_input(message)))?;
         let provider = self.runtime.block_on(AwsProvider::new_with_account_guard(
             &region,
             allowed,
@@ -635,7 +654,9 @@ impl CarinaProvider for AwsProcessProvider {
         // Run the account guard before we accept this provider — fails
         // fast (before any read/plan/apply) when the credentials in use
         // point at the wrong AWS account.
-        self.runtime.block_on(provider.verify_account_id())?;
+        self.runtime
+            .block_on(provider.verify_account_id())
+            .map_err(Self::convert_error)?;
         self.provider = Some(provider);
         // No ReferenceForm table is declared in this change. Reporting an
         // available scope would therefore add no capability, and discovering
@@ -1556,7 +1577,10 @@ mod tests {
             panic!("role_name must be the shared validated String");
         };
         assert_eq!(identity, &expected);
-        assert_eq!(pattern, Some(r"^[A-Za-z0-9_+=,.@-]+\z"));
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some(r"^[A-Za-z0-9_+=,.@-]+\z")
+        );
         assert_eq!(length, Some((Some(1), Some(64))));
         let identity = wire_identity(&expected);
         for valid in [
@@ -1809,6 +1833,7 @@ mod tests {
         let err = provider
             .validate_config(&attrs)
             .expect_err("cross-account role outside allowed_account_ids must fail");
+        let err = err.message;
         assert!(err.contains("412038850359"), "must name target: {err}");
         assert!(err.contains("111111111111"), "must name allow list: {err}");
     }

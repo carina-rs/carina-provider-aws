@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use carina_core::parser::{ExpandedInferredFile, LoadedProviderContext, ProviderConfig};
 use carina_core::paths::ResolvedPath;
-use carina_core::provider::{BoxFuture, ProviderError, ProviderFactory};
+use carina_core::provider::{
+    BoxFuture, HostError as ProviderError, ProviderBoundary, ProviderNormalizer as _, ProviderPlan,
+};
 use carina_core::resource::{ConcreteValue, DeferredValue, ProviderResource, Resource, Value};
 use carina_plugin_host::{
     AwsCredentialError, AwsCredentialProvisioner, AwsCredentialSource, AwsCredentials,
@@ -95,7 +97,7 @@ fn test_egress(
 }
 
 async fn guest_normalizer() -> (
-    Box<dyn carina_core::provider::ProviderNormalizer>,
+    carina_core::provider::ConfiguredNormalizer,
     tempfile::TempDir,
 ) {
     let path = std::env::var_os("CARINA_AWS_WASM")
@@ -148,8 +150,8 @@ async fn guest_normalizer() -> (
     let resolved_config = configs.iter().next().expect("local provider configuration");
     let config = carina_core::executor::prepare_provider_ready_config(&factory, resolved_config)
         .expect("prepare provider configuration");
-    let normalizer = factory
-        .create_normalizer(None, &config)
+    let session = ProviderPlan::state_only().session("aws", None, Some(&config));
+    let normalizer = ProviderBoundary::initialize_normalizer(&factory, &session)
         .await
         .expect("initialize the real AWS guest normalizer without AWS calls");
     (normalizer, cache)

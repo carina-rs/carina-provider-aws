@@ -12,7 +12,8 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
 use carina_core::schema::{
-    AttributeType, Draft, FieldGroup, FieldGroupKind, ListElements, RawShape, TypeIdentity,
+    AttributeType, Draft, FieldGroup, FieldGroupKind, ListElements, PatternMatch, PatternSpec,
+    RawShape, TypeIdentity,
 };
 use carina_smithy::{Shape, ShapeKind, SmithyModel};
 use clap::{Parser, ValueEnum};
@@ -131,14 +132,14 @@ enum TypeOverride {
     IntRange { min: i64, max: i64 },
     /// Anonymous String refinement; does not introduce an identifier identity.
     RefinedString {
-        pattern: &'static str,
+        pattern: PatternSpec,
         min_length: u64,
         max_length: u64,
     },
     /// Anonymous String carrier with documented character bounds only.
     StringBounds { min: u64, max: u64 },
     /// Anonymous whole-string pattern with no documented numeric length cap.
-    StringPattern(&'static str),
+    StringPattern(PatternSpec),
     /// Share an anonymous String constructor and derive documentation from it.
     AnonymousStringConstructor(&'static str),
     /// An established core scalar, including its existing validation identity.
@@ -167,11 +168,25 @@ fn length_from_traits(traits: &carina_smithy::Traits) -> Bounds<u64> {
     })
 }
 
+fn pattern_spec_code(pattern: &PatternSpec) -> String {
+    let mode = match pattern.mode() {
+        PatternMatch::Full => "carina_core::schema::PatternMatch::Full".to_string(),
+        PatternMatch::Substring { reason } => format!(
+            "carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new({:?}).expect(\"visible pattern reason\") }}",
+            reason.as_str(),
+        ),
+    };
+    format!(
+        "carina_core::schema::PatternSpec::new({:?}, {mode})",
+        pattern.as_str()
+    )
+}
+
 /// Anonymous strings share their Rust literal encoding and schema metadata.
-fn string_refinement(pattern: Option<&str>, length: Bounds<u64>) -> ValueTypeOverride {
+fn string_refinement(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> ValueTypeOverride {
     let pattern_code = pattern.map_or_else(
         || "None".to_string(),
-        |pattern| format!("Some({pattern:?}.to_string())"),
+        |pattern| format!("Some({})", pattern_spec_code(pattern)),
     );
     let type_code = if pattern.is_none() && length.is_none() {
         PLAIN_STRING_TYPE_CODE.to_string()
@@ -181,12 +196,7 @@ fn string_refinement(pattern: Option<&str>, length: Bounds<u64>) -> ValueTypeOve
     ValueTypeOverride {
         type_code,
         documentation: None,
-        attribute_type: AttributeType::refined_string(
-            None,
-            pattern.map(str::to_string),
-            length,
-            None,
-        ),
+        attribute_type: AttributeType::refined_string(None, pattern.cloned(), length, None),
     }
 }
 
@@ -399,7 +409,7 @@ enum ArnEmitChoice {
 struct ArnValidation {
     service: &'static str,
     resource: &'static str,
-    regex: String,
+    pattern: PatternSpec,
     #[cfg(test)]
     sample_arn_rest: &'static str,
 }
@@ -409,63 +419,75 @@ static ARN_VALIDATIONS: LazyLock<[ArnValidation; 9]> = LazyLock::new(|| {
         ArnValidation {
             service: "iam",
             resource: "Role",
-            regex: arn_regex("iam::[^:]*:role/.+$"),
+            pattern: PatternSpec::new(arn_regex("iam::[^:]*:role/.+$"), PatternMatch::Full),
             #[cfg(test)]
             sample_arn_rest: "iam::123456789012:role/example-role",
         },
         ArnValidation {
             service: "iam",
             resource: "Policy",
-            regex: arn_regex("iam::[^:]*:policy/.+$"),
+            pattern: PatternSpec::new(arn_regex("iam::[^:]*:policy/.+$"), PatternMatch::Full),
             #[cfg(test)]
             sample_arn_rest: "iam::123456789012:policy/example-policy",
         },
         ArnValidation {
             service: "iam",
             resource: "OidcProvider",
-            regex: arn_regex("iam::[^:]*:oidc-provider/.+$"),
+            pattern: PatternSpec::new(
+                arn_regex("iam::[^:]*:oidc-provider/.+$"),
+                PatternMatch::Full,
+            ),
             #[cfg(test)]
             sample_arn_rest: "iam::123456789012:oidc-provider/example.com",
         },
         ArnValidation {
             service: "kms",
             resource: "Key",
-            regex: arn_regex("kms:[^:]*:[^:]*:key/.+$"),
+            pattern: PatternSpec::new(arn_regex("kms:[^:]*:[^:]*:key/.+$"), PatternMatch::Full),
             #[cfg(test)]
             sample_arn_rest: "kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
         },
         ArnValidation {
             service: "s3",
             resource: "Bucket",
-            regex: arn_regex("s3:::.+$"),
+            pattern: PatternSpec::new(arn_regex("s3:::.+$"), PatternMatch::Full),
             #[cfg(test)]
             sample_arn_rest: "s3:::example-bucket",
         },
         ArnValidation {
             service: "cloudfront",
             resource: "Distribution",
-            regex: arn_regex("cloudfront::[^:]*:distribution/.+$"),
+            pattern: PatternSpec::new(
+                arn_regex("cloudfront::[^:]*:distribution/.+$"),
+                PatternMatch::Full,
+            ),
             #[cfg(test)]
             sample_arn_rest: "cloudfront::123456789012:distribution/EXAMPLE",
         },
         ArnValidation {
             service: "ecs",
             resource: "Cluster",
-            regex: arn_regex("ecs:[^:]*:[^:]*:cluster/.+$"),
+            pattern: PatternSpec::new(arn_regex("ecs:[^:]*:[^:]*:cluster/.+$"), PatternMatch::Full),
             #[cfg(test)]
             sample_arn_rest: "ecs:us-east-1:123456789012:cluster/example",
         },
         ArnValidation {
             service: "dynamodb",
             resource: "Table",
-            regex: arn_regex("dynamodb:[^:]*:[^:]*:table/.+$"),
+            pattern: PatternSpec::new(
+                arn_regex("dynamodb:[^:]*:[^:]*:table/.+$"),
+                PatternMatch::Full,
+            ),
             #[cfg(test)]
             sample_arn_rest: "dynamodb:us-east-1:123456789012:table/example",
         },
         ArnValidation {
             service: "logs",
             resource: "LogGroup",
-            regex: arn_regex("logs:[^:]*:[^:]*:log-group:.+$"),
+            pattern: PatternSpec::new(
+                arn_regex("logs:[^:]*:[^:]*:log-group:.+$"),
+                PatternMatch::Full,
+            ),
             #[cfg(test)]
             sample_arn_rest: "logs:us-east-1:123456789012:log-group:example",
         },
@@ -527,11 +549,14 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
     }
 
     let regex_expr = match choice {
-        ArnEmitChoice::PerKind(entry) => format!("Some({:?}.to_string())", entry.regex),
+        ArnEmitChoice::PerKind(entry) => format!("Some({})", pattern_spec_code(&entry.pattern)),
         ArnEmitChoice::ServicePrefix(service) => {
             format!(
-                "Some({:?}.to_string())",
-                arn_regex(&format!("{service}:.*$"))
+                "Some({})",
+                pattern_spec_code(&PatternSpec::new(
+                    arn_regex(&format!("{service}:.*$")),
+                    PatternMatch::Full
+                ))
             )
         }
         ArnEmitChoice::Generic => unreachable!("handled above"),
@@ -8170,9 +8195,10 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
                     // https://docs.aws.amazon.com/vpc/latest/userguide/flow-log-records.html
                     // https://docs.aws.amazon.com/vpc/latest/tgw/tgw-flow-logs.html
-                    TypeOverride::StringPattern(
+                    TypeOverride::StringPattern(PatternSpec::new(
                         r"^\$\{[a-z0-9]+(?:-[a-z0-9]+)*\}(?: +\$\{[a-z0-9]+(?:-[a-z0-9]+)*\})*\z",
-                    ),
+                        PatternMatch::Full,
+                    )),
                 ),
                 (
                     ("ec2.FlowLog", "max_aggregation_interval"),
@@ -8188,7 +8214,10 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // without imposing CreateLogGroup's create-only aws/ rule.
                     // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html
                     TypeOverride::RefinedString {
-                        pattern: r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                        pattern: PatternSpec::new(
+                            r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                            PatternMatch::Full,
+                        ),
                         min_length: 1,
                         max_length: 512,
                     },
@@ -8209,7 +8238,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // TagKeyList$member -> TagKey: length 1..128, no pattern.
                     // (?s) preserves the entire Smithy string alphabet.
                     TypeOverride::RefinedString {
-                        pattern: r"(?s)^.{1,128}\z",
+                        pattern: PatternSpec::new(r"(?s)^.{1,128}\z", PatternMatch::Full),
                         min_length: 1,
                         max_length: 128,
                     },
@@ -8328,7 +8357,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // domains retain the full 253 cap, without the request cap.
                     // https://docs.aws.amazon.com/acm/latest/APIReference/API_DomainValidation.html
                     TypeOverride::RefinedString {
-                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
                         min_length: 1,
                         max_length: 253,
                     },
@@ -8340,7 +8369,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     ),
                     // DomainValidation$ValidationDomain -> DomainNameString.
                     TypeOverride::RefinedString {
-                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
                         min_length: 1,
                         max_length: 253,
                     },
@@ -8352,7 +8381,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     ),
                     // RenewalSummary reuses the same DomainValidation shape.
                     TypeOverride::RefinedString {
-                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
                         min_length: 1,
                         max_length: 253,
                     },
@@ -8363,7 +8392,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                         "renewal_summary.domain_validation_options[].validation_domain",
                     ),
                     TypeOverride::RefinedString {
-                        pattern: ACM_DOMAIN_NAME_PATTERN,
+                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
                         min_length: 1,
                         max_length: 253,
                     },
@@ -8512,7 +8541,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // intersect their constraints: printable ASCII except < >.
                     // https://docs.aws.amazon.com/accounts/latest/APIReference/API_PutAccountName.html
                     TypeOverride::RefinedString {
-                        pattern: r"^[ -;=?-~]+\z",
+                        pattern: PatternSpec::new(r"^[ -;=?-~]+\z", PatternMatch::Full),
                         min_length: 1,
                         max_length: 50,
                     },
@@ -8546,7 +8575,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // ^o-[a-z0-9]{10,32}$. No length trait; the prefix and
                     // quantifier give an effective total length of 12..34.
                     TypeOverride::RefinedString {
-                        pattern: r"^o-[a-z0-9]{10,32}\z",
+                        pattern: PatternSpec::new(r"^o-[a-z0-9]{10,32}\z", PatternMatch::Full),
                         min_length: 12,
                         max_length: 34,
                     },
@@ -8589,7 +8618,10 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // so name references are assignable in both directions:
                     // carina-provider-awscc/src/schemas/generated/logs/log_group.rs
                     TypeOverride::RefinedString {
-                        pattern: r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                        pattern: PatternSpec::new(
+                            r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                            PatternMatch::Full,
+                        ),
                         min_length: 1,
                         max_length: 512,
                     },
@@ -8613,7 +8645,10 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // conditions. Leave the fifo_queue <-> .fifo condition to AWS;
                     // do not add a provider-local runtime validator.
                     TypeOverride::RefinedString {
-                        pattern: r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+                        pattern: PatternSpec::new(
+                            r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+                            PatternMatch::Full,
+                        ),
                         min_length: 1,
                         max_length: 80,
                     },
@@ -9019,7 +9054,7 @@ mod tests {
         let pattern = r"^path\\[a-z]+$";
         assert!(
             tags.code()
-                .contains(&format!("Some({pattern:?}.to_string())")),
+                .contains(&format!("Some(carina_core::schema::PatternSpec::new({pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }}))")),
             "{}",
             tags.code()
         );
@@ -9278,7 +9313,7 @@ mod tests {
                     r"^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$"
                 };
                 format!(
-                    "AttributeType::refined_map(AttributeType::refined_string(None, Some({key_pattern:?}.to_string()), {key_length}, None), AttributeType::refined_string(None, Some({value_pattern:?}.to_string()), {value_length}, None), Some(({minimum:?}, {maximum:?})))"
+                    "AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new({key_pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }})), {key_length}, None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new({value_pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }})), {value_length}, None), Some(({minimum:?}, {maximum:?})))"
                 )
             } else {
                 "AttributeType::map(AttributeType::string())".to_string()
@@ -9297,7 +9332,10 @@ mod tests {
         let attr_type = AttributeType::refined_map(
             AttributeType::refined_string(
                 None,
-                Some("^[a-z]+$".to_string()),
+                Some(carina_core::schema::PatternSpec::new(
+                    "^[a-z]+$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
                 Some((Some(1), Some(8))),
                 None,
             ),
@@ -9979,7 +10017,7 @@ mod tests {
             "{generated}"
         );
         assert!(
-            generated.contains(r#"Some("^[.\\-_/#A-Za-z0-9]{1,512}\\z".to_string())"#),
+            generated.contains(r#"Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]{1,512}\\z", carina_core::schema::PatternMatch::Full))"#),
             "match AWSCC's exact anonymous name refinement: {generated}"
         );
         assert!(
@@ -12377,8 +12415,8 @@ mod tests {
             .lines()
             .find_map(|line| {
                 line.trim()
-                    .strip_prefix("Some(")?
-                    .strip_suffix(".to_string()),")
+                    .strip_prefix("Some(carina_core::schema::PatternSpec::new(")?
+                    .strip_suffix(", carina_core::schema::PatternMatch::Full)),")
             })
             .unwrap_or_else(|| panic!("missing emitted ARN regex:\n{emitted}"));
         let pattern = syn::parse_str::<syn::LitStr>(literal)
@@ -13938,7 +13976,12 @@ mod tests {
     #[test]
     fn markdown_type_display_preserves_literal_patterns() {
         let pattern = r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\z";
-        let attribute_type = AttributeType::refined_string(None, Some(pattern.into()), None, None);
+        let attribute_type = AttributeType::refined_string(
+            None,
+            Some(PatternSpec::new(pattern, PatternMatch::Full)),
+            None,
+            None,
+        );
         let mut enums = BTreeMap::new();
         let mut structs = MarkdownTypes::default();
         let display = discover_markdown_attribute_type(

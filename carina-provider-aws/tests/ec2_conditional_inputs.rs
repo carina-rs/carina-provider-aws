@@ -33,7 +33,10 @@ async fn normalize(resource: &str, attrs: &[(&str, Value)]) -> Result<ProviderRe
     AwsNormalizer
         .normalize_desired(&mut resources)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string()
+        })?;
     Ok(resources.remove(0))
 }
 

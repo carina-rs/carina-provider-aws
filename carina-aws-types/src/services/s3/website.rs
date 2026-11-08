@@ -1,4 +1,5 @@
 use carina_core::schema::{AttributeType, StructField};
+use carina_core::schema::{PatternMatch, PatternSpec};
 
 use crate::enum_with_dsl_aliases;
 
@@ -9,7 +10,12 @@ pub fn s3_index_document() -> AttributeType {
         vec![
             StructField::required(
                 "suffix",
-                AttributeType::refined_string(None, Some(r"^[^/]+\z".to_string()), None, None),
+                AttributeType::refined_string(
+                    None,
+                    Some(PatternSpec::new(r"^[^/]+\z", PatternMatch::Full)),
+                    None,
+                    None,
+                ),
             )
             .with_provider_name("Suffix")
             .build(),

@@ -30,7 +30,10 @@ fn awscc_log_group_name_fixture() -> ValidatedResourceSchema {
                 "log_group_name",
                 AttributeType::refined_string(
                     None,
-                    Some(r"^[.\-_/#A-Za-z0-9]{1,512}\z".to_string()),
+                    Some(carina_core::schema::PatternSpec::new(
+                        r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+                        carina_core::schema::PatternMatch::Full,
+                    )),
                     Some((Some(1), Some(512))),
                     None,
                 ),
@@ -103,7 +106,10 @@ fn logs_log_group_name_validates_length_and_whole_string_pattern() {
         identity.is_none(),
         "value constraints must not add an identity"
     );
-    assert_eq!(pattern, Some(r"^[.\-_/#A-Za-z0-9]{1,512}\z"));
+    assert_eq!(
+        pattern.map(carina_core::schema::PatternSpec::as_str),
+        Some(r"^[.\-_/#A-Za-z0-9]{1,512}\z")
+    );
     assert_eq!(length, Some((Some(1), Some(512))));
 
     for schema in logs_schemas() {

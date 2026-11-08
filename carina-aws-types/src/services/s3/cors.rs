@@ -1,4 +1,5 @@
 use carina_core::schema::{AttributeType, StructField};
+use carina_core::schema::{PatternMatch, PatternSpec};
 
 // CORSRule and ManageCorsUsing: IDs <=255 characters, closed methods, one wildcard.
 // AllowedMethods and AllowedOrigins are required lists with at least one member.
@@ -26,7 +27,10 @@ fn s3_cors_rule() -> AttributeType {
                 "allowed_origins",
                 super::nonempty_list(AttributeType::refined_string(
                     None,
-                    Some(r"^[^*]*(?:\*[^*]*)?\z".to_string()),
+                    Some(PatternSpec::new(
+                        r"^[^*]*(?:\*[^*]*)?\z",
+                        PatternMatch::Full,
+                    )),
                     None,
                     None,
                 )),
@@ -37,7 +41,10 @@ fn s3_cors_rule() -> AttributeType {
                 "allowed_headers",
                 AttributeType::list(AttributeType::refined_string(
                     None,
-                    Some(r"^[^*]*(?:\*[^*]*)?\z".to_string()),
+                    Some(PatternSpec::new(
+                        r"^[^*]*(?:\*[^*]*)?\z",
+                        PatternMatch::Full,
+                    )),
                     None,
                     None,
                 )),

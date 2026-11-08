@@ -46,7 +46,11 @@ fn organizations_account_refinements_use_iam_role_identity_and_anonymous_account
                 expected_identity,
                 "{field}"
             );
-            assert_eq!(pattern, Some(expected_pattern), "{field}");
+            assert_eq!(
+                pattern.map(carina_core::schema::PatternSpec::as_str),
+                Some(expected_pattern),
+                "{field}"
+            );
             assert_eq!(length, Some((Some(1), Some(maximum))), "{field}");
         }
     }

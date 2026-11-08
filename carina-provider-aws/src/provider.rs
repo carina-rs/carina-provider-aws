@@ -1078,8 +1078,7 @@ impl AwsIssuedCreate for IssuedCreate {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
-        let Some(diagnostic) =
-            PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
+        let Some(diagnostic) = PartialReadDiagnostic::new(reason.into(), missing_attributes.into())
         else {
             return Err(self.no_resource(ProviderError::internal(
                 "read-back partial requires missing attributes",
@@ -1207,8 +1206,7 @@ impl AwsResumedCreate for ResumedCreate {
         reason: ProviderError,
         missing_attributes: NonEmptyAttributeNames,
     ) -> Result<Self::Step, Self::Verdict> {
-        let Some(diagnostic) =
-            PartialReadDiagnostic::new(reason.to_string(), missing_attributes.into())
+        let Some(diagnostic) = PartialReadDiagnostic::new(reason.into(), missing_attributes.into())
         else {
             return Err(self.no_resource(ProviderError::internal(
                 "read-back partial requires missing attributes",
@@ -3611,7 +3609,7 @@ impl AwsProvider {
                         identifier,
                         snapshots,
                     ),
-                    reason.to_string(),
+                    reason.into(),
                     missing_attributes.into(),
                 )))
             }
@@ -4109,6 +4107,7 @@ impl Provider for AwsProvider {
 
 #[cfg(test)]
 mod pending_operation_tests {
+    use carina_core::test_utils::provider_text::NativeWireFixture as _;
     use std::collections::HashMap;
     use std::collections::VecDeque;
     use std::future::ready;
@@ -4129,6 +4128,214 @@ mod pending_operation_tests {
 
     fn identifier(value: &str) -> AppliedIdentifier {
         AppliedIdentifier::new(value).expect("test identifier must be non-empty")
+    }
+
+    struct PartialReadProvider;
+
+    impl Provider for PartialReadProvider {
+        fn name(&self) -> &str {
+            "partial-read-fixture"
+        }
+
+        fn read(
+            &self,
+            _: &ResourceId,
+            _: &AppliedIdentifier,
+            _: ReadRequest,
+        ) -> BoxFuture<'_, ProviderResult<ReadOutcome>> {
+            unreachable!()
+        }
+
+        fn read_data_source(
+            &self,
+            _: &ProviderReadyDataSource,
+        ) -> BoxFuture<'_, ProviderResult<State>> {
+            unreachable!()
+        }
+
+        fn create(
+            &self,
+            _: &ResourceId,
+            _: CreateRequest,
+            attempt: CreateAttempt,
+        ) -> BoxFuture<'_, Result<CreateOutcome, CreateFailure>> {
+            Box::pin(async move {
+                let issued = attempt.issued(identifier("created"), Sent::AllRequestAttributes);
+                let reason = ProviderError::api_error_caused_by(
+                    "read-back failed",
+                    std::io::Error::other("typed provider reason"),
+                )
+                .with_operation("s3.HeadBucket")
+                .with_status(503);
+                match AwsIssuedCreate::partial(
+                    issued,
+                    HashMap::new(),
+                    reason,
+                    NonEmptyAttributeNames::try_from(vec!["result".into()]).unwrap(),
+                )? {
+                    CoreCreateStep::Done(outcome) => Ok(outcome),
+                    CoreCreateStep::Pending(_) => unreachable!(),
+                }
+            })
+        }
+
+        fn resume_create(
+            &self,
+            _: ResumeCreateRequest,
+        ) -> BoxFuture<'_, Result<ResumeOutcome, ResumeFailure>> {
+            unreachable!()
+        }
+
+        fn update(
+            &self,
+            id: &ResourceId,
+            identifier: &AppliedIdentifier,
+            _: UpdateRequest,
+            _: UpdateAttempt,
+        ) -> BoxFuture<'_, ProviderResult<UpdateOutcome>> {
+            let state = crate::read_model::partial_applied_state(
+                id.clone(),
+                identifier.clone(),
+                HashMap::<String, Value>::new(),
+            );
+            Box::pin(async move {
+                let reason = ProviderError::api_error_caused_by(
+                    "update read-back failed",
+                    std::io::Error::other("typed update cause"),
+                )
+                .with_operation("s3.HeadBucket")
+                .with_status(503);
+                assert!(reason.detail().cause().unwrap().is::<std::io::Error>());
+                Ok(UpdateOutcome::partial_success(
+                    state,
+                    reason.into(),
+                    vec!["result".into()],
+                ))
+            })
+        }
+
+        fn delete(&self, _: DeleteAttempt) -> BoxFuture<'_, ProviderResult<()>> {
+            unreachable!()
+        }
+
+        fn required_permissions(
+            &self,
+            _: &ResourceId,
+            _: carina_core::effect::PlanOp,
+        ) -> ProviderResult<Vec<String>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_read_reason_survives_as_typed_provider_text() {
+        use carina_core::executor::{ModuleConstraintGate, ProviderPreparationContext};
+        use carina_core::provider::NoopNormalizer;
+        use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
+
+        let schema = ResourceSchema::new("Partial")
+            .attribute(AttributeSchema::optional("result", AttributeType::string()).build())
+            .validate()
+            .unwrap();
+        let mut fixture_schemas = carina_core::schema::SchemaRegistry::new();
+        fixture_schemas.insert("partial-read-fixture", schema);
+        let provider = carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(PartialReadProvider),
+            Box::new(NoopNormalizer),
+            &fixture_schemas,
+        );
+        let request = carina_core::validation::deferred_types::with_session_for_test_async(
+            &carina_core::parser::LoadedProviderContext::empty_for_test(),
+            async |checks| {
+                let bindings = Default::default();
+                let gate = ModuleConstraintGate::from_live_compositions(&[]);
+                let schemas = Default::default();
+                let context = ProviderPreparationContext::new(
+                    &bindings,
+                    &gate,
+                    &[],
+                    &NoopNormalizer,
+                    &[],
+                    &schemas,
+                    checks,
+                );
+                carina_core::executor::provider_ready::prepare_create_request(
+                    Resource::with_provider("partial-read-fixture", "Partial", "test", None),
+                    &context,
+                )
+                .await
+                .unwrap()
+            },
+        )
+        .await;
+        let permit = carina_core::replacement::create_permit_for_test(request);
+        let (create, _cancellation) = carina_core::executor::dispatch_create(&provider, permit);
+        let outcome = create.await.unwrap();
+        let diagnostic = outcome.diagnostic().unwrap();
+
+        assert_eq!(
+            diagnostic.reason().as_str(),
+            "read-back failed\n  operation: s3.HeadBucket\n  status: 503\n  cause: typed provider reason"
+        );
+        assert_eq!(diagnostic.missing_attributes(), ["result"]);
+    }
+
+    #[tokio::test]
+    async fn update_partial_read_reason_keeps_typed_provider_error_cause() {
+        use carina_core::executor::{ModuleConstraintGate, ProviderPreparationContext};
+        use carina_core::provider::NoopNormalizer;
+        use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, SchemaRegistry};
+
+        let schema = ResourceSchema::new("Partial")
+            .attribute(AttributeSchema::optional("result", AttributeType::string()).build())
+            .validate()
+            .unwrap();
+        let mut fixture_schemas = SchemaRegistry::new();
+        fixture_schemas.insert("partial-read-fixture", schema.clone());
+        let provider = carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(PartialReadProvider),
+            Box::new(NoopNormalizer),
+            &fixture_schemas,
+        );
+        let request = carina_core::validation::deferred_types::with_session_for_test_async(
+            &carina_core::parser::LoadedProviderContext::empty_for_test(),
+            async |checks| {
+                let bindings = Default::default();
+                let gate = ModuleConstraintGate::from_live_compositions(&[]);
+                let mut schemas = SchemaRegistry::new();
+                schemas.insert("partial-read-fixture", schema);
+                let context = ProviderPreparationContext::new(
+                    &bindings,
+                    &gate,
+                    &[],
+                    &NoopNormalizer,
+                    &[],
+                    &schemas,
+                    checks,
+                );
+                let resource =
+                    Resource::with_provider("partial-read-fixture", "Partial", "test", None);
+                let from = crate::test_existing_state(resource.id.clone(), HashMap::new())
+                    .with_identifier("updated")
+                    .to_snapshot();
+                carina_core::executor::prepare_update_request(resource, from, &[], &context)
+                    .await
+                    .unwrap()
+            },
+        )
+        .await;
+        let permit =
+            carina_core::replacement::update_permit_for_test(identifier("updated"), request);
+        let outcome = carina_core::executor::dispatch_update(&provider, permit)
+            .await
+            .unwrap();
+        let diagnostic = outcome.diagnostic().unwrap();
+
+        assert_eq!(
+            diagnostic.reason().as_str(),
+            "update read-back failed\n  operation: s3.HeadBucket\n  status: 503\n  cause: typed update cause"
+        );
+        assert_eq!(diagnostic.missing_attributes(), ["result"]);
     }
 
     struct PendingOnlyAttempt;
@@ -4835,12 +5042,20 @@ mod pending_operation_tests {
                 error,
             }) => {
                 assert_eq!(preserved, token);
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 assert!(
                     error.to_string().contains("credentials unavailable"),
                     "{error}"
                 );
             }
             Err(AcmPollVerdict::NotCreated(error)) => {
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 panic!(
                     "ACM poll returned NotCreated instead of preserving its continuation: {error}"
                 )
@@ -4885,6 +5100,10 @@ mod pending_operation_tests {
                 error,
             }) => {
                 assert_eq!(preserved, token);
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 assert!(
                     error.to_string().contains(
                         "acm.Certificate may have been created; check before re-applying"
@@ -4893,6 +5112,10 @@ mod pending_operation_tests {
                 );
             }
             Err(AcmPollVerdict::NotCreated(error)) => {
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 panic!(
                     "ACM poll returned NotCreated instead of preserving its continuation: {error}"
                 )
@@ -4937,6 +5160,10 @@ mod pending_operation_tests {
                 error,
             }) => {
                 assert_eq!(preserved, token);
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 assert!(
                     error.to_string().contains(
                         "acm.Certificate may have been created; check before re-applying"
@@ -4945,6 +5172,10 @@ mod pending_operation_tests {
                 );
             }
             Err(AcmPollVerdict::NotCreated(error)) => {
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 panic!(
                     "ACM poll returned NotCreated instead of preserving its continuation: {error}"
                 )
@@ -4990,6 +5221,10 @@ mod pending_operation_tests {
                 error,
             }) => {
                 assert_eq!(preserved, token);
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 assert!(
                     error.to_string().contains(
                         "acm.Certificate may have been created; check before re-applying"
@@ -4998,6 +5233,10 @@ mod pending_operation_tests {
                 );
             }
             Err(AcmPollVerdict::NotCreated(error)) => {
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 panic!(
                     "ACM poll returned NotCreated instead of preserving its continuation: {error}"
                 )
@@ -5043,6 +5282,10 @@ mod pending_operation_tests {
                 error,
             }) => {
                 assert_eq!(preserved, token);
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 assert!(
                     error.to_string().contains(
                         "acm.Certificate may have been created; check before re-applying"
@@ -5051,6 +5294,10 @@ mod pending_operation_tests {
                 );
             }
             Err(AcmPollVerdict::NotCreated(error)) => {
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
                 panic!(
                     "ACM poll returned NotCreated instead of preserving its continuation: {error}"
                 )

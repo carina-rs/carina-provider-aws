@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
-use carina_core::schema::AttributeType;
+use carina_core::schema::{AttributeType, PatternMatch, PatternReason, PatternSpec};
 use carina_smithy::{Shape, ShapeRef, SmithyModel};
 
 use super::{
@@ -12,7 +12,7 @@ use super::{
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TagString {
-    pattern: Option<String>,
+    pattern: Option<PatternSpec>,
     length: Bounds<u64>,
 }
 
@@ -31,7 +31,17 @@ impl TagString {
             .get("smithy.api#pattern")
             .or_else(|| traits.get("smithy.api#pattern"))
             .and_then(|pattern| pattern.as_str())
-            .map(str::to_string);
+            .map(|pattern| {
+                PatternSpec::new(
+                    pattern,
+                    PatternMatch::Substring {
+                        reason: PatternReason::new(
+                            "Smithy tag patterns retain their authored search semantics.",
+                        )
+                        .expect("visible pattern reason"),
+                    },
+                )
+            });
         Ok(Self {
             pattern,
             length: length_from_traits(&member.traits).or_else(|| length_from_traits(traits)),
@@ -39,7 +49,7 @@ impl TagString {
     }
 
     fn refinement(&self) -> ValueTypeOverride {
-        string_refinement(self.pattern.as_deref(), self.length)
+        string_refinement(self.pattern.as_ref(), self.length)
     }
 }
 
@@ -181,4 +191,37 @@ pub fn resource_tag_type(res: &ResourceDef, model: &SmithyModel) -> Result<TagMa
         .validate()
         .with_context(|| format!("{} tag source {source}", res.name))?;
     Ok(tags.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use carina_core::schema::CompiledPattern;
+
+    #[test]
+    fn smithy_prefix_pattern_keeps_search_matching() {
+        let model = carina_smithy::parse(
+            r#"{
+            "smithy":"2.0", "shapes": {
+                "test#Value":{"type":"string","traits":{"smithy.api#pattern":"^prefix-"}}
+            }
+        }"#,
+        )
+        .unwrap();
+        let member = ShapeRef {
+            target: "test#Value".into(),
+            traits: Default::default(),
+        };
+        let tag = TagString::from_member(&model, &member).unwrap();
+        let pattern = tag.pattern.as_ref().unwrap();
+        assert!(matches!(pattern.mode(), PatternMatch::Substring { .. }));
+        let compiled = CompiledPattern::try_new(pattern).unwrap();
+        assert!(compiled.is_match("prefix-\ntrailing text"));
+        assert!(!compiled.is_match("other-prefix-value"));
+        assert!(
+            tag.refinement()
+                .type_code
+                .contains("PatternMatch::Substring")
+        );
+    }
 }

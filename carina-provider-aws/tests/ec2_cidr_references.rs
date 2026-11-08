@@ -7,7 +7,8 @@ use carina_core::protocol_convert::{
 };
 use carina_core::provider::{
     BoxFuture, CanonicalProviderConfigAttributes, InitializeOutcomeMint, LoadedProviderSnapshot,
-    ProviderFactory, ProviderInitialization, ProviderReadyConfig, ProviderResult,
+    ProviderFactory, ProviderInitialization, ProviderResult, ProviderSession,
+    ProviderValidationInputs,
 };
 use carina_core::schema::{
     RawShape, SchemaRegistry, ValidatedConfigSchema, ValidatedResourceSchema, types,
@@ -85,13 +86,16 @@ impl ProviderFactory for OriginCidrFactory {
     fn provider_config_attribute_types(&self) -> ValidatedConfigSchema {
         AwsProviderFactory.provider_config_attribute_types()
     }
-    fn validate_config(&self, attrs: &CanonicalProviderConfigAttributes) -> ProviderResult<()> {
-        AwsProviderFactory.validate_config(attrs)
+    fn validate_config(
+        &self,
+        attrs: &CanonicalProviderConfigAttributes,
+        inputs: &ProviderValidationInputs,
+    ) -> ProviderResult<()> {
+        AwsProviderFactory.validate_config(attrs, inputs)
     }
     fn create_provider(
         &self,
-        _: Option<&str>,
-        _: &ProviderReadyConfig,
+        _: &ProviderSession,
         _: InitializeOutcomeMint,
     ) -> BoxFuture<'_, ProviderResult<ProviderInitialization>> {
         panic!("CIDR validation tests must not create an AWS client")

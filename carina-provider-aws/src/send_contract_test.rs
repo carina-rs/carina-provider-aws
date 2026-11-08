@@ -479,7 +479,7 @@ fn sample_typed_string(
     resource_type: &str,
     path: &[String],
     identity: Option<&TypeIdentity>,
-    pattern: Option<&str>,
+    pattern: Option<&carina_core::schema::PatternSpec>,
     length: Option<(Option<u64>, Option<u64>)>,
     validate: Option<&CustomValidator>,
 ) -> Value {
@@ -1201,11 +1201,15 @@ async fn prepare_create_for_capture(
             let schemas = crate::schemas::schema_registry();
             let factories: Vec<Box<dyn carina_core::provider::ProviderFactory>> =
                 vec![Box::new(crate::AwsProviderFactory)];
+            let fixture_normalizer = carina_core::test_utils::provider_text::normalizer(
+                "aws",
+                Box::new(crate::AwsNormalizer),
+            );
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 bindings,
                 &gate,
                 &[],
-                &crate::AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &schemas,
                 type_checks,
@@ -1397,6 +1401,8 @@ fn checked_integer_inputs_fail_before_any_send_parts_are_created() {
                 matches!(error, ProviderError::InvalidInput(_)),
                 "{resource_type}.{path}: {error:?}"
             );
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(
                 error.to_string().contains(path),
                 "{resource_type}.{path}: {error}"
@@ -1553,12 +1559,12 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
     let mock = MockAws::builder()
         .with_service(Arc::clone(&service))
         .build();
-    let provider = AwsProvider::from_sdk_config(
+    let provider = Arc::new(AwsProvider::from_sdk_config(
         REGION.to_string(),
         vec![],
         vec![],
         &BoundedSdkConfig::for_test(mock.sdk_config(REGION).await),
-    );
+    ));
     let bindings = carina_core::binding_index::ResolvedBindings::default();
     let sqs = || Resource::with_provider("aws", "sqs.Queue", "invalid-create", None);
     let canonicalize_sqs = |mut resource: Resource| {
@@ -1662,8 +1668,13 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
                 panic!("cross-field validation must reject during normalization: {error:?}")
             }
             Ok(request) => {
+                let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+                    Box::new(Arc::clone(&provider)),
+                    Box::new(crate::AwsNormalizer),
+                    &provider.schema_registry,
+                );
                 let (create, _cancellation) = carina_core::executor::dispatch_create(
-                    &provider,
+                    &boundary,
                     create_permit_for_test(request),
                 );
                 let _ = tokio::time::timeout(Duration::from_secs(1), create).await;
@@ -1675,7 +1686,7 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
             "invalid create must not send any AWS request"
         );
         assert!(
-            matches!(&error, ProviderError::InvalidInput(_)),
+            matches!(&error, carina_core::provider::HostError::InvalidInput(_)),
             "{error:?}"
         );
         assert!(error.to_string().contains(message), "{error:?}");
@@ -1696,6 +1707,8 @@ async fn native_create_preparation_rejects_sqs_and_nat_cross_field_conflicts_bef
                     "native update must materialize and validate unchanged cross-field inputs",
                 );
             assert!(matches!(error, ProviderError::InvalidInput(_)));
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             assert!(error.to_string().contains(message), "{error:?}");
             assert!(
                 service.snapshot().is_empty(),
@@ -1864,6 +1877,8 @@ async fn sqs_update_rejects_fifo_conflicts_after_deferred_inputs_resolve_before_
             matches!(&error, ProviderError::InvalidInput(_)),
             "{error:?}"
         );
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(
             error
                 .to_string()
@@ -1958,7 +1973,9 @@ async fn acm_tag_update_does_not_restore_outputs_omitted_by_final_read_back() {
         outcome.diagnostic().unwrap().missing_attributes(),
         ["domain_validation_options"]
     );
-    let state = outcome.into_state_for_writeback();
+    let state =
+        carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(outcome)
+            .into_state_for_writeback();
     assert!(
         !state.attributes.contains_key("domain_validation_options"),
         "omitted DNS records must remain absent so cached planning can mark them unknown"
@@ -2179,6 +2196,8 @@ async fn route53_update_rejects_resolved_invalid_rdata_before_send() {
             .await
             .expect_err("invalid RData must stop before the mutation");
         assert!(matches!(error, ProviderError::InvalidInput(_)), "{error:?}");
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
         assert!(error.to_string().contains("resource_records"), "{error}");
         assert!(!error.to_string().contains(values[0]), "{error}");
         assert!(
@@ -2253,11 +2272,15 @@ async fn capture_create_and_update_mutations() {
                 vec![Box::new(crate::AwsProviderFactory)];
             // Reuse the provider's checked schemas across the matrix; compiling
             // the full registry per attribute consumes the capture timeout.
+            let fixture_normalizer = carina_core::test_utils::provider_text::normalizer(
+                "aws",
+                Box::new(crate::AwsNormalizer),
+            );
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &gate,
                 &[],
-                &crate::AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &provider.schema_registry,
                 type_checks,

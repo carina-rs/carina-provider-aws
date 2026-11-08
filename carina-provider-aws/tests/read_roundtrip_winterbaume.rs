@@ -3,6 +3,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+#[path = "support/comparison.rs"]
+mod comparison;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use carina_core::differ::{Diff, Orphans, PlanPriorStates, create_plan};
 use carina_core::effect::Effect;
 use carina_core::provider::{
-    AppliedIdentifier, CreateFailure, CreateOutcome, CreateRequest, NestedWriteOnlyRecord,
-    NoopNormalizer, PersistedAttributes, Provider, ProviderFactory, ProviderNormalizer,
-    RawSavedAttrs, ReadRequest, UpdateRequest,
+    AppliedIdentifier, CreateRequest, HostCreateFailure as CreateFailure,
+    HostCreateOutcome as CreateOutcome, NestedWriteOnlyRecord, NoopNormalizer, PersistedAttributes,
+    Provider, ProviderFactory, ProviderNormalizer, RawSavedAttrs, ReadRequest, UpdateRequest,
 };
 use carina_core::replacement::{create_permit_for_test, update_permit_for_test};
 use carina_core::resource::{
@@ -111,15 +114,15 @@ fn schema_registry() -> SchemaRegistry {
     carina_provider_aws::schemas::schema_registry()
 }
 
-async fn provider_from_service(service: impl MockService + 'static) -> AwsProvider {
+async fn provider_from_service(service: impl MockService + 'static) -> Arc<AwsProvider> {
     let mock = MockAws::builder().with_service(service).build();
     let sdk_config = mock.sdk_config(REGION).await;
-    AwsProvider::from_sdk_config(
+    Arc::new(AwsProvider::from_sdk_config(
         REGION.to_string(),
         vec![],
         vec![],
         &BoundedSdkConfig::for_test(sdk_config),
-    )
+    ))
 }
 
 struct ReplicationRoundTripService {
@@ -158,7 +161,7 @@ impl MockService for ReplicationRoundTripService {
     }
 }
 
-async fn provider_with_replication_bucket() -> AwsProvider {
+async fn provider_with_replication_bucket() -> Arc<AwsProvider> {
     let service = S3Service::new();
     service
         .restore(
@@ -190,13 +193,13 @@ fn request_target(request: &MockRequest) -> &str {
 
 fn assert_no_diff(desired: Resource, current: State<impl StateValueLeaf>) {
     let registry = schema_registry();
-    let router = carina_provider_aws::test_comparison_router();
+    let router = comparison::test_comparison_router();
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("managed resource comparison context");
     let saved = carina_core::provider::RawSavedAttrs::default().lift(&registry);
     let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
-    let result = carina_provider_aws::test_diff(&desired, &current, &saved, None, comparison);
+    let result = comparison::test_diff(&desired, &current, &saved, None, comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -213,7 +216,7 @@ async fn assert_no_diff_with_nested_write_only(
             SchemaKind::Resource,
         )
         .expect("managed resource schema");
-    let router = carina_provider_aws::test_comparison_router();
+    let router = comparison::test_comparison_router();
     let comparison = router
         .comparison_for(&registry, &desired.id)
         .expect("managed resource comparison context");
@@ -247,8 +250,7 @@ async fn assert_no_diff_with_nested_write_only(
         &comparison.context().observation_for_test(),
     );
     let desired = ResolvedResource::new(desired.into_resolved_dependency_phase_for_test());
-    let result =
-        carina_provider_aws::test_diff(&desired, &current, &saved, Some(&explicit), comparison);
+    let result = comparison::test_diff(&desired, &current, &saved, Some(&explicit), comparison);
     assert!(matches!(result, Diff::NoChange(_)), "{result:?}");
 }
 
@@ -261,11 +263,13 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
             let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &schemas,
                 type_checks,
@@ -304,16 +308,21 @@ async fn create_request_without_schema_for_test(resource: Resource) -> CreateReq
 }
 
 async fn create_outcome_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<CreateOutcome, CreateFailure> {
+    let boundary = carina_core::test_utils::provider_text::boundary_with_components(
+        Box::new(Arc::clone(provider)),
+        Box::new(AwsNormalizer),
+        &schema_registry(),
+    );
     let (create, _cancellation) =
-        carina_core::executor::dispatch_create(provider, create_permit_for_test(request));
+        carina_core::executor::dispatch_create(&boundary, create_permit_for_test(request));
     create.await
 }
 
 async fn create_state_for_test(
-    provider: &AwsProvider,
+    provider: &Arc<AwsProvider>,
     request: CreateRequest,
 ) -> Result<SnapshotState, CreateFailure> {
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
@@ -335,7 +344,7 @@ async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
     resource
 }
 
-async fn create_round_trip_state(provider: &AwsProvider, desired: &Resource) -> SnapshotState {
+async fn create_round_trip_state(provider: &Arc<AwsProvider>, desired: &Resource) -> SnapshotState {
     create_state_for_test(
         provider,
         create_request_without_schema_for_test(desired.clone()).await,
@@ -357,11 +366,13 @@ async fn update_request_for_test(
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
             let schemas = schema_registry();
             let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(AwsProviderFactory)];
+            let fixture_normalizer =
+                carina_core::test_utils::provider_text::normalizer("aws", Box::new(AwsNormalizer));
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
                 &[],
-                &AwsNormalizer,
+                &fixture_normalizer,
                 &factories,
                 &schemas,
                 type_checks,
@@ -966,7 +977,7 @@ async fn provider_with_account_rename(
     initial_name: &str,
     management_account_id: &str,
     mode: AccountRenameMode,
-) -> (AwsProvider, Arc<Mutex<AccountRenameState>>) {
+) -> (Arc<AwsProvider>, Arc<Mutex<AccountRenameState>>) {
     let state = Arc::new(Mutex::new(AccountRenameState {
         account_name: initial_name.to_string(),
         tags: IndexMap::new(),
@@ -984,12 +995,12 @@ async fn provider_with_account_rename(
         })
         .build();
     let sdk_config = mock.sdk_config(REGION).await;
-    let provider = AwsProvider::from_sdk_config(
+    let provider = Arc::new(AwsProvider::from_sdk_config(
         REGION.to_string(),
         vec![],
         vec![],
         &BoundedSdkConfig::for_test(sdk_config),
-    );
+    ));
     (provider, state)
 }
 
@@ -1523,7 +1534,9 @@ async fn log_group_tag_side_read_failure_names_required_permission() {
         .read(&id, &applied_identifier(LOG_GROUP_NAME), ReadRequest)
         .await
         .expect_err("a denied ListTagsLogGroup call must fail the managed read");
-    let message = error.to_string();
+    let message =
+        carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+            .to_string();
     assert!(message.contains("ListTagsLogGroup"), "{message}");
     assert!(message.contains("logs:ListTagsLogGroup"), "{message}");
 }
@@ -1554,7 +1567,11 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
     let request = update_request_for_test(desired, from, &["tags".to_string()]).await;
 
     let state = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(LOG_GROUP_NAME), request),
     )
     .await
@@ -1754,7 +1771,7 @@ async fn account_name_change_plans_an_update_instead_of_replacement() {
     let mut providers = carina_core::provider::ProviderRouter::new();
     providers.add_provider(
         "aws".to_string(),
-        carina_core::provider::InitializedProvider::unavailable(Box::new(provider)),
+        carina_core::test_utils::provider_text::initialized(Box::new(provider)),
     );
     let schemas = schema_registry();
     let desired = organizations_account_resource("desired-name");
@@ -1811,7 +1828,11 @@ async fn account_name_update_sends_put_account_name_and_read_converges() {
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
     let updated = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -1846,7 +1867,11 @@ async fn management_account_rename_omits_account_id() {
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
     let updated = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -1877,7 +1902,11 @@ async fn unchanged_account_name_sends_no_put_account_name() {
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
     carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -1914,7 +1943,11 @@ async fn account_name_and_tags_update_in_order_and_read_converges() {
     .await;
 
     let updated = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -1948,7 +1981,11 @@ async fn account_name_access_denied_error_names_required_setup() {
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
     let error = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -1982,7 +2019,11 @@ async fn account_name_non_access_denied_error_has_no_setup_hint() {
         update_request_for_test(desired.clone(), current, &["account_name".to_string()]).await;
 
     let error = carina_core::executor::dispatch_update(
-        &provider,
+        &carina_core::test_utils::provider_text::boundary_with_components(
+            Box::new(Arc::clone(&provider)),
+            Box::new(AwsNormalizer),
+            &schema_registry(),
+        ),
         update_permit_for_test(applied_identifier(ORGANIZATIONS_ACCOUNT_ID), request),
     )
     .await
@@ -2464,7 +2505,9 @@ async fn queue_tag_side_read_failure_names_required_permission() {
         .read(&id, &applied_identifier(QUEUE_URL), ReadRequest)
         .await
         .expect_err("a denied ListQueueTags call must fail the managed read");
-    let message = error.to_string();
+    let message =
+        carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+            .to_string();
     assert!(message.contains("ListQueueTags"), "{message}");
     assert!(message.contains("sqs:ListQueueTags"), "{message}");
 }
@@ -2483,7 +2526,9 @@ async fn queue_kms_reuse_period_without_master_key_is_rejected_during_normalizat
         .normalize_desired(&mut resources)
         .await
         .expect_err("a truly absent KMS key must be rejected during v13 normalization");
-    let message = error.to_string();
+    let message =
+        carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+            .to_string();
     assert!(
         message.contains("kms_data_key_reuse_period_seconds"),
         "{message}"

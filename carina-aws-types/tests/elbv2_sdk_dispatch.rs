@@ -60,11 +60,14 @@ impl CarinaProvider for MatcherProvider {
         ValidatedConfigSchema::default()
     }
 
-    fn validate_config(&self, _attrs: &BTreeMap<String, Value>) -> Result<(), String> {
+    fn validate_config(&self, _attrs: &BTreeMap<String, Value>) -> Result<(), ProviderError> {
         Ok(())
     }
 
-    fn initialize(&mut self, _attrs: &BTreeMap<String, Value>) -> Result<ReferenceScope, String> {
+    fn initialize(
+        &mut self,
+        _attrs: &BTreeMap<String, Value>,
+    ) -> Result<ReferenceScope, ProviderError> {
         Ok(ReferenceScope::Unavailable)
     }
 

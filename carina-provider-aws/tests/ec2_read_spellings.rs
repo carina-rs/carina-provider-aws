@@ -65,7 +65,11 @@ async fn read(
             ReadRequest,
         )
         .await
-        .unwrap_or_else(|error| panic!("{resource}: {error}"))
+        .unwrap_or_else(|error| {
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+            panic!("{resource}: {error}")
+        })
         .into_state()
 }
 

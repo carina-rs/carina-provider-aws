@@ -33,7 +33,10 @@ fn organizations_organization_id_is_anonymous_and_validates_smithy_bounds() {
             panic!("id must be String");
         };
         assert!(identity.is_none());
-        assert_eq!(pattern, Some(r"^o-[a-z0-9]{10,32}\z"));
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some(r"^o-[a-z0-9]{10,32}\z")
+        );
         assert_eq!(length, Some((Some(12), Some(34))));
         for valid in ["o-0123456789".to_string(), format!("o-{}", "a".repeat(32))] {
             let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));

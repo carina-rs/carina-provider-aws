@@ -113,7 +113,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
             AttributeSchema::provider_populated("domain_validation_options", AttributeType::list(AttributeType::struct_(
                     "DomainValidation".to_string(),
                     vec![
-                    StructField::required("domain_name", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
+                    StructField::required("domain_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
                     StructField::optional("http_redirect", AttributeType::struct_(
                     "HttpRedirect".to_string(),
                     vec![
@@ -135,7 +135,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).deferred_populate().with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
-                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
+                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
                     StructField::optional("validation_emails", AttributeType::list(types::email())).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
                     StructField::optional("validation_method", AttributeType::enum_(
     carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.DomainValidation")),
@@ -176,7 +176,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::required("domain_validation_options", AttributeType::list(AttributeType::struct_(
                     "DomainValidation".to_string(),
                     vec![
-                    StructField::required("domain_name", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
+                    StructField::required("domain_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
                     StructField::optional("http_redirect", AttributeType::struct_(
                     "HttpRedirect".to_string(),
                     vec![
@@ -198,7 +198,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
-                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z".to_string()), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
+                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
                     StructField::optional("validation_emails", AttributeType::list(types::email())).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
                     StructField::optional("validation_method", AttributeType::enum_(
     carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.RenewalSummary.DomainValidation")),
@@ -263,7 +263,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$".to_string()), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$".to_string()), Some((None, Some(256))), None), Some((Some(1), Some(50)))))
+            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((None, Some(256))), None), Some((Some(1), Some(50)))))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),
