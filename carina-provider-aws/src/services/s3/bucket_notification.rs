@@ -146,6 +146,10 @@ impl AwsProvider {
         let lambda_function_configurations = lambda_function_configurations.into_inner();
         let queue_configurations = queue_configurations.into_inner();
         let topic_configurations = topic_configurations.into_inner();
+        let event_bridge_configuration = event_bridge_configuration.resolve(|| Ok(None))?;
+        let lambda_function_configurations = lambda_function_configurations.resolve(|| Ok(None))?;
+        let queue_configurations = queue_configurations.resolve(|| Ok(None))?;
+        let topic_configurations = topic_configurations.resolve(|| Ok(None))?;
         self.put_s3_bucket_notification(
             &id,
             identifier,

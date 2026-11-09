@@ -19,6 +19,8 @@ mod read_back;
 mod read_model;
 mod read_models_generated;
 mod references;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod removal_tests;
 #[cfg(test)]
 mod resend_guard;
 mod resend_safety_generated;

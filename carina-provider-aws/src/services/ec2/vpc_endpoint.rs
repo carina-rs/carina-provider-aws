@@ -1,3 +1,4 @@
+use crate::helpers::AttributeChange;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
@@ -216,21 +217,58 @@ impl AwsProvider {
             tags,
         } = input.into_parts();
         let policy_document = policy_document.into_inner();
+        let private_dns_enabled = private_dns_enabled.into_inner();
+        let tags = tags.into_inner();
+        // Decode create-only context only if a removal needs it. The default
+        // endpoint type is Gateway; removing the context itself is invalid.
+        let endpoint_type = || -> ProviderResult<String> {
+            let context = crate::send_model::decode_change(to, "vpc_endpoint_type", |resource| {
+                crate::send_model::optional_enum(resource, _schema, "vpc_endpoint_type")
+            })?
+            .resolve(|| {
+                Err(crate::helpers::removal_error(
+                    &id,
+                    "policy_document",
+                    "Its reset depends on vpc_endpoint_type, which is not known in state",
+                ))
+            })?;
+            Ok(context.unwrap_or_else(|| "Gateway".into()))
+        };
+        let (policy_document, reset_policy) = match policy_document {
+            AttributeChange::Set(value) | AttributeChange::Unchanged(value) => (value, false),
+            AttributeChange::Removed => {
+                if endpoint_type()? != "Gateway" {
+                    return Err(crate::helpers::removal_error(
+                        &id,
+                        "policy_document",
+                        "ResetPolicy is only documented for gateway endpoints",
+                    ));
+                }
+                (None, true)
+            }
+        };
         let policy_document = policy_document
             .as_ref()
             .map(|value| {
                 crate::services::iam::role::resolve_iam_policy_value(&id, "policy_document", value)
             })
             .transpose()?;
-        let private_dns_enabled = private_dns_enabled.into_inner();
-        let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
+        let private_dns_enabled = private_dns_enabled.resolve(|| {
+            Err(crate::helpers::removal_error(
+                &id,
+                "private_dns_enabled",
+                "The EC2 API does not document a reset matching create-time omission",
+            ))
+        })?;
         let mut req = self
             .ec2_client
             .modify_vpc_endpoint()
             .vpc_endpoint_id(identifier.as_str());
 
-        let mut has_modifications = false;
+        let mut has_modifications = reset_policy;
+        if reset_policy {
+            req = req.reset_policy(true);
+        }
 
         if let Some(v) = private_dns_enabled {
             req = req.private_dns_enabled(v);
@@ -249,13 +287,8 @@ impl AwsProvider {
         }
 
         // Apply tags
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
 
         Ok(self.read_ec2_vpc_endpoint(&id, identifier).await)
     }

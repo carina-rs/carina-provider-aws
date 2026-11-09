@@ -133,6 +133,25 @@ impl AwsProvider {
         } = input.into_parts();
         let gateway_id = gateway_id.into_inner();
         let nat_gateway_id = nat_gateway_id.into_inner();
+        let mut removed_target = None;
+        let gateway_id = gateway_id.resolve(|| {
+            removed_target = Some("gateway_id");
+            Ok(None)
+        })?;
+        let nat_gateway_id = nat_gateway_id.resolve(|| {
+            removed_target = Some("nat_gateway_id");
+            Ok(None)
+        })?;
+        if gateway_id.is_none()
+            && nat_gateway_id.is_none()
+            && let Some(removed_target) = removed_target
+        {
+            return Err(crate::helpers::removal_error(
+                &id,
+                removed_target,
+                "ReplaceRoute requires a target",
+            ));
+        }
         let Some((route_table_id, destination_cidr)) = identifier.as_str().split_once('|') else {
             return Err(ProviderError::invalid_input(format!(
                 "Invalid route identifier: {}",

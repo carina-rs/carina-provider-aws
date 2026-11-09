@@ -150,6 +150,9 @@ impl AwsProvider {
         let error_document = error_document.into_inner();
         let index_document = index_document.into_inner();
         let redirect_all_requests_to = redirect_all_requests_to.into_inner();
+        let error_document = error_document.resolve(|| Ok(None))?;
+        let index_document = index_document.resolve(|| Ok(None))?;
+        let redirect_all_requests_to = redirect_all_requests_to.resolve(|| Ok(None))?;
         self.put_s3_bucket_website(
             &id,
             identifier,

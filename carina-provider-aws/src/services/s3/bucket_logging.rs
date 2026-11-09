@@ -123,6 +123,8 @@ impl AwsProvider {
         let target_bucket = target_bucket.into_inner();
         let target_object_key_format = target_object_key_format.into_inner();
         let target_prefix = target_prefix.into_inner();
+        let target_object_key_format = target_object_key_format.resolve(|| Ok(None))?;
+        let target_prefix = target_prefix.resolve(|| Ok(None))?;
         self.put_s3_bucket_logging(
             &id,
             identifier,

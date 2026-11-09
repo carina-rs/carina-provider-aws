@@ -604,9 +604,8 @@ impl AwsProvider {
         let input = Ec2FlowLogUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2FlowLogUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
         for flow_log_id in identifier.as_str().split(',') {
-            self.apply_ec2_tags(&id, flow_log_id, tags.as_ref(), Some(&from.attributes))
+            self.apply_ec2_tags(&id, flow_log_id, tags.clone(), Some(&from.attributes))
                 .await?;
         }
         Ok(self.read_ec2_flow_log(&id, identifier).await)

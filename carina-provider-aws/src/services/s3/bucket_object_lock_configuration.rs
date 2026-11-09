@@ -188,6 +188,7 @@ impl AwsProvider {
         } = input.into_parts();
         let object_lock_enabled = object_lock_enabled.into_inner();
         let rule = rule.into_inner();
+        let rule = rule.resolve(|| Ok(None))?;
         self.put_s3_bucket_object_lock_configuration(
             &id,
             identifier,

@@ -111,27 +111,37 @@ impl Ec2VpcCreateInput {
 
 /// Exhaustive typed update input for `ec2.Vpc`.
 pub(crate) struct Ec2VpcUpdateInput {
-    enable_dns_hostnames: Option<bool>,
-    enable_dns_support: Option<bool>,
-    tags: Option<crate::send_model::Tags>,
+    enable_dns_hostnames: crate::helpers::AttributeChange<Option<bool>>,
+    enable_dns_support: crate::helpers::AttributeChange<Option<bool>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2VpcUpdateParts {
-    pub(crate) enable_dns_hostnames: crate::send_model::Sent<Option<bool>>,
-    pub(crate) enable_dns_support: crate::send_model::Sent<Option<bool>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) enable_dns_hostnames:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) enable_dns_support:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2VpcUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc::ec2_vpc_config().schema;
         Ok(Self {
-            enable_dns_hostnames: crate::send_model::optional_bool(
+            enable_dns_hostnames: crate::send_model::decode_change(
                 _resource,
                 "enable_dns_hostnames",
+                |_resource| crate::send_model::optional_bool(_resource, "enable_dns_hostnames"),
             )?,
-            enable_dns_support: crate::send_model::optional_bool(_resource, "enable_dns_support")?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            enable_dns_support: crate::send_model::decode_change(
+                _resource,
+                "enable_dns_support",
+                |_resource| crate::send_model::optional_bool(_resource, "enable_dns_support"),
+            )?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -151,6 +161,27 @@ impl Ec2VpcUpdateInput {
                 enable_dns_support,
             ),
             tags: crate::send_model::Sent::new("ec2.Vpc.update.tags", tags),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Ec2SubnetDnsField {
+    EnableResourceNameDnsAaaaRecord,
+    EnableResourceNameDnsARecord,
+    HostnameType,
+}
+impl Ec2SubnetDnsField {
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::EnableResourceNameDnsAaaaRecord,
+        Self::EnableResourceNameDnsARecord,
+        Self::HostnameType,
+    ];
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::EnableResourceNameDnsAaaaRecord => "enable_resource_name_dns_aaaa_record",
+            Self::EnableResourceNameDnsARecord => "enable_resource_name_dns_a_record",
+            Self::HostnameType => "hostname_type",
         }
     }
 }
@@ -360,45 +391,69 @@ impl Ec2SubnetCreateInput {
 
 /// Exhaustive typed update input for `ec2.Subnet`.
 pub(crate) struct Ec2SubnetUpdateInput {
-    assign_ipv6_address_on_creation: Option<bool>,
-    enable_dns64: Option<bool>,
-    enable_lni_at_device_index: Option<i32>,
-    map_public_ip_on_launch: Option<bool>,
-    private_dns_name_options_on_launch: Option<Value>,
-    tags: Option<crate::send_model::Tags>,
+    assign_ipv6_address_on_creation: crate::helpers::AttributeChange<Option<bool>>,
+    enable_dns64: crate::helpers::AttributeChange<Option<bool>>,
+    enable_lni_at_device_index: crate::helpers::AttributeChange<Option<i32>>,
+    map_public_ip_on_launch: crate::helpers::AttributeChange<Option<bool>>,
+    private_dns_name_options_on_launch: crate::helpers::AttributeChange<Option<Value>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2SubnetUpdateParts {
-    pub(crate) assign_ipv6_address_on_creation: crate::send_model::Sent<Option<bool>>,
-    pub(crate) enable_dns64: crate::send_model::Sent<Option<bool>>,
-    pub(crate) enable_lni_at_device_index: crate::send_model::Sent<Option<i32>>,
-    pub(crate) map_public_ip_on_launch: crate::send_model::Sent<Option<bool>>,
-    pub(crate) private_dns_name_options_on_launch: crate::send_model::Sent<Option<Value>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) assign_ipv6_address_on_creation:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) enable_dns64: crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) enable_lni_at_device_index:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i32>>>,
+    pub(crate) map_public_ip_on_launch:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) private_dns_name_options_on_launch:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2SubnetUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::subnet::ec2_subnet_config().schema;
         Ok(Self {
-            assign_ipv6_address_on_creation: crate::send_model::optional_bool(
+            assign_ipv6_address_on_creation: crate::send_model::decode_change(
                 _resource,
                 "assign_ipv6_address_on_creation",
+                |_resource| {
+                    crate::send_model::optional_bool(_resource, "assign_ipv6_address_on_creation")
+                },
             )?,
-            enable_dns64: crate::send_model::optional_bool(_resource, "enable_dns64")?,
-            enable_lni_at_device_index: crate::send_model::optional_i32(
+            enable_dns64: crate::send_model::decode_change(
+                _resource,
+                "enable_dns64",
+                |_resource| crate::send_model::optional_bool(_resource, "enable_dns64"),
+            )?,
+            enable_lni_at_device_index: crate::send_model::decode_change(
                 _resource,
                 "enable_lni_at_device_index",
+                |_resource| {
+                    crate::send_model::optional_i32(_resource, "enable_lni_at_device_index")
+                },
             )?,
-            map_public_ip_on_launch: crate::send_model::optional_bool(
+            map_public_ip_on_launch: crate::send_model::decode_change(
                 _resource,
                 "map_public_ip_on_launch",
+                |_resource| crate::send_model::optional_bool(_resource, "map_public_ip_on_launch"),
             )?,
-            private_dns_name_options_on_launch: crate::send_model::optional_value(
+            private_dns_name_options_on_launch: crate::send_model::decode_change(
                 _resource,
                 "private_dns_name_options_on_launch",
+                |_resource| {
+                    crate::send_model::optional_value(
+                        _resource,
+                        "private_dns_name_options_on_launch",
+                    )
+                },
             )?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -479,19 +534,22 @@ impl Ec2InternetGatewayCreateInput {
 
 /// Exhaustive typed update input for `ec2.InternetGateway`.
 pub(crate) struct Ec2InternetGatewayUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2InternetGatewayUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2InternetGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::internet_gateway::ec2_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -545,18 +603,21 @@ impl Ec2RouteTableCreateInput {
 
 /// Exhaustive typed update input for `ec2.RouteTable`.
 pub(crate) struct Ec2RouteTableUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2RouteTableUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2RouteTableUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route_table::ec2_route_table_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -641,21 +702,28 @@ impl Ec2RouteCreateInput {
 
 /// Exhaustive typed update input for `ec2.Route`.
 pub(crate) struct Ec2RouteUpdateInput {
-    gateway_id: Option<String>,
-    nat_gateway_id: Option<String>,
+    gateway_id: crate::helpers::AttributeChange<Option<String>>,
+    nat_gateway_id: crate::helpers::AttributeChange<Option<String>>,
 }
 
 pub(crate) struct Ec2RouteUpdateParts {
-    pub(crate) gateway_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) nat_gateway_id: crate::send_model::Sent<Option<String>>,
+    pub(crate) gateway_id: crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>,
+    pub(crate) nat_gateway_id:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>,
 }
 
 impl Ec2RouteUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::route::ec2_route_config().schema;
         Ok(Self {
-            gateway_id: crate::send_model::optional_string(_resource, "gateway_id")?,
-            nat_gateway_id: crate::send_model::optional_string(_resource, "nat_gateway_id")?,
+            gateway_id: crate::send_model::decode_change(_resource, "gateway_id", |_resource| {
+                crate::send_model::optional_string(_resource, "gateway_id")
+            })?,
+            nat_gateway_id: crate::send_model::decode_change(
+                _resource,
+                "nat_gateway_id",
+                |_resource| crate::send_model::optional_string(_resource, "nat_gateway_id"),
+            )?,
         })
     }
 
@@ -740,19 +808,22 @@ impl Ec2SecurityGroupCreateInput {
 
 /// Exhaustive typed update input for `ec2.SecurityGroup`.
 pub(crate) struct Ec2SecurityGroupUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2SecurityGroupUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2SecurityGroupUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::security_group::ec2_security_group_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -916,7 +987,7 @@ pub(crate) struct Ec2SecurityGroupIngressUpdateInput;
 pub(crate) struct Ec2SecurityGroupIngressUpdateParts;
 
 impl Ec2SecurityGroupIngressUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::security_group_ingress::ec2_security_group_ingress_config().schema;
         Ok(Self)
     }
@@ -1077,7 +1148,7 @@ pub(crate) struct Ec2SecurityGroupEgressUpdateInput;
 pub(crate) struct Ec2SecurityGroupEgressUpdateParts;
 
 impl Ec2SecurityGroupEgressUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::security_group_egress::ec2_security_group_egress_config().schema;
         Ok(Self)
     }
@@ -1133,18 +1204,21 @@ impl Ec2EgressOnlyInternetGatewayCreateInput {
 
 /// Exhaustive typed update input for `ec2.EgressOnlyInternetGateway`.
 pub(crate) struct Ec2EgressOnlyInternetGatewayUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2EgressOnlyInternetGatewayUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2EgressOnlyInternetGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::egress_only_internet_gateway::ec2_egress_only_internet_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1222,18 +1296,21 @@ impl Ec2EipCreateInput {
 
 /// Exhaustive typed update input for `ec2.Eip`.
 pub(crate) struct Ec2EipUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2EipUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2EipUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::eip::ec2_eip_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1400,18 +1477,21 @@ impl Ec2FlowLogCreateInput {
 
 /// Exhaustive typed update input for `ec2.FlowLog`.
 pub(crate) struct Ec2FlowLogUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2FlowLogUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2FlowLogUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::flow_log::ec2_flow_log_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1547,18 +1627,21 @@ impl Ec2NatGatewayCreateInput {
 
 /// Exhaustive typed update input for `ec2.NatGateway`.
 pub(crate) struct Ec2NatGatewayUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2NatGatewayUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2NatGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::nat_gateway::ec2_nat_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1623,7 +1706,7 @@ pub(crate) struct Ec2SubnetRouteTableAssociationUpdateInput;
 pub(crate) struct Ec2SubnetRouteTableAssociationUpdateParts;
 
 impl Ec2SubnetRouteTableAssociationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::subnet_route_table_association::ec2_subnet_route_table_association_config().schema;
         Ok(Self)
     }
@@ -1693,22 +1776,28 @@ impl Ec2TransitGatewayCreateInput {
 
 /// Exhaustive typed update input for `ec2.TransitGateway`.
 pub(crate) struct Ec2TransitGatewayUpdateInput {
-    description: Option<String>,
-    tags: Option<crate::send_model::Tags>,
+    description: crate::helpers::AttributeChange<Option<String>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2TransitGatewayUpdateParts {
-    pub(crate) description: crate::send_model::Sent<Option<String>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) description:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2TransitGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::transit_gateway::ec2_transit_gateway_config().schema;
         Ok(Self {
-            description: crate::send_model::optional_string(_resource, "description")?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            description: crate::send_model::decode_change(_resource, "description", |_resource| {
+                crate::send_model::optional_string(_resource, "description")
+            })?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1804,18 +1893,21 @@ impl Ec2TransitGatewayAttachmentCreateInput {
 
 /// Exhaustive typed update input for `ec2.TransitGatewayAttachment`.
 pub(crate) struct Ec2TransitGatewayAttachmentUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2TransitGatewayAttachmentUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2TransitGatewayAttachmentUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::transit_gateway_attachment::ec2_transit_gateway_attachment_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -1996,28 +2088,38 @@ impl Ec2VpcEndpointCreateInput {
 
 /// Exhaustive typed update input for `ec2.VpcEndpoint`.
 pub(crate) struct Ec2VpcEndpointUpdateInput {
-    policy_document: Option<Value>,
-    private_dns_enabled: Option<bool>,
-    tags: Option<crate::send_model::Tags>,
+    policy_document: crate::helpers::AttributeChange<Option<Value>>,
+    private_dns_enabled: crate::helpers::AttributeChange<Option<bool>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2VpcEndpointUpdateParts {
-    pub(crate) policy_document: crate::send_model::Sent<Option<Value>>,
-    pub(crate) private_dns_enabled: crate::send_model::Sent<Option<bool>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) policy_document:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) private_dns_enabled:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2VpcEndpointUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::ec2::vpc_endpoint::ec2_vpc_endpoint_config().schema;
         Ok(Self {
-            policy_document: crate::send_model::optional_value(_resource, "policy_document")?,
-            private_dns_enabled: crate::send_model::optional_bool(
+            policy_document: crate::send_model::decode_change(
+                _resource,
+                "policy_document",
+                |_resource| crate::send_model::optional_value(_resource, "policy_document"),
+            )?,
+            private_dns_enabled: crate::send_model::decode_change(
                 _resource,
                 "private_dns_enabled",
+                |_resource| crate::send_model::optional_bool(_resource, "private_dns_enabled"),
             )?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -2107,7 +2209,7 @@ pub(crate) struct Ec2VpcGatewayAttachmentUpdateInput;
 pub(crate) struct Ec2VpcGatewayAttachmentUpdateParts;
 
 impl Ec2VpcGatewayAttachmentUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_gateway_attachment::ec2_vpc_gateway_attachment_config().schema;
         Ok(Self)
     }
@@ -2183,18 +2285,21 @@ impl Ec2VpcPeeringConnectionCreateInput {
 
 /// Exhaustive typed update input for `ec2.VpcPeeringConnection`.
 pub(crate) struct Ec2VpcPeeringConnectionUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2VpcPeeringConnectionUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2VpcPeeringConnectionUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpc_peering_connection::ec2_vpc_peering_connection_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -2277,18 +2382,21 @@ impl Ec2VpnGatewayCreateInput {
 
 /// Exhaustive typed update input for `ec2.VpnGateway`.
 pub(crate) struct Ec2VpnGatewayUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct Ec2VpnGatewayUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl Ec2VpnGatewayUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::ec2::vpn_gateway::ec2_vpn_gateway_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -2357,18 +2465,21 @@ impl S3BucketCreateInput {
 
 /// Exhaustive typed update input for `s3.Bucket`.
 pub(crate) struct S3BucketUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct S3BucketUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl S3BucketUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket::s3_bucket_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -2429,11 +2540,13 @@ pub(crate) struct S3BucketPolicyUpdateParts {
 }
 
 impl S3BucketPolicyUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_policy::s3_bucket_policy_config().schema;
         Ok(Self {
-            policy: crate::send_model::required_value(_resource, "policy")?,
+            policy: crate::send_model::decode_required(_resource, "policy", |_resource| {
+                crate::send_model::required_value(_resource, "policy")
+            })?,
         })
     }
 
@@ -2494,11 +2607,13 @@ pub(crate) struct S3BucketVersioningUpdateParts {
 
 impl S3BucketVersioningUpdateInput {
     pub(crate) fn decode(
-        _resource: &impl crate::send_model::SendResource,
+        _resource: &crate::helpers::UpdateResource,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
-            status: crate::send_model::required_enum(_resource, _schema, "status")?,
+            status: crate::send_model::decode_required(_resource, "status", |_resource| {
+                crate::send_model::required_enum(_resource, _schema, "status")
+            })?,
         })
     }
 
@@ -2535,8 +2650,7 @@ impl S3BucketObjectLockConfigurationCreateInput {
                 _schema,
                 "object_lock_enabled",
             )?,
-            rule: {
-                let value = crate::send_model::optional_value(_resource, "rule")?;
+            rule: crate::send_model::optional_value(_resource, "rule").and_then(|value| {
                 if let Some(value) = &value {
                     crate::send_model::check_i32_value(
                         _resource,
@@ -2548,8 +2662,8 @@ impl S3BucketObjectLockConfigurationCreateInput {
                         ],
                     )?;
                 }
-                value
-            },
+                Ok(value)
+            })?,
         })
     }
 
@@ -2589,40 +2703,43 @@ impl S3BucketObjectLockConfigurationCreateInput {
 /// Exhaustive typed update input for `s3.BucketObjectLockConfiguration`.
 pub(crate) struct S3BucketObjectLockConfigurationUpdateInput {
     object_lock_enabled: String,
-    rule: Option<Value>,
+    rule: crate::helpers::AttributeChange<Option<Value>>,
 }
 
 pub(crate) struct S3BucketObjectLockConfigurationUpdateParts {
     pub(crate) object_lock_enabled: crate::send_model::Sent<String>,
-    pub(crate) rule: crate::send_model::Sent<Option<Value>>,
+    pub(crate) rule: crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
 }
 
 impl S3BucketObjectLockConfigurationUpdateInput {
     pub(crate) fn decode(
-        _resource: &impl crate::send_model::SendResource,
+        _resource: &crate::helpers::UpdateResource,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
-            object_lock_enabled: crate::send_model::required_enum(
+            object_lock_enabled: crate::send_model::decode_required(
                 _resource,
-                _schema,
                 "object_lock_enabled",
+                |_resource| {
+                    crate::send_model::required_enum(_resource, _schema, "object_lock_enabled")
+                },
             )?,
-            rule: {
-                let value = crate::send_model::optional_value(_resource, "rule")?;
-                if let Some(value) = &value {
-                    crate::send_model::check_i32_value(
-                        _resource,
-                        "rule",
-                        value,
-                        &[
-                            &["default_retention", "retention_period", "days"],
-                            &["default_retention", "retention_period", "years"],
-                        ],
-                    )?;
-                }
-                value
-            },
+            rule: crate::send_model::decode_change(_resource, "rule", |_resource| {
+                crate::send_model::optional_value(_resource, "rule").and_then(|value| {
+                    if let Some(value) = &value {
+                        crate::send_model::check_i32_value(
+                            _resource,
+                            "rule",
+                            value,
+                            &[
+                                &["default_retention", "retention_period", "days"],
+                                &["default_retention", "retention_period", "years"],
+                            ],
+                        )?;
+                    }
+                    Ok(value)
+                })
+            })?,
         })
     }
 
@@ -2693,11 +2810,13 @@ pub(crate) struct S3BucketAclUpdateParts {
 
 impl S3BucketAclUpdateInput {
     pub(crate) fn decode(
-        _resource: &impl crate::send_model::SendResource,
+        _resource: &crate::helpers::UpdateResource,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
-            acl: crate::send_model::required_enum(_resource, _schema, "acl")?,
+            acl: crate::send_model::decode_required(_resource, "acl", |_resource| {
+                crate::send_model::required_enum(_resource, _schema, "acl")
+            })?,
         })
     }
 
@@ -2771,14 +2890,16 @@ pub(crate) struct S3BucketOwnershipControlsUpdateParts {
 
 impl S3BucketOwnershipControlsUpdateInput {
     pub(crate) fn decode(
-        _resource: &impl crate::send_model::SendResource,
+        _resource: &crate::helpers::UpdateResource,
         _schema: &carina_core::schema::CompiledResourceSchema,
     ) -> ProviderResult<Self> {
         Ok(Self {
-            object_ownership: crate::send_model::required_enum(
+            object_ownership: crate::send_model::decode_required(
                 _resource,
-                _schema,
                 "object_ownership",
+                |_resource| {
+                    crate::send_model::required_enum(_resource, _schema, "object_ownership")
+                },
             )?,
         })
     }
@@ -2848,10 +2969,12 @@ pub(crate) struct S3BucketServerSideEncryptionConfigurationUpdateParts {
 }
 
 impl S3BucketServerSideEncryptionConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_server_side_encryption_configuration::s3_bucket_server_side_encryption_configuration_config().schema;
         Ok(Self {
-            rules: crate::send_model::required_value(_resource, "rules")?,
+            rules: crate::send_model::decode_required(_resource, "rules", |_resource| {
+                crate::send_model::required_value(_resource, "rules")
+            })?,
         })
     }
 
@@ -2887,16 +3010,15 @@ impl S3BucketReplicationConfigurationCreateInput {
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
             role: crate::send_model::required_string(_resource, "role")?,
-            rules: {
-                let value = crate::send_model::required_value(_resource, "rules")?;
+            rules: crate::send_model::required_value(_resource, "rules").and_then(|value| {
                 crate::send_model::check_i32_value(
                     _resource,
                     "rules",
                     &value,
                     &[&["[]", "priority"]],
                 )?;
-                value
-            },
+                Ok(value)
+            })?,
         })
     }
 
@@ -2943,20 +3065,23 @@ pub(crate) struct S3BucketReplicationConfigurationUpdateParts {
 }
 
 impl S3BucketReplicationConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_replication_configuration::s3_bucket_replication_configuration_config().schema;
         Ok(Self {
-            role: crate::send_model::required_string(_resource, "role")?,
-            rules: {
-                let value = crate::send_model::required_value(_resource, "rules")?;
-                crate::send_model::check_i32_value(
-                    _resource,
-                    "rules",
-                    &value,
-                    &[&["[]", "priority"]],
-                )?;
-                value
-            },
+            role: crate::send_model::decode_required(_resource, "role", |_resource| {
+                crate::send_model::required_string(_resource, "role")
+            })?,
+            rules: crate::send_model::decode_required(_resource, "rules", |_resource| {
+                crate::send_model::required_value(_resource, "rules").and_then(|value| {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "rules",
+                        &value,
+                        &[&["[]", "priority"]],
+                    )?;
+                    Ok(value)
+                })
+            })?,
         })
     }
 
@@ -2993,8 +3118,7 @@ impl S3BucketLifecycleConfigurationCreateInput {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
-            rules: {
-                let value = crate::send_model::required_value(_resource, "rules")?;
+            rules: crate::send_model::required_value(_resource, "rules").and_then(|value| {
                 crate::send_model::check_i32_value(
                     _resource,
                     "rules",
@@ -3027,8 +3151,8 @@ impl S3BucketLifecycleConfigurationCreateInput {
                         &["[]", "transitions", "[]", "days"],
                     ],
                 )?;
-                value
-            },
+                Ok(value)
+            })?,
         })
     }
 
@@ -3064,45 +3188,46 @@ pub(crate) struct S3BucketLifecycleConfigurationUpdateParts {
 }
 
 impl S3BucketLifecycleConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_lifecycle_configuration::s3_bucket_lifecycle_configuration_config().schema;
         Ok(Self {
-            rules: {
-                let value = crate::send_model::required_value(_resource, "rules")?;
-                crate::send_model::check_i32_value(
-                    _resource,
-                    "rules",
-                    &value,
-                    &[
+            rules: crate::send_model::decode_required(_resource, "rules", |_resource| {
+                crate::send_model::required_value(_resource, "rules").and_then(|value| {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "rules",
+                        &value,
                         &[
-                            "[]",
-                            "abort_incomplete_multipart_upload",
-                            "days_after_initiation",
+                            &[
+                                "[]",
+                                "abort_incomplete_multipart_upload",
+                                "days_after_initiation",
+                            ],
+                            &["[]", "expiration", "days"],
+                            &[
+                                "[]",
+                                "noncurrent_version_expiration",
+                                "newer_noncurrent_versions",
+                            ],
+                            &["[]", "noncurrent_version_expiration", "noncurrent_days"],
+                            &[
+                                "[]",
+                                "noncurrent_version_transitions",
+                                "[]",
+                                "newer_noncurrent_versions",
+                            ],
+                            &[
+                                "[]",
+                                "noncurrent_version_transitions",
+                                "[]",
+                                "noncurrent_days",
+                            ],
+                            &["[]", "transitions", "[]", "days"],
                         ],
-                        &["[]", "expiration", "days"],
-                        &[
-                            "[]",
-                            "noncurrent_version_expiration",
-                            "newer_noncurrent_versions",
-                        ],
-                        &["[]", "noncurrent_version_expiration", "noncurrent_days"],
-                        &[
-                            "[]",
-                            "noncurrent_version_transitions",
-                            "[]",
-                            "newer_noncurrent_versions",
-                        ],
-                        &[
-                            "[]",
-                            "noncurrent_version_transitions",
-                            "[]",
-                            "noncurrent_days",
-                        ],
-                        &["[]", "transitions", "[]", "days"],
-                    ],
-                )?;
-                value
-            },
+                    )?;
+                    Ok(value)
+                })
+            })?,
         })
     }
 
@@ -3193,26 +3318,40 @@ impl S3BucketWebsiteConfigurationCreateInput {
 
 /// Exhaustive typed update input for `s3.BucketWebsiteConfiguration`.
 pub(crate) struct S3BucketWebsiteConfigurationUpdateInput {
-    error_document: Option<Value>,
-    index_document: Option<Value>,
-    redirect_all_requests_to: Option<Value>,
+    error_document: crate::helpers::AttributeChange<Option<Value>>,
+    index_document: crate::helpers::AttributeChange<Option<Value>>,
+    redirect_all_requests_to: crate::helpers::AttributeChange<Option<Value>>,
 }
 
 pub(crate) struct S3BucketWebsiteConfigurationUpdateParts {
-    pub(crate) error_document: crate::send_model::Sent<Option<Value>>,
-    pub(crate) index_document: crate::send_model::Sent<Option<Value>>,
-    pub(crate) redirect_all_requests_to: crate::send_model::Sent<Option<Value>>,
+    pub(crate) error_document:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) index_document:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) redirect_all_requests_to:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
 }
 
 impl S3BucketWebsiteConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_website_configuration::s3_bucket_website_configuration_config().schema;
         Ok(Self {
-            error_document: crate::send_model::optional_value(_resource, "error_document")?,
-            index_document: crate::send_model::optional_value(_resource, "index_document")?,
-            redirect_all_requests_to: crate::send_model::optional_value(
+            error_document: crate::send_model::decode_change(
+                _resource,
+                "error_document",
+                |_resource| crate::send_model::optional_value(_resource, "error_document"),
+            )?,
+            index_document: crate::send_model::decode_change(
+                _resource,
+                "index_document",
+                |_resource| crate::send_model::optional_value(_resource, "index_document"),
+            )?,
+            redirect_all_requests_to: crate::send_model::decode_change(
                 _resource,
                 "redirect_all_requests_to",
+                |_resource| {
+                    crate::send_model::optional_value(_resource, "redirect_all_requests_to")
+                },
             )?,
         })
     }
@@ -3258,16 +3397,17 @@ impl S3BucketCorsConfigurationCreateInput {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
             bucket: crate::send_model::required_string(_resource, "bucket")?,
-            cors_rules: {
-                let value = crate::send_model::required_value(_resource, "cors_rules")?;
-                crate::send_model::check_i32_value(
-                    _resource,
-                    "cors_rules",
-                    &value,
-                    &[&["[]", "max_age_seconds"]],
-                )?;
-                value
-            },
+            cors_rules: crate::send_model::required_value(_resource, "cors_rules").and_then(
+                |value| {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "cors_rules",
+                        &value,
+                        &[&["[]", "max_age_seconds"]],
+                    )?;
+                    Ok(value)
+                },
+            )?,
         })
     }
 
@@ -3303,19 +3443,20 @@ pub(crate) struct S3BucketCorsConfigurationUpdateParts {
 }
 
 impl S3BucketCorsConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_cors_configuration::s3_bucket_cors_configuration_config().schema;
         Ok(Self {
-            cors_rules: {
-                let value = crate::send_model::required_value(_resource, "cors_rules")?;
-                crate::send_model::check_i32_value(
-                    _resource,
-                    "cors_rules",
-                    &value,
-                    &[&["[]", "max_age_seconds"]],
-                )?;
-                value
-            },
+            cors_rules: crate::send_model::decode_required(_resource, "cors_rules", |_resource| {
+                crate::send_model::required_value(_resource, "cors_rules").and_then(|value| {
+                    crate::send_model::check_i32_value(
+                        _resource,
+                        "cors_rules",
+                        &value,
+                        &[&["[]", "max_age_seconds"]],
+                    )?;
+                    Ok(value)
+                })
+            })?,
         })
     }
 
@@ -3426,38 +3567,50 @@ impl S3BucketNotificationConfigurationCreateInput {
 
 /// Exhaustive typed update input for `s3.BucketNotificationConfiguration`.
 pub(crate) struct S3BucketNotificationConfigurationUpdateInput {
-    event_bridge_configuration: Option<Value>,
-    lambda_function_configurations: Option<Value>,
-    queue_configurations: Option<Value>,
-    topic_configurations: Option<Value>,
+    event_bridge_configuration: crate::helpers::AttributeChange<Option<Value>>,
+    lambda_function_configurations: crate::helpers::AttributeChange<Option<Value>>,
+    queue_configurations: crate::helpers::AttributeChange<Option<Value>>,
+    topic_configurations: crate::helpers::AttributeChange<Option<Value>>,
 }
 
 pub(crate) struct S3BucketNotificationConfigurationUpdateParts {
-    pub(crate) event_bridge_configuration: crate::send_model::Sent<Option<Value>>,
-    pub(crate) lambda_function_configurations: crate::send_model::Sent<Option<Value>>,
-    pub(crate) queue_configurations: crate::send_model::Sent<Option<Value>>,
-    pub(crate) topic_configurations: crate::send_model::Sent<Option<Value>>,
+    pub(crate) event_bridge_configuration:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) lambda_function_configurations:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) queue_configurations:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) topic_configurations:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
 }
 
 impl S3BucketNotificationConfigurationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_notification_configuration::s3_bucket_notification_configuration_config().schema;
         Ok(Self {
-            event_bridge_configuration: crate::send_model::optional_value(
+            event_bridge_configuration: crate::send_model::decode_change(
                 _resource,
                 "event_bridge_configuration",
+                |_resource| {
+                    crate::send_model::optional_value(_resource, "event_bridge_configuration")
+                },
             )?,
-            lambda_function_configurations: crate::send_model::optional_value(
+            lambda_function_configurations: crate::send_model::decode_change(
                 _resource,
                 "lambda_function_configurations",
+                |_resource| {
+                    crate::send_model::optional_value(_resource, "lambda_function_configurations")
+                },
             )?,
-            queue_configurations: crate::send_model::optional_value(
+            queue_configurations: crate::send_model::decode_change(
                 _resource,
                 "queue_configurations",
+                |_resource| crate::send_model::optional_value(_resource, "queue_configurations"),
             )?,
-            topic_configurations: crate::send_model::optional_value(
+            topic_configurations: crate::send_model::decode_change(
                 _resource,
                 "topic_configurations",
+                |_resource| crate::send_model::optional_value(_resource, "topic_configurations"),
             )?,
         })
     }
@@ -3563,27 +3716,40 @@ impl S3BucketLoggingCreateInput {
 /// Exhaustive typed update input for `s3.BucketLogging`.
 pub(crate) struct S3BucketLoggingUpdateInput {
     target_bucket: String,
-    target_object_key_format: Option<Value>,
-    target_prefix: Option<String>,
+    target_object_key_format: crate::helpers::AttributeChange<Option<Value>>,
+    target_prefix: crate::helpers::AttributeChange<Option<String>>,
 }
 
 pub(crate) struct S3BucketLoggingUpdateParts {
     pub(crate) target_bucket: crate::send_model::Sent<String>,
-    pub(crate) target_object_key_format: crate::send_model::Sent<Option<Value>>,
-    pub(crate) target_prefix: crate::send_model::Sent<Option<String>>,
+    pub(crate) target_object_key_format:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) target_prefix:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>,
 }
 
 impl S3BucketLoggingUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::s3::bucket_logging::s3_bucket_logging_config().schema;
         Ok(Self {
-            target_bucket: crate::send_model::required_string(_resource, "target_bucket")?,
-            target_object_key_format: crate::send_model::optional_value(
+            target_bucket: crate::send_model::decode_required(
+                _resource,
+                "target_bucket",
+                |_resource| crate::send_model::required_string(_resource, "target_bucket"),
+            )?,
+            target_object_key_format: crate::send_model::decode_change(
                 _resource,
                 "target_object_key_format",
+                |_resource| {
+                    crate::send_model::optional_value(_resource, "target_object_key_format")
+                },
             )?,
-            target_prefix: crate::send_model::optional_string(_resource, "target_prefix")?,
+            target_prefix: crate::send_model::decode_change(
+                _resource,
+                "target_prefix",
+                |_resource| crate::send_model::optional_string(_resource, "target_prefix"),
+            )?,
         })
     }
 
@@ -3700,32 +3866,46 @@ impl S3BucketPublicAccessBlockCreateInput {
 
 /// Exhaustive typed update input for `s3.BucketPublicAccessBlock`.
 pub(crate) struct S3BucketPublicAccessBlockUpdateInput {
-    block_public_acls: Option<bool>,
-    block_public_policy: Option<bool>,
-    ignore_public_acls: Option<bool>,
-    restrict_public_buckets: Option<bool>,
+    block_public_acls: crate::helpers::AttributeChange<Option<bool>>,
+    block_public_policy: crate::helpers::AttributeChange<Option<bool>>,
+    ignore_public_acls: crate::helpers::AttributeChange<Option<bool>>,
+    restrict_public_buckets: crate::helpers::AttributeChange<Option<bool>>,
 }
 
 pub(crate) struct S3BucketPublicAccessBlockUpdateParts {
-    pub(crate) block_public_acls: crate::send_model::Sent<Option<bool>>,
-    pub(crate) block_public_policy: crate::send_model::Sent<Option<bool>>,
-    pub(crate) ignore_public_acls: crate::send_model::Sent<Option<bool>>,
-    pub(crate) restrict_public_buckets: crate::send_model::Sent<Option<bool>>,
+    pub(crate) block_public_acls:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) block_public_policy:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) ignore_public_acls:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) restrict_public_buckets:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
 }
 
 impl S3BucketPublicAccessBlockUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::s3::bucket_public_access_block::s3_bucket_public_access_block_config().schema;
         Ok(Self {
-            block_public_acls: crate::send_model::optional_bool(_resource, "block_public_acls")?,
-            block_public_policy: crate::send_model::optional_bool(
+            block_public_acls: crate::send_model::decode_change(
+                _resource,
+                "block_public_acls",
+                |_resource| crate::send_model::optional_bool(_resource, "block_public_acls"),
+            )?,
+            block_public_policy: crate::send_model::decode_change(
                 _resource,
                 "block_public_policy",
+                |_resource| crate::send_model::optional_bool(_resource, "block_public_policy"),
             )?,
-            ignore_public_acls: crate::send_model::optional_bool(_resource, "ignore_public_acls")?,
-            restrict_public_buckets: crate::send_model::optional_bool(
+            ignore_public_acls: crate::send_model::decode_change(
+                _resource,
+                "ignore_public_acls",
+                |_resource| crate::send_model::optional_bool(_resource, "ignore_public_acls"),
+            )?,
+            restrict_public_buckets: crate::send_model::decode_change(
                 _resource,
                 "restrict_public_buckets",
+                |_resource| crate::send_model::optional_bool(_resource, "restrict_public_buckets"),
             )?,
         })
     }
@@ -3802,7 +3982,7 @@ pub(crate) struct OrganizationsOrganizationUpdateInput;
 pub(crate) struct OrganizationsOrganizationUpdateParts;
 
 impl OrganizationsOrganizationUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::organizations::organization::organizations_organization_config().schema;
         Ok(Self)
     }
@@ -3894,22 +4074,29 @@ impl OrganizationsAccountCreateInput {
 /// Exhaustive typed update input for `organizations.Account`.
 pub(crate) struct OrganizationsAccountUpdateInput {
     account_name: String,
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct OrganizationsAccountUpdateParts {
     pub(crate) account_name: crate::send_model::Sent<String>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl OrganizationsAccountUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::organizations::account::organizations_account_config()
                 .schema;
         Ok(Self {
-            account_name: crate::send_model::required_string(_resource, "account_name")?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            account_name: crate::send_model::decode_required(
+                _resource,
+                "account_name",
+                |_resource| crate::send_model::required_string(_resource, "account_name"),
+            )?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -4010,28 +4197,38 @@ impl Route53RecordSetCreateInput {
 
 /// Exhaustive typed update input for `route53.RecordSet`.
 pub(crate) struct Route53RecordSetUpdateInput {
-    alias_target: Option<Value>,
-    resource_records: Option<crate::send_model::StringList>,
-    ttl: Option<i64>,
+    alias_target: crate::helpers::AttributeChange<Option<Value>>,
+    resource_records: crate::helpers::AttributeChange<Option<crate::send_model::StringList>>,
+    ttl: crate::helpers::AttributeChange<Option<i64>>,
 }
 
 pub(crate) struct Route53RecordSetUpdateParts {
-    pub(crate) alias_target: crate::send_model::Sent<Option<Value>>,
-    pub(crate) resource_records: crate::send_model::Sent<Option<crate::send_model::StringList>>,
-    pub(crate) ttl: crate::send_model::Sent<Option<i64>>,
+    pub(crate) alias_target:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) resource_records: crate::send_model::Sent<
+        crate::helpers::AttributeChange<Option<crate::send_model::StringList>>,
+    >,
+    pub(crate) ttl: crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
 }
 
 impl Route53RecordSetUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema =
             &crate::schemas::generated::route53::record_set::route53_record_set_config().schema;
         Ok(Self {
-            alias_target: crate::send_model::optional_value(_resource, "alias_target")?,
-            resource_records: crate::send_model::optional_string_list(
+            alias_target: crate::send_model::decode_change(
+                _resource,
+                "alias_target",
+                |_resource| crate::send_model::optional_value(_resource, "alias_target"),
+            )?,
+            resource_records: crate::send_model::decode_change(
                 _resource,
                 "resource_records",
+                |_resource| crate::send_model::optional_string_list(_resource, "resource_records"),
             )?,
-            ttl: crate::send_model::optional_int(_resource, "ttl")?,
+            ttl: crate::send_model::decode_change(_resource, "ttl", |_resource| {
+                crate::send_model::optional_int(_resource, "ttl")
+            })?,
         })
     }
 
@@ -4142,18 +4339,21 @@ impl IamRoleCreateInput {
 
 /// Exhaustive typed update input for `iam.Role`.
 pub(crate) struct IamRoleUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct IamRoleUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl IamRoleUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::iam::role::iam_role_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -4258,27 +4458,39 @@ impl LogsLogGroupCreateInput {
 
 /// Exhaustive typed update input for `logs.LogGroup`.
 pub(crate) struct LogsLogGroupUpdateInput {
-    deletion_protection_enabled: Option<bool>,
-    retention_in_days: Option<i32>,
-    tags: Option<crate::send_model::Tags>,
+    deletion_protection_enabled: crate::helpers::AttributeChange<Option<bool>>,
+    retention_in_days: crate::helpers::AttributeChange<Option<i32>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct LogsLogGroupUpdateParts {
-    pub(crate) deletion_protection_enabled: crate::send_model::Sent<Option<bool>>,
-    pub(crate) retention_in_days: crate::send_model::Sent<Option<i32>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) deletion_protection_enabled:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) retention_in_days:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i32>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl LogsLogGroupUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::logs::log_group::logs_log_group_config().schema;
         Ok(Self {
-            deletion_protection_enabled: crate::send_model::optional_bool(
+            deletion_protection_enabled: crate::send_model::decode_change(
                 _resource,
                 "deletion_protection_enabled",
+                |_resource| {
+                    crate::send_model::optional_bool(_resource, "deletion_protection_enabled")
+                },
             )?,
-            retention_in_days: crate::send_model::optional_i32(_resource, "retention_in_days")?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            retention_in_days: crate::send_model::decode_change(
+                _resource,
+                "retention_in_days",
+                |_resource| crate::send_model::optional_i32(_resource, "retention_in_days"),
+            )?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -4399,18 +4611,21 @@ impl AcmCertificateCreateInput {
 
 /// Exhaustive typed update input for `acm.Certificate`.
 pub(crate) struct AcmCertificateUpdateInput {
-    tags: Option<crate::send_model::Tags>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
 }
 
 pub(crate) struct AcmCertificateUpdateParts {
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
 }
 
 impl AcmCertificateUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::acm::certificate::acm_certificate_config().schema;
         Ok(Self {
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
         })
     }
 
@@ -4508,18 +4723,18 @@ impl SqsQueueCreateInput {
                 _resource,
                 "redrive_allow_policy",
             )?,
-            redrive_policy: {
-                let value = crate::send_model::optional_value(_resource, "redrive_policy")?;
-                if let Some(value) = &value {
-                    crate::send_model::check_i32_value(
-                        _resource,
-                        "redrive_policy",
-                        value,
-                        &[&["max_receive_count"]],
-                    )?;
-                }
-                value
-            },
+            redrive_policy: crate::send_model::optional_value(_resource, "redrive_policy")
+                .and_then(|value| {
+                    if let Some(value) = &value {
+                        crate::send_model::check_i32_value(
+                            _resource,
+                            "redrive_policy",
+                            value,
+                            &[&["max_receive_count"]],
+                        )?;
+                    }
+                    Ok(value)
+                })?,
             sqs_managed_sse_enabled: crate::send_model::optional_bool(
                 _resource,
                 "sqs_managed_sse_enabled",
@@ -4666,86 +4881,133 @@ impl SqsQueueCreateInput {
 
 /// Exhaustive typed update input for `sqs.Queue`.
 pub(crate) struct SqsQueueUpdateInput {
-    content_based_deduplication: Option<bool>,
-    delay_seconds: Option<i64>,
-    kms_data_key_reuse_period_seconds: Option<i64>,
-    kms_master_key_id: Option<String>,
-    maximum_message_size: Option<i64>,
-    message_retention_period: Option<i64>,
-    policy: Option<Value>,
-    receive_message_wait_time_seconds: Option<i64>,
-    redrive_allow_policy: Option<Value>,
-    redrive_policy: Option<Value>,
-    sqs_managed_sse_enabled: Option<bool>,
-    tags: Option<crate::send_model::Tags>,
-    visibility_timeout: Option<i64>,
+    content_based_deduplication: crate::helpers::AttributeChange<Option<bool>>,
+    delay_seconds: crate::helpers::AttributeChange<Option<i64>>,
+    kms_data_key_reuse_period_seconds: crate::helpers::AttributeChange<Option<i64>>,
+    kms_master_key_id: crate::helpers::AttributeChange<Option<String>>,
+    maximum_message_size: crate::helpers::AttributeChange<Option<i64>>,
+    message_retention_period: crate::helpers::AttributeChange<Option<i64>>,
+    policy: crate::helpers::AttributeChange<Option<Value>>,
+    receive_message_wait_time_seconds: crate::helpers::AttributeChange<Option<i64>>,
+    redrive_allow_policy: crate::helpers::AttributeChange<Option<Value>>,
+    redrive_policy: crate::helpers::AttributeChange<Option<Value>>,
+    sqs_managed_sse_enabled: crate::helpers::AttributeChange<Option<bool>>,
+    tags: crate::helpers::AttributeChange<Option<crate::send_model::Tags>>,
+    visibility_timeout: crate::helpers::AttributeChange<Option<i64>>,
 }
 
 pub(crate) struct SqsQueueUpdateParts {
-    pub(crate) content_based_deduplication: crate::send_model::Sent<Option<bool>>,
-    pub(crate) delay_seconds: crate::send_model::Sent<Option<i64>>,
-    pub(crate) kms_data_key_reuse_period_seconds: crate::send_model::Sent<Option<i64>>,
-    pub(crate) kms_master_key_id: crate::send_model::Sent<Option<String>>,
-    pub(crate) maximum_message_size: crate::send_model::Sent<Option<i64>>,
-    pub(crate) message_retention_period: crate::send_model::Sent<Option<i64>>,
-    pub(crate) policy: crate::send_model::Sent<Option<Value>>,
-    pub(crate) receive_message_wait_time_seconds: crate::send_model::Sent<Option<i64>>,
-    pub(crate) redrive_allow_policy: crate::send_model::Sent<Option<Value>>,
-    pub(crate) redrive_policy: crate::send_model::Sent<Option<Value>>,
-    pub(crate) sqs_managed_sse_enabled: crate::send_model::Sent<Option<bool>>,
-    pub(crate) tags: crate::send_model::Sent<Option<crate::send_model::Tags>>,
-    pub(crate) visibility_timeout: crate::send_model::Sent<Option<i64>>,
+    pub(crate) content_based_deduplication:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) delay_seconds: crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
+    pub(crate) kms_data_key_reuse_period_seconds:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
+    pub(crate) kms_master_key_id:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>,
+    pub(crate) maximum_message_size:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
+    pub(crate) message_retention_period:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
+    pub(crate) policy: crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) receive_message_wait_time_seconds:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
+    pub(crate) redrive_allow_policy:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) redrive_policy:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<Value>>>,
+    pub(crate) sqs_managed_sse_enabled:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<bool>>>,
+    pub(crate) tags:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<crate::send_model::Tags>>>,
+    pub(crate) visibility_timeout:
+        crate::send_model::Sent<crate::helpers::AttributeChange<Option<i64>>>,
 }
 
 impl SqsQueueUpdateInput {
-    pub(crate) fn decode(_resource: &impl crate::send_model::SendResource) -> ProviderResult<Self> {
+    pub(crate) fn decode(_resource: &crate::helpers::UpdateResource) -> ProviderResult<Self> {
         let _schema = &crate::schemas::generated::sqs::queue::sqs_queue_config().schema;
         Ok(Self {
-            content_based_deduplication: crate::send_model::optional_bool(
+            content_based_deduplication: crate::send_model::decode_change(
                 _resource,
                 "content_based_deduplication",
+                |_resource| {
+                    crate::send_model::optional_bool(_resource, "content_based_deduplication")
+                },
             )?,
-            delay_seconds: crate::send_model::optional_int(_resource, "delay_seconds")?,
-            kms_data_key_reuse_period_seconds: crate::send_model::optional_int(
+            delay_seconds: crate::send_model::decode_change(
+                _resource,
+                "delay_seconds",
+                |_resource| crate::send_model::optional_int(_resource, "delay_seconds"),
+            )?,
+            kms_data_key_reuse_period_seconds: crate::send_model::decode_change(
                 _resource,
                 "kms_data_key_reuse_period_seconds",
+                |_resource| {
+                    crate::send_model::optional_int(_resource, "kms_data_key_reuse_period_seconds")
+                },
             )?,
-            kms_master_key_id: crate::send_model::optional_string(_resource, "kms_master_key_id")?,
-            maximum_message_size: crate::send_model::optional_int(
+            kms_master_key_id: crate::send_model::decode_change(
+                _resource,
+                "kms_master_key_id",
+                |_resource| crate::send_model::optional_string(_resource, "kms_master_key_id"),
+            )?,
+            maximum_message_size: crate::send_model::decode_change(
                 _resource,
                 "maximum_message_size",
+                |_resource| crate::send_model::optional_int(_resource, "maximum_message_size"),
             )?,
-            message_retention_period: crate::send_model::optional_int(
+            message_retention_period: crate::send_model::decode_change(
                 _resource,
                 "message_retention_period",
+                |_resource| crate::send_model::optional_int(_resource, "message_retention_period"),
             )?,
-            policy: crate::send_model::optional_value(_resource, "policy")?,
-            receive_message_wait_time_seconds: crate::send_model::optional_int(
+            policy: crate::send_model::decode_change(_resource, "policy", |_resource| {
+                crate::send_model::optional_value(_resource, "policy")
+            })?,
+            receive_message_wait_time_seconds: crate::send_model::decode_change(
                 _resource,
                 "receive_message_wait_time_seconds",
+                |_resource| {
+                    crate::send_model::optional_int(_resource, "receive_message_wait_time_seconds")
+                },
             )?,
-            redrive_allow_policy: crate::send_model::optional_value(
+            redrive_allow_policy: crate::send_model::decode_change(
                 _resource,
                 "redrive_allow_policy",
+                |_resource| crate::send_model::optional_value(_resource, "redrive_allow_policy"),
             )?,
-            redrive_policy: {
-                let value = crate::send_model::optional_value(_resource, "redrive_policy")?;
-                if let Some(value) = &value {
-                    crate::send_model::check_i32_value(
-                        _resource,
-                        "redrive_policy",
-                        value,
-                        &[&["max_receive_count"]],
-                    )?;
-                }
-                value
-            },
-            sqs_managed_sse_enabled: crate::send_model::optional_bool(
+            redrive_policy: crate::send_model::decode_change(
+                _resource,
+                "redrive_policy",
+                |_resource| {
+                    crate::send_model::optional_value(_resource, "redrive_policy").and_then(
+                        |value| {
+                            if let Some(value) = &value {
+                                crate::send_model::check_i32_value(
+                                    _resource,
+                                    "redrive_policy",
+                                    value,
+                                    &[&["max_receive_count"]],
+                                )?;
+                            }
+                            Ok(value)
+                        },
+                    )
+                },
+            )?,
+            sqs_managed_sse_enabled: crate::send_model::decode_change(
                 _resource,
                 "sqs_managed_sse_enabled",
+                |_resource| crate::send_model::optional_bool(_resource, "sqs_managed_sse_enabled"),
             )?,
-            tags: crate::send_model::optional_tags(_resource, "tags")?,
-            visibility_timeout: crate::send_model::optional_int(_resource, "visibility_timeout")?,
+            tags: crate::send_model::decode_change(_resource, "tags", |_resource| {
+                crate::send_model::optional_tags(_resource, "tags")
+            })?,
+            visibility_timeout: crate::send_model::decode_change(
+                _resource,
+                "visibility_timeout",
+                |_resource| crate::send_model::optional_int(_resource, "visibility_timeout"),
+            )?,
         })
     }
 

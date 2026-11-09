@@ -580,7 +580,68 @@ where
 #[derive(Debug)]
 pub struct UpdateResource {
     pub(crate) id: ResourceId,
-    attributes: HashMap<String, UpdateAttribute>,
+    attributes: HashMap<String, AttributeChange<UpdateAttribute>>,
+}
+
+/// An update keeps explicit removal distinct from an untouched, absent value.
+/// Decoders may transform values, but cannot erase the removal variant.
+/// `Unchanged` carries the prior-state snapshot value; `Unchanged(None)` means
+/// the attribute is absent from both the prior state and the patch.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AttributeChange<T> {
+    Set(T),
+    Removed,
+    Unchanged(T),
+}
+
+impl<T> AttributeChange<T> {
+    /// Return the set or prior-state value, applying the caller's removal
+    /// policy only for `Removed`.
+    pub(crate) fn resolve(
+        self,
+        on_removed: impl FnOnce() -> ProviderResult<T>,
+    ) -> ProviderResult<T> {
+        match self {
+            Self::Set(value) | Self::Unchanged(value) => Ok(value),
+            Self::Removed => on_removed(),
+        }
+    }
+
+    pub(crate) fn try_map<U>(
+        self,
+        decode: impl FnOnce(T) -> ProviderResult<U>,
+    ) -> ProviderResult<AttributeChange<U>> {
+        match self {
+            Self::Set(value) => decode(value).map(AttributeChange::Set),
+            Self::Removed => Ok(AttributeChange::Removed),
+            Self::Unchanged(value) => decode(value).map(AttributeChange::Unchanged),
+        }
+    }
+}
+
+/// Removal rejected at update time until core can reject it during planning.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "removing `{attribute}` is not supported: {reason}; set it explicitly to the value you want, or replace the resource"
+)]
+pub(crate) struct AttributeRemovalError {
+    pub(crate) attribute: String,
+    pub(crate) reason: &'static str,
+}
+
+pub(crate) fn removal_error(
+    id: &ResourceId,
+    attribute: &str,
+    reason: &'static str,
+) -> ProviderError {
+    ProviderError::invalid_input_caused_by(
+        "Update rejected",
+        AttributeRemovalError {
+            attribute: attribute.into(),
+            reason,
+        },
+    )
+    .for_resource(id.clone())
 }
 
 #[derive(Debug)]
@@ -606,10 +667,10 @@ impl UpdateResource {
             .map(|(key, value)| {
                 (
                     key.clone(),
-                    UpdateAttribute {
+                    AttributeChange::Unchanged(UpdateAttribute {
                         snapshot: value.clone(),
                         live: OnceLock::new(),
-                    },
+                    }),
                 )
             })
             .collect();
@@ -618,10 +679,13 @@ impl UpdateResource {
                 PatchOp::Add { key, value }
                 | PatchOp::Replace { key, value }
                 | PatchOp::Reassert { key, value } => {
-                    attributes.insert(key.clone(), UpdateAttribute::live(value.clone()));
+                    attributes.insert(
+                        key.clone(),
+                        AttributeChange::Set(UpdateAttribute::live(value.clone())),
+                    );
                 }
                 PatchOp::Remove { key } => {
-                    attributes.remove(key);
+                    attributes.insert(key.clone(), AttributeChange::Removed);
                 }
             }
         }
@@ -631,12 +695,29 @@ impl UpdateResource {
         }
     }
 
-    pub(crate) fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>> {
-        let Some(attribute) = self.attributes.get(name) else {
-            return Ok(None);
-        };
+    pub(crate) fn attribute_change(
+        &self,
+        name: &str,
+    ) -> ProviderResult<AttributeChange<Option<&Value>>> {
+        match self.attributes.get(name) {
+            Some(AttributeChange::Set(attribute)) => self
+                .decode_attribute(name, attribute)
+                .map(|value| AttributeChange::Set(Some(value))),
+            Some(AttributeChange::Removed) => Ok(AttributeChange::Removed),
+            Some(AttributeChange::Unchanged(attribute)) => self
+                .decode_attribute(name, attribute)
+                .map(|value| AttributeChange::Unchanged(Some(value))),
+            None => Ok(AttributeChange::Unchanged(None)),
+        }
+    }
+
+    fn decode_attribute<'a>(
+        &self,
+        name: &str,
+        attribute: &'a UpdateAttribute,
+    ) -> ProviderResult<&'a Value> {
         if let Some(value) = attribute.live.get() {
-            return Ok(Some(value));
+            return Ok(value);
         }
         let value = attribute
             .snapshot
@@ -648,18 +729,21 @@ impl UpdateResource {
                 )
                 .for_resource(self.id.clone())
             })?;
-        Ok(Some(attribute.live.get_or_init(|| value)))
+        Ok(attribute.live.get_or_init(|| value))
     }
 
     /// Values provided by the patch or explicitly consumed by the update.
     pub(crate) fn materialized_attributes(&self) -> HashMap<String, Value> {
         self.attributes
             .iter()
-            .filter_map(|(key, attribute)| {
-                attribute
-                    .live
-                    .get()
-                    .map(|value| (key.clone(), value.clone()))
+            .filter_map(|(key, change)| match change {
+                AttributeChange::Set(attribute) | AttributeChange::Unchanged(attribute) => {
+                    attribute
+                        .live
+                        .get()
+                        .map(|value| (key.clone(), value.clone()))
+                }
+                AttributeChange::Removed => None,
             })
             .collect()
     }
@@ -677,16 +761,30 @@ impl UpdateResource {
                     .get(*key)
                     .is_some_and(|attribute| !attribute.is_read_only())
             })
-            .map(|(key, attribute)| (key.clone(), attribute.snapshot.clone()))
+            .filter_map(|(key, change)| match change {
+                AttributeChange::Set(attribute) | AttributeChange::Unchanged(attribute) => {
+                    Some((key.clone(), attribute.snapshot.clone()))
+                }
+                AttributeChange::Removed => None,
+            })
             .collect()
     }
 
-    /// Materialize the inputs read by an existing cross-field validator.
-    pub(crate) fn materialize(&self, names: &[&str]) -> ProviderResult<Resource> {
+    /// Build a resulting-value view only after the consumer explicitly chooses
+    /// what removed inputs mean. Send decoders preserve `attribute_change`.
+    pub(crate) fn materialize(
+        &self,
+        names: &[&str],
+        on_removed: impl Fn(&str) -> ProviderResult<Option<Value>>,
+    ) -> ProviderResult<Resource> {
         let mut resource = Resource::from_id(self.id.clone());
         for name in names {
-            if let Some(value) = self.get_attr(name)? {
-                resource.set_attr(*name, value.clone());
+            let value = self
+                .attribute_change(name)?
+                .try_map(|value| Ok(value.cloned()))?
+                .resolve(|| on_removed(name))?;
+            if let Some(value) = value {
+                resource.set_attr(*name, value);
             }
         }
         Ok(resource)
@@ -697,6 +795,19 @@ impl UpdateResource {
 mod tests {
     use super::*;
     use indexmap::IndexMap;
+
+    // These pre-existing assertions inspect resulting values. Declare removal
+    // as absence in this test-only projection; production UpdateResource has
+    // no Option accessor and cannot implement SendResource.
+    trait ResultingTestValue {
+        fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>>;
+    }
+
+    impl ResultingTestValue for UpdateResource {
+        fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>> {
+            self.attribute_change(name)?.resolve(|| Ok(None))
+        }
+    }
 
     fn make_test_resource(attrs: Vec<(&str, &str)>) -> Resource {
         let mut resource = Resource::new("acm.Certificate", "test");

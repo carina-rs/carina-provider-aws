@@ -218,7 +218,8 @@ impl AwsProvider {
         resource: &crate::helpers::UpdateResource,
     ) -> ProviderResult<ReadBackRequirements> {
         for requirement in declarations(resource.id.resource_type.as_str()) {
-            resource.get_attr(requirement.predicate.input_attribute())?;
+            // A removed input does not activate a read-back requirement.
+            resource.attribute_change(requirement.predicate.input_attribute())?;
         }
         self.declared_read_back_requirements(&resource.id, &resource.materialized_attributes())
     }
