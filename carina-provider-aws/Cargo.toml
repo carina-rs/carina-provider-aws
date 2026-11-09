@@ -51,7 +51,7 @@ wasi = "0.14"
 # follow-ups will reuse the same dev-deps for other services.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 aws-smithy-runtime = { version = "1", features = ["client"] }
-carina-core = { workspace = true, features = ["test-utils"] }
+carina-core = { workspace = true, features = ["test-utils", "provider-host"] }
 carina-codegen-aws = { path = "../carina-codegen-aws" }
 # Enable the test constructor for integration tests without exposing it in production.
 carina-provider-aws = { path = ".", features = ["test-utils"] }

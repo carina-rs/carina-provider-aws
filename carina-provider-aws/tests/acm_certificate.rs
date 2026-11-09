@@ -503,6 +503,7 @@ fn validate_source(source: &str) {
         snapshot.schema_registry(),
         &HashSet::from(["aws".to_string()]),
         context,
+        &mut Vec::new(),
     )
     .expect("validate ACM infra fixture");
     let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -519,6 +520,7 @@ fn validate_source(source: &str) {
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
     .expect("validate ACM infra reference types");
 }
@@ -708,25 +710,35 @@ aws.route53.RecordSet {
             schemas,
             session.catalog(),
         );
-        let diagnostics =
-            validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
-                .err()
-                .map(|error| {
-                    error
-                        .to_string()
-                        .lines()
-                        .map(|line| format!("../{module_name}: {line}"))
-                        .collect()
-                })
-                .unwrap_or_default();
+        let diagnostics = validate_resource_ref_types(
+            configuration.judged(),
+            &HashSet::new(),
+            &bindings,
+            &mut Vec::new(),
+        )
+        .err()
+        .map(|error| {
+            error
+                .to_string()
+                .lines()
+                .map(|line| format!("../{module_name}: {line}"))
+                .collect()
+        })
+        .unwrap_or_default();
 
         // Also exercise validate's directory loading / expansion / schema and
         // reference passes. Literal substitution alone cannot replace the
         // preceding module-definition check.
         let expanded = resolve_modules_with_config(loaded.parsed, &root, session, schemas)
             .expect("expand directory module with caller literal");
-        validate_resources(&expanded, schemas, &HashSet::from(["aws".into()]), context)
-            .expect("validate expanded ACM and Route 53 resources");
+        validate_resources(
+            &expanded,
+            schemas,
+            &HashSet::from(["aws".into()]),
+            context,
+            &mut Vec::new(),
+        )
+        .expect("validate expanded ACM and Route 53 resources");
         let signatures = load_resolved_module_signatures(&expanded, &root, context);
         let bindings =
             BindingIndex::from_parsed_with_upstream_exports_and_module_signatures_in_session(
@@ -741,8 +753,13 @@ aws.route53.RecordSet {
             schemas,
             session.catalog(),
         );
-        validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
-            .expect("validate expanded module references");
+        validate_resource_ref_types(
+            configuration.judged(),
+            &HashSet::new(),
+            &bindings,
+            &mut Vec::new(),
+        )
+        .expect("validate expanded module references");
         diagnostics
     })
     .publish(&mut deferred);

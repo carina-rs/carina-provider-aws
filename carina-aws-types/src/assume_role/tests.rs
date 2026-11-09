@@ -3,10 +3,13 @@ use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use aws_credential_types::credential_feature::AwsCredentialFeature;
 use aws_credential_types::credential_fn::provide_credentials_fn;
 use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_credential_types::{Credentials, provider::ProvideCredentials};
 use aws_smithy_async::rt::sleep::TokioSleep;
 use aws_smithy_async::test_util::ManualTimeSource;
+use aws_smithy_runtime::client::identity::IdentityCache;
 use aws_smithy_runtime_api::client::http::{
     HttpConnector, HttpConnectorFuture, SharedHttpConnector, http_client_fn,
 };
@@ -213,7 +216,7 @@ async fn regression_operation_cannot_disable_the_assume_role_resend_guard() {
         role_response("MUSTNOTBEISSUED", NOW + 3600),
     ]);
     let clock = ManualTimeSource::new(UNIX_EPOCH + Duration::from_secs(NOW));
-    let provider = provider(&config(&connector, &clock));
+    let provider = source(&config(&connector, &clock));
     let send = provider
         .request
         .clone()
@@ -271,33 +274,36 @@ fn caller_response() -> Reply {
     response(200, "<GetCallerIdentityResponse><GetCallerIdentityResult><Account>222222222222</Account><Arn>arn:aws:sts::222222222222:assumed-role/test/session</Arn><UserId>ROLE:session</UserId></GetCallerIdentityResult></GetCallerIdentityResponse>".into())
 }
 
-fn config(connector: &Connector, clock: &ManualTimeSource) -> SdkConfig {
+fn config(connector: &Connector, clock: &ManualTimeSource) -> crate::AwsSdkConfig {
     let connector = connector.clone();
-    SdkConfig::builder()
-        .region(Region::new("eu-west-1"))
-        .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
-            "HOSTKEY",
-            "host-secret",
-            Some("host-token".into()),
-            None,
-            "host-test",
-        )))
-        .http_client(http_client_fn(move |_, _| {
-            SharedHttpConnector::new(connector.clone())
-        }))
-        .time_source(clock.clone())
-        .sleep_impl(TokioSleep::new())
-        .retry_config(RetryConfig::standard().with_max_attempts(3))
-        .timeout_config(
-            TimeoutConfig::builder()
-                .operation_attempt_timeout(Duration::from_secs(30))
-                .operation_timeout(Duration::from_secs(60))
-                .build(),
-        )
-        .build()
+    crate::AwsSdkConfig::for_test(
+        SdkConfig::builder()
+            .region(Region::new("eu-west-1"))
+            .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
+                "HOSTKEY",
+                "host-secret",
+                Some("host-token".into()),
+                None,
+                "host-test",
+            )))
+            .http_client(http_client_fn(move |_, _| {
+                SharedHttpConnector::new(connector.clone())
+            }))
+            .time_source(clock.clone())
+            .sleep_impl(TokioSleep::new())
+            .retry_config(RetryConfig::standard().with_max_attempts(3))
+            .timeout_config(
+                TimeoutConfig::builder()
+                    .operation_attempt_timeout(Duration::from_secs(30))
+                    .operation_timeout(Duration::from_secs(60))
+                    .build(),
+            )
+            .identity_cache(IdentityCache::lazy().build())
+            .build(),
+    )
 }
 
-fn provider(config: &SdkConfig) -> GuardedAssumeRoleProvider {
+fn source(config: &crate::AwsSdkConfig) -> GuardedAssumeRoleProvider {
     GuardedAssumeRoleProvider::new(
         config,
         "arn:aws:iam::222222222222:role/test".into(),
@@ -307,18 +313,33 @@ fn provider(config: &SdkConfig) -> GuardedAssumeRoleProvider {
     )
 }
 
+fn provider(config: &crate::AwsSdkConfig) -> SharedCredentialsProvider {
+    config
+        .clone()
+        .with_source(source(config))
+        .sdk_config()
+        .credentials_provider()
+        .unwrap()
+}
+
 #[tokio::test]
 async fn session_duration_overflow_is_invalid_configuration_without_sending() {
     for seconds in [2_147_483_648, 4_294_967_297, u64::MAX] {
         let connector = Connector::new([]);
         let clock = ManualTimeSource::new(UNIX_EPOCH + Duration::from_secs(NOW));
-        let provider = GuardedAssumeRoleProvider::new(
-            &config(&connector, &clock),
+        let base = config(&connector, &clock);
+        let source = GuardedAssumeRoleProvider::new(
+            &base,
             "arn:aws:iam::222222222222:role/test".into(),
             Some("test-session".into()),
             None,
             Some(Duration::from_secs(seconds)),
         );
+        let provider = base
+            .with_source(source)
+            .sdk_config()
+            .credentials_provider()
+            .unwrap();
         let error = provider
             .provide_credentials()
             .await
@@ -534,11 +555,12 @@ async fn each_load_preserves_options_region_and_refreshes_base_credentials() {
             }
         })
     };
-    let config = config(&connector, &clock)
-        .to_builder()
-        .credentials_provider(SharedCredentialsProvider::new(base))
-        .identity_cache(IdentityCache::lazy().build())
-        .build();
+    let base = Arc::new(base);
+    let config =
+        config(&connector, &clock).with_source(crate::AwsCredentialsSource::new(move || {
+            let base = base.clone();
+            async move { base.provide_credentials().await }
+        }));
     let provider = provider(&config);
     let first = provider.provide_credentials().await.unwrap();
     let second = provider.provide_credentials().await.unwrap();
@@ -576,13 +598,19 @@ async fn each_load_preserves_options_region_and_refreshes_base_credentials() {
 async fn omitted_session_name_keeps_sdk_default_and_omits_optional_fields() {
     let connector = Connector::new([role_response("ASSUMED", NOW + 3600)]);
     let clock = ManualTimeSource::new(UNIX_EPOCH + Duration::from_secs(NOW));
-    let provider = GuardedAssumeRoleProvider::new(
-        &config(&connector, &clock),
+    let base = config(&connector, &clock);
+    let source = GuardedAssumeRoleProvider::new(
+        &base,
         "arn:aws:iam::222222222222:role/test".into(),
         None,
         None,
         None,
     );
+    let provider = base
+        .with_source(source)
+        .sdk_config()
+        .credentials_provider()
+        .unwrap();
     provider.provide_credentials().await.unwrap();
     let script = connector.0.lock().unwrap();
     let request = &script.requests[0];
@@ -606,10 +634,7 @@ async fn service_client_caches_role_credentials_and_refreshes_at_expiry() {
     ]);
     let clock = ManualTimeSource::new(UNIX_EPOCH + Duration::from_secs(NOW));
     let base = config(&connector, &clock);
-    let assumed = base
-        .to_builder()
-        .credentials_provider(SharedCredentialsProvider::new(provider(&base)))
-        .build();
+    let assumed = base.clone().with_source(source(&base));
     let client = StsClient::new(&assumed, |operation| {
         if operation == "GetCallerIdentity" {
             Idempotency::ReadOnly

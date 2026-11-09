@@ -573,6 +573,7 @@ fn validate_source(source: &str, registry: SchemaRegistry) {
         snapshot.schema_registry(),
         &HashSet::from(["aws".into()]),
         context,
+        &mut Vec::new(),
     )
     .unwrap();
     let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -589,6 +590,7 @@ fn validate_source(source: &str, registry: SchemaRegistry) {
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
     .unwrap();
 }
@@ -656,8 +658,14 @@ fn route53_acm_dns_references_validate_indexed_and_expanded_for_loop_shapes() {
             // the loaded provider catalog in the active type-check session.
             let expanded =
                 resolve_modules_with_config(loaded.parsed, &root, session, schemas).unwrap();
-            validate_resources(&expanded, schemas, &HashSet::from(["aws".into()]), context)
-                .unwrap();
+            validate_resources(
+                &expanded,
+                schemas,
+                &HashSet::from(["aws".into()]),
+                context,
+                &mut Vec::new(),
+            )
+            .unwrap();
             let signatures = load_resolved_module_signatures(&expanded, &root, context);
             let bindings =
                 BindingIndex::from_parsed_with_upstream_exports_and_module_signatures_in_session(
@@ -672,9 +680,12 @@ fn route53_acm_dns_references_validate_indexed_and_expanded_for_loop_shapes() {
                 schemas,
                 session.catalog(),
             );
-            if let Err(error) =
-                validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
-            {
+            if let Err(error) = validate_resource_ref_types(
+                configuration.judged(),
+                &HashSet::new(),
+                &bindings,
+                &mut Vec::new(),
+            ) {
                 diagnostics.push(format!("{shape}: {error}"));
             }
             if shape == "infra for loop" {
@@ -1069,13 +1080,24 @@ fn directory_module_diagnostics(
             schemas,
             session.catalog(),
         );
-        let diagnostics =
-            validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings)
-                .err()
-                .map(|e| e.to_string().lines().map(str::to_string).collect())
-                .unwrap_or_default();
+        let diagnostics = validate_resource_ref_types(
+            configuration.judged(),
+            &HashSet::new(),
+            &bindings,
+            &mut Vec::new(),
+        )
+        .err()
+        .map(|e| e.to_string().lines().map(str::to_string).collect())
+        .unwrap_or_default();
         let expanded = resolve_modules_with_config(loaded.parsed, &root, session, schemas).unwrap();
-        validate_resources(&expanded, schemas, &HashSet::from(["aws".into()]), context).unwrap();
+        validate_resources(
+            &expanded,
+            schemas,
+            &HashSet::from(["aws".into()]),
+            context,
+            &mut Vec::new(),
+        )
+        .unwrap();
         let signatures = load_resolved_module_signatures(&expanded, &root, context);
         let bindings =
             BindingIndex::from_parsed_with_upstream_exports_and_module_signatures_in_session(
@@ -1090,7 +1112,13 @@ fn directory_module_diagnostics(
             schemas,
             session.catalog(),
         );
-        validate_resource_ref_types(configuration.judged(), &HashSet::new(), &bindings).unwrap();
+        validate_resource_ref_types(
+            configuration.judged(),
+            &HashSet::new(),
+            &bindings,
+            &mut Vec::new(),
+        )
+        .unwrap();
         diagnostics
     })
     .publish(&mut deferred);
@@ -1254,6 +1282,7 @@ fn route53_infra_foreign_zone_ids_are_rejected_with_or_without_interpolation() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".into(), "awscc".into()]),
             context,
+            &mut Vec::new(),
         )
         .unwrap();
         let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -1270,6 +1299,7 @@ fn route53_infra_foreign_zone_ids_are_rejected_with_or_without_interpolation() {
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         assert_eq!(result.is_ok(), valid, "{result:?}");
         if let Err(error) = result {

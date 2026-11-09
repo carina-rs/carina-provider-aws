@@ -380,6 +380,7 @@ fn sqs_arn_sinks_reject_plain_string_references_and_accept_explicit_annotations(
                 snapshot.schema_registry(),
                 &HashSet::from(["aws".to_string(), "probe".to_string()]),
                 context,
+                &mut Vec::new(),
             )
             .expect("value validation defers references");
             let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -396,6 +397,7 @@ fn sqs_arn_sinks_reject_plain_string_references_and_accept_explicit_annotations(
                 configuration.judged(),
                 &HashSet::new(),
                 &bindings,
+                &mut Vec::new(),
             );
             if valid {
                 assert!(result.is_ok(), "{source}: {result:?}");
@@ -435,6 +437,7 @@ fn sqs_examples_and_acceptance_fixtures_validate() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .unwrap_or_else(|error| panic!("{fixture}: {error}"));
     }

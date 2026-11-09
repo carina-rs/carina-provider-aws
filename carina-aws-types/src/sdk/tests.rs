@@ -23,21 +23,23 @@ impl HttpConnector for UnusedConnector {
 }
 
 #[allow(dead_code, reason = "no service features may be enabled")]
-pub(super) fn sdk_config() -> SdkConfig {
-    SdkConfig::builder()
-        .region(Region::new("us-east-1"))
-        .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "sdk-config-test",
-        )))
-        .http_client(http_client_fn(|_, _| {
-            SharedHttpConnector::new(UnusedConnector)
-        }))
-        .sleep_impl(TokioSleep::new())
-        .build()
+pub(super) fn sdk_config() -> crate::AwsSdkConfig {
+    crate::AwsSdkConfig::for_test(
+        SdkConfig::builder()
+            .region(Region::new("us-east-1"))
+            .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "sdk-config-test",
+            )))
+            .http_client(http_client_fn(|_, _| {
+                SharedHttpConnector::new(UnusedConnector)
+            }))
+            .sleep_impl(TokioSleep::new())
+            .build(),
+    )
 }
 
 #[test]
@@ -115,20 +117,22 @@ impl HttpConnector for RecordedConnector {
 async fn review_round1_s3_express_override_cannot_start_create_session() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let connector = RecordedConnector(requests.clone());
-    let config = SdkConfig::builder()
-        .region(Region::new("us-east-1"))
-        .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "s3-override-test",
-        )))
-        .http_client(http_client_fn(move |_, _| {
-            SharedHttpConnector::new(connector.clone())
-        }))
-        .sleep_impl(TokioSleep::new())
-        .build();
+    let config = crate::AwsSdkConfig::for_test(
+        SdkConfig::builder()
+            .region(Region::new("us-east-1"))
+            .credentials_provider(SharedCredentialsProvider::new(Credentials::new(
+                "test",
+                "test",
+                None,
+                None,
+                "s3-override-test",
+            )))
+            .http_client(http_client_fn(move |_, _| {
+                SharedHttpConnector::new(connector.clone())
+            }))
+            .sleep_impl(TokioSleep::new())
+            .build(),
+    );
     let client = super::s3::S3Client::new(&config, |_| crate::Idempotency::NotIdempotent);
     let override_config = client
         .inner()

@@ -31,17 +31,30 @@ use aws_smithy_types::retry::{ErrorKind, RetryConfig};
 use aws_smithy_types::timeout::TimeoutConfig;
 use regex::Regex;
 
+use carina_core::provider::{ProviderPlan, ProviderSession};
+use carina_core::provider_text::{BoundProviderEvent, present_event};
+use carina_plugin_sdk::{EventLevel, ProviderDiagnostics};
+
 use super::{Idempotency, ResendGuard, error_message, rendered_failure, retry_summary};
 
 #[derive(Clone, Debug, Default)]
-struct CapturedOutput(Arc<Mutex<Vec<String>>>);
+struct CapturedOutput(Arc<Mutex<Vec<String>>>, Option<ProviderSession>);
 
 impl CapturedOutput {
     fn lines(&self) -> Vec<String> {
         self.0.lock().expect("output lock").clone()
     }
 
-    fn write_line(&self, line: &str) {
+    fn write_event(&self, event: BoundProviderEvent) {
+        assert_eq!(event.severity(), EventLevel::Warn);
+        assert!(
+            event.diagnostic().is_some(),
+            "retry events carry a typed diagnostic"
+        );
+        let rendered = present_event(&event).to_string();
+        let line = rendered
+            .strip_prefix("warn [aws] SDK retry: ")
+            .expect("host-authored retry framing");
         self.0.lock().expect("output lock").push(line.to_owned());
     }
 }
@@ -308,12 +321,17 @@ fn operation_with_timeouts(
     CapturedOutput,
     Arc<Mutex<Script>>,
 ) {
-    let output = CapturedOutput::default();
+    let mut output = CapturedOutput::default();
     let captured = output.clone();
-    let guard = ResendGuard {
-        lookup: |_| Idempotency::ReadOnly,
-        output: Box::new(move |line| captured.write_line(line)),
-    };
+    let session = ProviderPlan::state_only()
+        .session_builder("aws", None, None)
+        .with_diagnostic_sink(move |event| captured.write_event(event))
+        .build();
+    let guard = ResendGuard::new(
+        |_| Idempotency::ReadOnly,
+        ProviderDiagnostics::from_session(&session),
+    );
+    output.1 = Some(session);
     let script = Arc::new(Mutex::new(Script {
         replies: replies.into_iter().collect(),
         ..Script::default()
@@ -423,7 +441,6 @@ async fn exhausted_retries_print_gave_up_after_three_attempts() {
         ],
         0.05..=2.0,
     );
-    println!("{}", lines.join("\n"));
 }
 
 #[tokio::test]
@@ -574,7 +591,7 @@ fn connector_and_orchestrator_summaries_never_format_errors() {
         ),
     ];
     for (error, expected) in cases {
-        assert_eq!(retry_summary(&error, None), expected);
+        assert_eq!(retry_summary(&error, None).to_string(), expected);
     }
 }
 
@@ -586,24 +603,42 @@ fn http_summaries_only_use_typed_metadata_and_response_fields() {
         .build();
     let error = OrchestratorError::operation(Error::erase(metadata.clone()));
     let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "HTTP 503 SlowDown"
+    );
     let response = http_response(503);
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "HTTP 503 SlowDown"
+    );
     let error = OrchestratorError::response(Box::new(metadata));
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "HTTP 503 SlowDown"
+    );
     let error = OrchestratorError::response(Box::new(Unprintable));
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "HTTP 503"
+    );
     let error = OrchestratorError::timeout(Box::new(Unprintable));
-    assert_eq!(retry_summary(&error, Some(&response)), "Timeout");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "Timeout"
+    );
     let error = OrchestratorError::other(Unprintable);
-    assert_eq!(retry_summary(&error, Some(&response)), "Other");
+    assert_eq!(retry_summary(&error, Some(&response)).to_string(), "Other");
     let metadata = ErrorMetadata::builder()
         .code("SlowDown")
         .custom("aws_request_id", "metadata-request-id")
         .build();
     let error = OrchestratorError::operation(Error::erase(metadata));
     let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-    assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+    assert_eq!(
+        retry_summary(&error, Some(&response)).to_string(),
+        "HTTP 503 SlowDown"
+    );
 }
 
 #[tokio::test]
@@ -641,7 +676,7 @@ fn retry_error_codes_require_the_complete_bounded_ascii_shape() {
             ErrorMetadata::builder().code(&code).build(),
         ));
         assert_eq!(
-            retry_summary(&error, Some(&response)),
+            retry_summary(&error, Some(&response)).to_string(),
             format!("HTTP 503 {code}")
         );
     }
@@ -660,7 +695,7 @@ fn retry_error_codes_require_the_complete_bounded_ascii_shape() {
             ErrorMetadata::builder().code(&code).build(),
         ));
         assert_eq!(
-            retry_summary(&error, Some(&response)),
+            retry_summary(&error, Some(&response)).to_string(),
             "HTTP 503",
             "invalid code must be omitted in full"
         );
@@ -690,7 +725,10 @@ fn retry_summaries_omit_request_ids_from_headers_and_metadata() {
                 .build(),
         ));
         let response = HttpResponse::new(503.try_into().expect("status"), SdkBody::empty());
-        assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+        assert_eq!(
+            retry_summary(&error, Some(&response)).to_string(),
+            "HTTP 503 SlowDown"
+        );
     }
     let error = OrchestratorError::operation(Error::erase(
         ErrorMetadata::builder().code("SlowDown").build(),
@@ -704,7 +742,10 @@ fn retry_summaries_omit_request_ids_from_headers_and_metadata() {
         response
             .headers_mut()
             .insert("x-amzn-requestid", request_id.clone());
-        assert_eq!(retry_summary(&error, Some(&response)), "HTTP 503 SlowDown");
+        assert_eq!(
+            retry_summary(&error, Some(&response)).to_string(),
+            "HTTP 503 SlowDown"
+        );
         assert!(
             rendered_failure(&error, Some(&response))
                 .ends_with(&format!("; status: 503; request_id: {request_id}")),

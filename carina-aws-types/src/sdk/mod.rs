@@ -109,25 +109,29 @@ macro_rules! guarded_service {
             #[derive(Clone, Debug)]
             pub struct $client {
                 inner: $sdk::Client,
+                // Retain the session context when the caller drops its config,
+                // including the native fixture's diagnostic owner.
+                _config: crate::AwsSdkConfig,
             }
 
             impl $client {
                 /// Construct a guarded client using the service's idempotency lookup.
                 /// Credentials, transport, timeouts, and retry bounds are retained.
                 pub fn new(
-                    config: &aws_types::SdkConfig,
+                    config: &crate::AwsSdkConfig,
                     lookup: fn(&str) -> crate::Idempotency,
                 ) -> Self {
-                    let builder = $sdk::config::Builder::from(config);
+                    let builder = $sdk::config::Builder::from(config.sdk_config());
                     $(let builder = $configure(builder);)?
                     let mut builder = builder;
                     builder.push_interceptor(
                         aws_smithy_runtime_api::client::interceptors::SharedInterceptor::permanent(
-                            crate::ResendGuard::new(lookup),
+                            crate::ResendGuard::new(lookup, config.diagnostics().clone()),
                         ),
                     );
                     Self {
                         inner: $sdk::Client::from_conf(builder.build()),
+                        _config: config.clone(),
                     }
                 }
 

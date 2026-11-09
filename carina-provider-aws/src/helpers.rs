@@ -400,15 +400,16 @@ impl TokenSendPermit {
 ///   [`RetryPolicy::default()`].
 /// - `builder`: A factory that rebuilds the SDK fluent builder per attempt.
 pub(crate) async fn retry_aws_operation<F, B>(
+    diagnostics: &carina_plugin_sdk::ProviderDiagnostics,
     policy: RetryPolicy,
     builder: F,
 ) -> Result<B::Output, SendFailure<B::Error>>
 where
     F: Fn() -> B,
     B: AwsOperation<Resend = NoToken> + DecidedSend<()>,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
 {
-    retry_aws_builder(policy, builder, || ()).await
+    retry_aws_builder(diagnostics, policy, builder, || ()).await
 }
 
 /// Retry a generated token-bearing AWS builder with one invocation token.
@@ -416,6 +417,7 @@ where
 /// The wrapper applies `token` after every rebuild, so provider-level resends
 /// cannot accidentally ask the SDK to synthesize a different token.
 pub(crate) async fn retry_aws_operation_with_token<'a, F, B, C>(
+    diagnostics: &carina_plugin_sdk::ProviderDiagnostics,
     token: &'a ClientToken,
     policy: RetryPolicy,
     builder: F,
@@ -425,9 +427,12 @@ where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     TokenOperation<B, C>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
         + AwsOperation<Output = B::Output, Error = B::Error>,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
 {
-    retry_aws_builder(policy, builder, || (token, TokenSendPermit::new())).await
+    retry_aws_builder(diagnostics, policy, builder, || {
+        (token, TokenSendPermit::new())
+    })
+    .await
 }
 
 /// Send a generated token-bearing AWS builder exactly once.
@@ -442,7 +447,7 @@ where
     B: AwsOperation<Resend = WithToken> + TokenBearing,
     TokenOperation<B, C>: DecidedSend<(&'a ClientToken, TokenSendPermit)>
         + AwsOperation<Output = B::Output, Error = B::Error>,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
 {
     DecidedSend::send(builder, (token, TokenSendPermit::new()))
         .await
@@ -453,6 +458,7 @@ where
 }
 
 async fn retry_aws_builder<F, C, B, Context>(
+    diagnostics: &carina_plugin_sdk::ProviderDiagnostics,
     policy: RetryPolicy,
     builder: F,
     context: C,
@@ -461,7 +467,7 @@ where
     F: Fn() -> B,
     C: Fn() -> Context,
     B: DecidedSend<Context>,
-    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + 'static,
+    B::Error: ProvideErrorKind + ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
 {
     let mut attempt = 0;
     let mut maybe_sent = false;
@@ -479,13 +485,18 @@ where
                     && provider_retry_allowed(classification, B::IDEMPOTENCY, &error)
                 {
                     let delay = policy.delay_secs(attempt);
-                    eprintln!(
-                        "  Retrying {} (attempt {}/{}): {}",
-                        B::NAME,
-                        attempt,
-                        policy.max_attempts,
-                        DisplayErrorContext(&error)
-                    );
+                    let diagnostic = carina_core::provider_text::ProviderDiagnostic::new(error);
+                    diagnostics.emit(carina_plugin_sdk::ProviderEvent::diagnostic(
+                        carina_plugin_sdk::EventLevel::Warn,
+                        carina_core::provider_text::ProviderText::new(format!(
+                            "Retrying {} (attempt {}/{})",
+                            B::NAME,
+                            attempt,
+                            policy.max_attempts
+                        ))
+                        .into(),
+                        &diagnostic,
+                    ));
                     sleep(Duration::from_secs(delay)).await;
                     continue;
                 }
@@ -1912,9 +1923,12 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_does_not_resend_non_idempotent_timeout() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Timeout);
 
-        let result = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone())).await;
+        let result =
+            retry_aws_operation(&diagnostics, test_policy(3), || MockCreateVpc(call.clone())).await;
 
         assert!(result.is_err());
         assert_eq!(call.attempts(), 1);
@@ -1922,9 +1936,14 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_resends_readonly_timeout() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Timeout);
 
-        let result = retry_aws_operation(test_policy(3), || MockDescribeVpcs(call.clone())).await;
+        let result = retry_aws_operation(&diagnostics, test_policy(3), || {
+            MockDescribeVpcs(call.clone())
+        })
+        .await;
 
         assert_eq!(result.expect("read-only resend succeeds"), "success");
         assert_eq!(call.attempts(), 2);
@@ -1932,11 +1951,15 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_does_not_retry_construction_failure() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Construction);
 
-        let error = retry_aws_operation(test_policy(3), || MockDescribeVpcs(call.clone()))
-            .await
-            .expect_err("deterministic construction failures must terminate immediately");
+        let error = retry_aws_operation(&diagnostics, test_policy(3), || {
+            MockDescribeVpcs(call.clone())
+        })
+        .await
+        .expect_err("deterministic construction failures must terminate immediately");
 
         assert_eq!(
             error.classification(),
@@ -1947,11 +1970,14 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_does_not_resend_non_idempotent_response_error() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Response);
 
-        let error = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone()))
-            .await
-            .expect_err("a 4xx response parsing failure must not be resent");
+        let error =
+            retry_aws_operation(&diagnostics, test_policy(3), || MockCreateVpc(call.clone()))
+                .await
+                .expect_err("a 4xx response parsing failure must not be resent");
 
         assert_eq!(call.attempts(), 1);
         assert_eq!(
@@ -1965,11 +1991,13 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_applies_the_same_token_to_every_rebuilt_request() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Timeout);
         let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let token = ClientToken::new();
 
-        let result = retry_aws_operation_with_token(&token, test_policy(3), || {
+        let result = retry_aws_operation_with_token(&diagnostics, &token, test_policy(3), || {
             TokenOperation::new(
                 MockCreateNatGateway {
                     call: call.clone(),
@@ -1991,6 +2019,8 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_keeps_maybe_sent_after_throttling_exhaustion() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::scripted([
             MockFailure::Timeout,
             MockFailure::Service {
@@ -2005,7 +2035,7 @@ mod tests {
         let seen_tokens = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let token = ClientToken::new();
 
-        let error = retry_aws_operation_with_token(&token, test_policy(3), || {
+        let error = retry_aws_operation_with_token(&diagnostics, &token, test_policy(3), || {
             TokenOperation::new(
                 MockCreateNatGateway {
                     call: call.clone(),
@@ -2060,12 +2090,15 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_resends_rejected_throttling() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Service {
             code: "RequestLimitExceeded",
             retryable: Some(ErrorKind::ThrottlingError),
         });
 
-        let result = retry_aws_operation(test_policy(3), || MockCreateVpc(call.clone())).await;
+        let result =
+            retry_aws_operation(&diagnostics, test_policy(3), || MockCreateVpc(call.clone())).await;
 
         assert_eq!(result.expect("throttled resend succeeds"), "success");
         assert_eq!(call.attempts(), 2);
@@ -2073,12 +2106,17 @@ mod tests {
 
     #[tokio::test]
     async fn provider_retry_preserves_s3_operation_aborted_carve_out() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(&session);
         let call = MockCall::new(MockFailure::Service {
             code: "OperationAborted",
             retryable: None,
         });
 
-        let result = retry_aws_operation(test_policy(3), || MockCreateBucket(call.clone())).await;
+        let result = retry_aws_operation(&diagnostics, test_policy(3), || {
+            MockCreateBucket(call.clone())
+        })
+        .await;
 
         assert_eq!(
             result.expect("OperationAborted means AWS rejected the create"),

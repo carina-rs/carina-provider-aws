@@ -619,10 +619,15 @@ mod tests {
                 ));
 
                 // WASM CRUD encoding uses the same checked projection and conversion.
-                let wasm_error = try_core_to_protocol_value(&Value::Concrete(ConcreteValue::Map(
-                    configs[0].default_tags.clone(),
-                )))
-                .expect_err("the same default tags cannot be encoded for WASM either");
+                let tags = Value::Concrete(ConcreteValue::Map(configs[0].default_tags.clone()));
+                let known_tags = tags
+                    .knowledge(&carina_core::resource::knowledge::KnowledgeContext::validation())
+                    .expect("default tags can be classified")
+                    .into_classification()
+                    .into_known()
+                    .expect("default tags are fully known");
+                let wasm_error = try_core_to_protocol_value(&known_tags)
+                    .expect_err("the same default tags cannot be encoded for WASM either");
                 assert_eq!(error.path(), wasm_error.value_path());
                 let ProtocolConvertError::ValuePath { error: reason, .. } = wasm_error else {
                     panic!("expected the WASM conversion error at the default-tag key");

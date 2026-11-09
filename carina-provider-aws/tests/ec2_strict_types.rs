@@ -586,6 +586,7 @@ fn ec2_infra_network_shapes_and_existing_id_references_remain_valid() {
         snapshot.schema_registry(),
         &HashSet::from(["aws".to_string()]),
         snapshot.provider_context(),
+        &mut Vec::new(),
     )
     .unwrap();
     let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -602,6 +603,7 @@ fn ec2_infra_network_shapes_and_existing_id_references_remain_valid() {
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
     .unwrap();
 }
@@ -644,6 +646,7 @@ fn ec2_anonymous_names_accept_plain_string_refs_and_named_cidrs_require_matching
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             snapshot.provider_context(),
+            &mut Vec::new(),
         )
         .unwrap();
         let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -660,6 +663,7 @@ fn ec2_anonymous_names_accept_plain_string_refs_and_named_cidrs_require_matching
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         assert_eq!(result.is_ok(), succeeds, "{declaration}: {result:?}");
     }

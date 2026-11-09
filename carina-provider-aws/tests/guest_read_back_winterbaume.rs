@@ -58,6 +58,8 @@ mod guest {
                 runtime,
                 provider: Some(aws),
                 normalizer: AwsNormalizer,
+                diagnostic_session: carina_core::provider::ProviderPlan::state_only()
+                    .session("aws", None, None),
             },
             service,
         )
@@ -320,6 +322,8 @@ mod guest {
             runtime,
             provider: Some(aws),
             normalizer: AwsNormalizer,
+            diagnostic_session: carina_core::provider::ProviderPlan::state_only()
+                .session("aws", None, None),
         };
         let request = proto::CreateRequest {
             resource: proto::Resource {

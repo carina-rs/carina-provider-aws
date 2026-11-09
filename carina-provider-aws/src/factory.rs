@@ -97,9 +97,19 @@ impl ProviderFactory for AwsProviderFactory {
                 });
             }
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::from_session(session);
+        #[cfg(target_arch = "wasm32")]
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::guest();
         Box::pin(async move {
-            let provider =
-                AwsProvider::new_with_account_guard(&region, allowed, forbidden, assume_role).await;
+            let provider = AwsProvider::new_with_account_guard(
+                &region,
+                allowed,
+                forbidden,
+                assume_role,
+                diagnostics,
+            )
+            .await;
             Ok(InitializeOutcome::unavailable().with_provider(Box::new(provider)))
         })
     }

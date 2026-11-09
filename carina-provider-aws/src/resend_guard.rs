@@ -268,7 +268,7 @@ mod tests {
             }),
         );
 
-        let error = retry_aws_operation(RetryPolicy::default(), || {
+        let error = retry_aws_operation(&provider.diagnostics, RetryPolicy::default(), || {
             provider.sts_client.get_caller_identity()
         })
         .await
@@ -295,7 +295,7 @@ mod tests {
         ]);
         let provider = provider(connector.clone());
 
-        let error = retry_aws_operation(RetryPolicy::default(), || {
+        let error = retry_aws_operation(&provider.diagnostics, RetryPolicy::default(), || {
             provider.ec2_client.create_vpc().cidr_block("10.0.0.0/16")
         })
         .await
@@ -320,12 +320,17 @@ mod tests {
         let provider = provider(connector.clone());
         let token = ClientToken::new();
 
-        retry_aws_operation_with_token(&token, RetryPolicy::default(), || {
-            provider
-                .ec2_client
-                .create_nat_gateway()
-                .configure(|builder| builder.subnet_id("subnet-123"))
-        })
+        retry_aws_operation_with_token(
+            &provider.diagnostics,
+            &token,
+            RetryPolicy::default(),
+            || {
+                provider
+                    .ec2_client
+                    .create_nat_gateway()
+                    .configure(|builder| builder.subnet_id("subnet-123"))
+            },
+        )
         .await
         .expect("post-transmit Other(None) should be retried with the same token");
 

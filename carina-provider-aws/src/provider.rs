@@ -4287,7 +4287,7 @@ mod pending_operation_tests {
             async |checks| {
                 let bindings = Default::default();
                 let gate = ModuleConstraintGate::from_live_compositions(&[]);
-                let schemas = Default::default();
+                let schemas = fixture_schemas.clone();
                 let context = ProviderPreparationContext::new(
                     &bindings,
                     &gate,

@@ -118,7 +118,20 @@ fn read_outcome_to_proto(
 fn issued_create_attributes_to_proto(
     attributes: &HashMap<String, CoreValue>,
 ) -> Result<BTreeMap<String, proto::Value>, CoreProviderError> {
-    protocol_convert::try_core_to_protocol_value_map(attributes)
+    let attributes = attributes
+        .iter()
+        .map(|(name, value)| {
+            let known = value
+                .knowledge(&carina_core::resource::knowledge::KnowledgeContext::validation())?
+                .into_classification()
+                .into_known()?;
+            Ok((name.clone(), known))
+        })
+        .collect::<Result<HashMap<_, _>, carina_core::resource::knowledge::KnowledgeError>>()
+        .map_err(|error| {
+            CoreProviderError::internal_caused_by("failed to encode create result", error)
+        })?;
+    protocol_convert::try_core_to_protocol_value_map(&attributes)
         .map_err(|error| protocol_output_error("failed to encode create result", error))
 }
 
@@ -126,7 +139,20 @@ fn issued_create_attributes_to_proto(
 fn partial_create_attributes_to_proto(
     attributes: &HashMap<String, CoreValue>,
 ) -> Result<BTreeMap<String, proto::Value>, CoreProviderError> {
-    protocol_convert::try_core_to_protocol_value_map(attributes)
+    let attributes = attributes
+        .iter()
+        .map(|(name, value)| {
+            let known = value
+                .knowledge(&carina_core::resource::knowledge::KnowledgeContext::validation())?
+                .into_classification()
+                .into_known()?;
+            Ok((name.clone(), known))
+        })
+        .collect::<Result<HashMap<_, _>, carina_core::resource::knowledge::KnowledgeError>>()
+        .map_err(|error| {
+            CoreProviderError::internal_caused_by("failed to encode partial create result", error)
+        })?;
+    protocol_convert::try_core_to_protocol_value_map(&attributes)
         .map_err(|error| protocol_output_error("failed to encode partial create result", error))
 }
 
@@ -515,6 +541,8 @@ struct AwsProcessProvider {
     runtime: tokio::runtime::Runtime,
     provider: Option<AwsProvider>,
     normalizer: AwsNormalizer,
+    #[cfg(not(target_arch = "wasm32"))]
+    diagnostic_session: carina_core::provider::ProviderSession,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -528,23 +556,35 @@ impl Default for AwsProcessProvider {
 impl AwsProcessProvider {
     fn new() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
-        let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        let runtime = carina_plugin_sdk::expect_diagnostic(
+            tokio::runtime::Runtime::new()
+                .map_err(carina_core::provider_text::ProviderDiagnostic::new),
+        );
         #[cfg(target_arch = "wasm32")]
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .expect("Failed to create tokio runtime");
+        let runtime = carina_plugin_sdk::expect_diagnostic(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .map_err(carina_core::provider_text::ProviderDiagnostic::new),
+        );
         Self {
             runtime,
             provider: None,
             normalizer: AwsNormalizer,
+            #[cfg(not(target_arch = "wasm32"))]
+            diagnostic_session: carina_core::provider::ProviderPlan::state_only()
+                .session("aws", None, None),
         }
     }
 
     fn provider(&self) -> &AwsProvider {
-        self.provider
-            .as_ref()
-            .expect("Provider not initialized; call initialize() first")
+        self.provider.as_ref().unwrap_or_else(|| {
+            carina_plugin_sdk::panic_diagnostic(
+                carina_core::provider_text::ProviderDiagnostic::message(
+                    "Provider not initialized; call initialize() first".into(),
+                ),
+            )
+        })
     }
 
     fn schema_registry() -> SchemaRegistry {
@@ -637,11 +677,17 @@ impl CarinaProvider for AwsProcessProvider {
         let forbidden = extract_string_list(core_attrs.get("forbidden_account_ids"));
         let assume_role = extract_assume_role(core_attrs.get("assume_role"))
             .map_err(CoreProviderError::invalid_input)?;
+        #[cfg(target_arch = "wasm32")]
+        let diagnostics = carina_plugin_sdk::ProviderDiagnostics::guest();
+        #[cfg(not(target_arch = "wasm32"))]
+        let diagnostics =
+            carina_plugin_sdk::ProviderDiagnostics::from_session(&self.diagnostic_session);
         let provider = self.runtime.block_on(AwsProvider::new_with_account_guard(
             &region,
             allowed,
             forbidden,
             assume_role,
+            diagnostics,
         ));
         // Run the account guard before we accept this provider — fails
         // fast (before any read/plan/apply) when the credentials in use

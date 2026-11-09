@@ -82,6 +82,7 @@ fn logs_log_group_name_typed_references_pass_in_both_provider_directions() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string(), "awscc".to_string()]),
             context,
+            &mut Vec::new(),
         );
         assert!(
             result.is_ok(),
@@ -236,6 +237,7 @@ fn logs_log_group_name_accepts_a_typed_string_reference() {
         snapshot.schema_registry(),
         &HashSet::from(["aws".to_string()]),
         context,
+        &mut Vec::new(),
     )
     .expect("typed IAM role ID must be assignable to log_group_name");
 }
@@ -263,6 +265,7 @@ fn logs_log_group_examples_and_acceptance_fixtures_validate() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .unwrap_or_else(|error| panic!("{fixture}: {error}"));
     }

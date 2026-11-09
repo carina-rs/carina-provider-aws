@@ -17,6 +17,8 @@ use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_smithy_types::error::ErrorMetadata;
 use aws_smithy_types::retry::{ErrorKind, RetryConfig};
+use carina_core::provider_text::ProviderDiagnostic;
+use carina_plugin_sdk::{EventLevel, ProviderDiagnostics, ProviderEvent};
 use regex::Regex;
 
 use super::ServiceErrorCode;
@@ -56,7 +58,7 @@ pub(super) fn classify_attempt(
 struct PreviousAttempt {
     outcome: AttemptOutcome,
     failure: String,
-    retry_summary: String,
+    retry_summary: RetryFailure,
     finished_at: Instant,
 }
 
@@ -153,41 +155,118 @@ fn find_source<'a, T: std::error::Error + 'static>(
     None
 }
 
-/// Retry diagnostics use only typed fields, never error Display/Debug text.
-fn retry_summary(error: &OrchestratorError<Error>, response: Option<&HttpResponse>) -> String {
+/// Only typed fields enter retry diagnostics; raw error formatters never run.
+#[derive(Debug, Clone)]
+enum RetryFailure {
+    Http { status: u16, code: Option<String> },
+    ConnectorTimeout,
+    ConnectorIo(Option<io::ErrorKind>),
+    Connector,
+    Timeout,
+    Other,
+}
+
+impl fmt::Display for RetryFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http { status, code } => {
+                write!(f, "HTTP {status}")?;
+                if let Some(code) = code {
+                    write!(f, " {code}")?;
+                }
+                Ok(())
+            }
+            Self::ConnectorTimeout => f.write_str("connector timeout"),
+            Self::ConnectorIo(kind) => {
+                f.write_str("connector io error")?;
+                if let Some(kind) = kind {
+                    write!(f, " ({kind:?})")?;
+                }
+                Ok(())
+            }
+            Self::Connector => f.write_str("connector error"),
+            Self::Timeout => f.write_str("Timeout"),
+            Self::Other => f.write_str("Other"),
+        }
+    }
+}
+
+fn retry_summary(
+    error: &OrchestratorError<Error>,
+    response: Option<&HttpResponse>,
+) -> RetryFailure {
     if (error.is_response_error() || error.is_operation_error())
         && let Some(response) = response
     {
-        let mut summary = format!("HTTP {}", response.status().as_u16());
-        // Type erasure doesn't retain ProvideErrorMetadata. Use metadata
-        // only when it is directly available or exposed as a typed cause;
-        // modeled errors that hide it get status only.
+        // Modeled errors may hide metadata; unavailable metadata yields status only.
         let metadata = error
             .as_operation_error()
             .and_then(|error| error.downcast_ref::<ErrorMetadata>())
             .or_else(|| find_source::<ErrorMetadata>(error));
-        if let Some(code) = metadata
+        let code = metadata
             .and_then(ErrorMetadata::code)
             .and_then(ServiceErrorCode::parse)
-        {
-            summary.push(' ');
-            summary.push_str(code.as_str());
-        }
-        return summary;
+            .map(|code| code.as_str().to_owned());
+        return RetryFailure::Http {
+            status: response.status().as_u16(),
+            code,
+        };
     }
     match OrchestratorKind::of(error) {
-        OrchestratorKind::Connector(kind) => match kind {
-            ConnectorKind::Timeout => "connector timeout".to_string(),
-            ConnectorKind::Io => match find_source::<io::Error>(error) {
-                Some(error) => format!("connector io error ({:?})", error.kind()),
-                None => "connector io error".to_string(),
-            },
-            ConnectorKind::User | ConnectorKind::Other(..) => "connector error".to_string(),
-        },
-        OrchestratorKind::Timeout => "Timeout".to_string(),
-        OrchestratorKind::Other => "Other".to_string(),
+        OrchestratorKind::Connector(ConnectorKind::Timeout) => RetryFailure::ConnectorTimeout,
+        OrchestratorKind::Connector(ConnectorKind::Io) => {
+            RetryFailure::ConnectorIo(find_source::<io::Error>(error).map(io::Error::kind))
+        }
+        OrchestratorKind::Connector(ConnectorKind::User | ConnectorKind::Other(_)) => {
+            RetryFailure::Connector
+        }
+        OrchestratorKind::Timeout => RetryFailure::Timeout,
+        OrchestratorKind::Other => RetryFailure::Other,
     }
 }
+
+#[derive(Debug)]
+enum RetryDiagnostic {
+    Retrying {
+        service: String,
+        operation: String,
+        attempt: u32,
+        max: u32,
+        elapsed: f64,
+        failure: RetryFailure,
+    },
+    GaveUp {
+        service: String,
+        operation: String,
+        attempts: u32,
+    },
+}
+impl fmt::Display for RetryDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Retrying {
+                service,
+                operation,
+                attempt,
+                max,
+                elapsed,
+                failure,
+            } => write!(
+                f,
+                "  Retrying {service}.{operation} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {failure}"
+            ),
+            Self::GaveUp {
+                service,
+                operation,
+                attempts,
+            } => write!(
+                f,
+                "  Gave up {service}.{operation} after {attempts} SDK attempts"
+            ),
+        }
+    }
+}
+impl std::error::Error for RetryDiagnostic {}
 
 #[derive(Debug, Clone, Copy)]
 enum ConnectorKind {
@@ -250,7 +329,7 @@ impl OrchestratorKind {
 /// Associates one service client's SDK metadata with generated resend policy.
 pub struct ResendGuard {
     lookup: fn(&str) -> Idempotency,
-    output: Box<dyn Fn(&str) + Send + Sync>,
+    diagnostics: ProviderDiagnostics,
 }
 
 impl fmt::Debug for ResendGuard {
@@ -263,10 +342,10 @@ impl fmt::Debug for ResendGuard {
 
 impl ResendGuard {
     /// Creates a guard using the service's generated idempotency lookup.
-    pub fn new(lookup: fn(&str) -> Idempotency) -> Self {
+    pub fn new(lookup: fn(&str) -> Idempotency, diagnostics: ProviderDiagnostics) -> Self {
         Self {
             lookup,
-            output: Box::new(|line| eprintln!("{line}")),
+            diagnostics,
         }
     }
 }
@@ -327,7 +406,7 @@ impl Intercept for ResendGuard {
             PreviousAttempt {
                 outcome,
                 failure: "failure details unavailable".to_string(),
-                retry_summary: "Other".to_string(),
+                retry_summary: RetryFailure::Other,
                 finished_at: started_at,
             }
         });
@@ -344,11 +423,18 @@ impl Intercept for ResendGuard {
             let elapsed = started_at
                 .duration_since(previous.finished_at)
                 .as_secs_f64();
-            (self.output)(&format!(
-                "  Retrying {}.{} (SDK attempt {attempt}/{max} after {elapsed:.1}s): {}",
-                metadata.service(),
-                metadata.name(),
-                previous.retry_summary,
+            let diagnostic = ProviderDiagnostic::new(RetryDiagnostic::Retrying {
+                service: metadata.service().to_owned(),
+                operation: metadata.name().to_owned(),
+                attempt,
+                max,
+                elapsed,
+                failure: previous.retry_summary,
+            });
+            self.diagnostics.emit(ProviderEvent::diagnostic(
+                EventLevel::Warn,
+                "SDK retry".into(),
+                &diagnostic,
             ));
         }
 
@@ -445,7 +531,7 @@ impl Intercept for ResendGuard {
             .output_or_error()
             .and_then(Result::err)
             .map(|error| retry_summary(error, context.response()))
-            .unwrap_or_else(|| "Other".to_string());
+            .unwrap_or(RetryFailure::Other);
         let finished_at = Instant::now();
         cfg.interceptor_state().store_put(PreviousAttempt {
             outcome,
@@ -510,11 +596,15 @@ impl Intercept for ResendGuard {
             (cfg.load::<LastStartedAttempt>(), cfg.load::<Metadata>())
             && attempt.0.attempts() > 1
         {
-            (self.output)(&format!(
-                "  Gave up {}.{} after {} SDK attempts",
-                metadata.service(),
-                metadata.name(),
-                attempt.0.attempts(),
+            let diagnostic = ProviderDiagnostic::new(RetryDiagnostic::GaveUp {
+                service: metadata.service().to_owned(),
+                operation: metadata.name().to_owned(),
+                attempts: attempt.0.attempts(),
+            });
+            self.diagnostics.emit(ProviderEvent::diagnostic(
+                EventLevel::Warn,
+                "SDK retry".into(),
+                &diagnostic,
             ));
         }
         Ok(())
@@ -526,6 +616,7 @@ mod retry_visibility_tests;
 
 #[cfg(test)]
 mod tests {
+    use carina_plugin_sdk::ProviderDiagnostics;
     use std::io;
 
     use aws_smithy_async::time::StaticTimeSource;
@@ -657,7 +748,11 @@ mod tests {
         SendClassification,
         SdkError<MockServiceError, aws_smithy_runtime_api::client::orchestrator::HttpResponse>,
     ) {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -727,7 +822,11 @@ mod tests {
 
     #[test]
     fn pre_transmit_orchestrator_timeout_is_typed_not_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -759,7 +858,11 @@ mod tests {
 
     #[test]
     fn absent_attempt_phase_fails_closed_to_maybe_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -783,7 +886,11 @@ mod tests {
 
     #[test]
     fn serialization_failure_keeps_construction_variant_and_source() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut context = InterceptorContext::new(Input::doesnt_matter());
         let mut cfg = operation_config(1);
@@ -809,7 +916,11 @@ mod tests {
 
     #[test]
     fn other_connector_failure_after_transmit_stays_maybe_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -840,7 +951,8 @@ mod tests {
 
     #[test]
     fn pre_transmit_readonly_unclassified_connector_failure_is_not_rewritten() {
-        let guard = ResendGuard::new(read_only);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(read_only, ProviderDiagnostics::from_session(&session));
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -871,7 +983,8 @@ mod tests {
 
     #[test]
     fn post_transmit_readonly_unclassified_connector_failure_is_rewritten() {
-        let guard = ResendGuard::new(read_only);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(read_only, ProviderDiagnostics::from_session(&session));
         let runtime_components = runtime_components();
         let mut context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -904,7 +1017,11 @@ mod tests {
 
     #[test]
     fn maybe_sent_attempt_then_pre_transmit_failure_is_maybe_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut cfg = operation_config(1);
         let mut first = before_transmit_context();
@@ -951,7 +1068,11 @@ mod tests {
 
     #[test]
     fn maybe_sent_attempt_then_pre_transmit_timeout_keeps_transient_final_attempt() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut cfg = operation_config(1);
         let mut first = before_transmit_context();
@@ -997,7 +1118,11 @@ mod tests {
 
     #[test]
     fn maybe_sent_attempt_then_response_error_is_maybe_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut cfg = operation_config(1);
         let mut first = before_transmit_context();
@@ -1057,7 +1182,11 @@ mod tests {
 
     #[test]
     fn all_attempts_pre_transmit_is_not_sent() {
-        let guard = ResendGuard::new(token_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(
+            token_idempotent,
+            ProviderDiagnostics::from_session(&session),
+        );
         let runtime_components = runtime_components();
         let mut cfg = operation_config(1);
         let mut first = before_transmit_context();
@@ -1094,7 +1223,8 @@ mod tests {
 
     #[test]
     fn non_idempotent_retry_is_allowed_when_previous_attempt_never_reached_transmit() {
-        let guard = ResendGuard::new(not_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(not_idempotent, ProviderDiagnostics::from_session(&session));
         let runtime_components = runtime_components();
         let context = before_transmit_context();
         let mut cfg = operation_config(1);
@@ -1115,7 +1245,8 @@ mod tests {
 
     #[test]
     fn non_idempotent_retry_is_refused_when_transmit_was_reached_without_finalizer() {
-        let guard = ResendGuard::new(not_idempotent);
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
+        let guard = ResendGuard::new(not_idempotent, ProviderDiagnostics::from_session(&session));
         let runtime_components = runtime_components();
         let context = before_transmit_context();
         let mut cfg = operation_config(1);

@@ -15,42 +15,31 @@ use crate::services::sts::assume_role::AssumeRoleConfig;
 
 /// An AWS SDK configuration with the provider's timeout and retry policy applied.
 #[derive(Clone)]
-pub struct BoundedSdkConfig(aws_types::SdkConfig);
+pub struct BoundedSdkConfig(carina_aws_types::AwsSdkConfig);
 
 impl BoundedSdkConfig {
     /// Apply the provider's timeout and retry policy to an SDK configuration.
-    fn new(config: aws_types::SdkConfig) -> Self {
-        Self(
-            config
-                .into_builder()
-                .timeout_config(timeout_config())
-                .retry_config(retry_config())
-                .build(),
-        )
+    fn new(config: carina_aws_types::AwsSdkConfig) -> Self {
+        Self(config.with_policy(timeout_config(), retry_config()))
     }
 
     /// Build a bounded configuration from an SDK configuration for tests.
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(all(not(target_arch = "wasm32"), any(test, feature = "test-utils")))]
     pub fn for_test(config: aws_types::SdkConfig) -> Self {
-        Self::new(config)
+        Self::new(carina_aws_types::AwsSdkConfig::for_test(config))
     }
 
     /// Borrow the shared configuration for guarded-client constructors.
     ///
     /// Only carina-aws-types can name and construct raw service clients; its
     /// factories always install the resend guard.
-    pub(crate) fn sdk_config(&self) -> &aws_types::SdkConfig {
+    pub(crate) fn sdk_config(&self) -> &carina_aws_types::AwsSdkConfig {
         &self.0
     }
 
     /// Keep effective credentials and bounds when routing a qualified reference.
     pub(crate) fn in_region(&self, region: &str) -> Self {
-        Self(
-            self.0
-                .to_builder()
-                .region(Region::new(region.to_string()))
-                .build(),
-        )
+        Self(self.0.clone().in_region(Region::new(region.to_string())))
     }
 
     /// Build a bounded configuration around a test HTTP client while retaining
@@ -81,23 +70,18 @@ impl BoundedSdkConfig {
     }
 
     /// Load a bounded SDK configuration for the region and optional assumed role.
-    pub(crate) async fn load(region: &str, assume_role: Option<AssumeRoleConfig>) -> Self {
-        Self::load_with_overrides(region, assume_role, None, None).await
-    }
-
-    async fn load_with_overrides(
+    pub(crate) async fn load(
         region: &str,
         assume_role: Option<AssumeRoleConfig>,
-        http_client: Option<aws_smithy_runtime_api::client::http::SharedHttpClient>,
-        credentials_provider: Option<aws_credential_types::provider::SharedCredentialsProvider>,
+        diagnostics: carina_plugin_sdk::ProviderDiagnostics,
     ) -> Self {
         let base = Self::new(
             carina_aws_types::load_sdk_config(
                 Region::new(region.to_string()),
                 timeout_config(),
                 retry_config(),
-                http_client,
-                credentials_provider,
+                diagnostics,
+                None,
             )
             .await,
         );
@@ -116,8 +100,7 @@ impl BoundedSdkConfig {
             assume_role.external_id,
             assume_role.duration,
         );
-        let shared = aws_credential_types::provider::SharedCredentialsProvider::new(provider);
-        Self::new(self.0.into_builder().credentials_provider(shared).build())
+        Self::new(self.0.with_source(provider))
     }
 }
 
@@ -189,6 +172,7 @@ impl AwsProvider {
             acm_client: AcmClient::from_bounded_config(config),
             sqs_client: SqsClient::from_bounded_config(config),
             kms_client: crate::references::KmsClient::from_bounded_config(config),
+            diagnostics: config.0.diagnostics().clone(),
             schema_registry: Self::schema_registry(),
             region,
             allowed_account_ids,
@@ -215,7 +199,10 @@ mod tests {
             .build();
 
         let bounded = BoundedSdkConfig::for_test(input);
-        assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
+        assert_bounded_policy(
+            bounded.0.sdk_config().timeout_config(),
+            bounded.0.sdk_config().retry_config(),
+        );
     }
 
     #[test]
@@ -368,22 +355,33 @@ mod tests {
         use aws_credential_types::provider::ProvideCredentials;
 
         let mock = winterbaume_core::MockAws::builder().build();
-        let bounded = BoundedSdkConfig::load_with_overrides(
-            "us-east-1",
-            None,
-            Some(mock.http_client()),
-            Some(mock.credentials_provider()),
-        )
-        .await;
-        assert_bounded_policy(bounded.0.timeout_config(), bounded.0.retry_config());
-        assert_eq!(bounded.0.region().unwrap().as_ref(), "us-east-1");
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
         let expected = mock
             .credentials_provider()
             .provide_credentials()
             .await
             .unwrap();
+        let bounded = BoundedSdkConfig::new(
+            carina_aws_types::load_sdk_config(
+                aws_types::region::Region::new("us-east-1"),
+                super::timeout_config(),
+                super::retry_config(),
+                carina_plugin_sdk::ProviderDiagnostics::from_session(&session),
+                Some(expected.clone().into()),
+            )
+            .await,
+        );
+        assert_bounded_policy(
+            bounded.0.sdk_config().timeout_config(),
+            bounded.0.sdk_config().retry_config(),
+        );
+        assert_eq!(
+            bounded.0.sdk_config().region().unwrap().as_ref(),
+            "us-east-1"
+        );
         let actual = bounded
             .0
+            .sdk_config()
             .credentials_provider()
             .unwrap()
             .provide_credentials()
@@ -416,6 +414,7 @@ mod tests {
             region: _,
             allowed_account_ids: _,
             forbidden_account_ids: _,
+            diagnostics: _,
         } = provider;
 
         macro_rules! assert_guard {

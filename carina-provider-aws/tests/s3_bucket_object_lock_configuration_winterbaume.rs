@@ -47,7 +47,8 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> Arc<AwsProvider> {
 async fn provider_with_s3() -> (Arc<AwsProvider>, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(TEST_REGION).await;
-    let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
+    let setup_config = carina_aws_types::AwsSdkConfig::for_test(sdk_config.clone());
+    let s3_client = S3Client::new(&setup_config, |_| Idempotency::NotIdempotent);
     (provider_from_config(sdk_config), s3_client)
 }
 
@@ -113,14 +114,18 @@ fn schema_registry() -> carina_core::schema::SchemaRegistry {
     carina_provider_aws::schemas::schema_registry()
 }
 
-async fn create_request_for_test(resource: Resource) -> CreateRequest {
+async fn create_transport_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
         &carina_core::parser::LoadedProviderContext::empty_for_test(),
         async |type_checks| {
             let bindings = carina_core::binding_index::ResolvedBindings::default();
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-            let schemas = carina_core::schema::SchemaRegistry::new();
+            // Exercise provider decoding with the raw transport fixture values.
+            let schemas = carina_core::test_utils::preparation_schemas(
+                &resource.id,
+                carina_core::schema::SchemaKind::Resource,
+            );
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
@@ -252,7 +257,7 @@ async fn create_object_lock(
     rule: Option<Value>,
 ) -> SnapshotState {
     let resource = object_lock_resource(bucket, rule);
-    let request = create_request_for_test(resource).await;
+    let request = create_transport_request_for_test(resource).await;
     create_state_for_test(provider, request)
         .await
         .expect("create Object Lock configuration")
@@ -363,7 +368,7 @@ async fn host_canonicalizes_dsl_enum_identifiers_before_create() {
         &registry,
     )
     .expect("host should resolve authored enum identifiers");
-    let request = create_request_for_test(resource).await;
+    let request = create_transport_request_for_test(resource).await;
 
     let _state = create_state_for_test(&provider, request)
         .await
@@ -470,7 +475,7 @@ async fn create_requires_versioning_with_actionable_bucket_error() {
     let bucket = "carina-object-lock-versioning-required";
     create_bucket(&client, bucket).await;
     let resource = object_lock_resource(bucket, None);
-    let request = create_request_for_test(resource).await;
+    let request = create_transport_request_for_test(resource).await;
 
     let error = create_outcome_for_test(&provider, request)
         .await
@@ -562,7 +567,7 @@ async fn create_rejects_all_reachable_invalid_rule_shapes() {
 
     for (case, rule, expected_message) in cases {
         let resource = object_lock_resource(bucket, Some(rule));
-        let request = create_request_for_test(resource).await;
+        let request = create_transport_request_for_test(resource).await;
         let result = create_outcome_for_test(&provider, request).await;
         let error = match result {
             Ok(_) => panic!("{case}: provider.create must reject the value"),
@@ -676,7 +681,7 @@ async fn recreate_without_rule_refuses_to_clobber_retained_compliance_rule() {
     .await
     .expect("Object Lock destroy should be a no-op");
     let resource = object_lock_resource(bucket, None);
-    let request = create_request_for_test(resource).await;
+    let request = create_transport_request_for_test(resource).await;
     let recreate = create_outcome_for_test(&provider, request).await;
 
     let stored = client

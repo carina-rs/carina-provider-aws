@@ -2,11 +2,11 @@
 
 use std::time::SystemTime;
 
-use aws_credential_types::{
-    Credentials,
-    provider::{ProvideCredentials, error::CredentialsError, future},
-};
+use aws_credential_types::{Credentials, provider::error::CredentialsError};
 use carina_plugin_sdk::aws_credentials::AwsCredentialError;
+use carina_plugin_sdk::protected_material::{
+    AwsSessionFuture, AwsSessionMaterial, AwsSessionSource,
+};
 
 struct HostCredentials {
     access_key_id: String,
@@ -30,40 +30,47 @@ fn current_host_credentials() -> Result<HostCredentials, AwsCredentialError> {
 /// The SDK caches these credentials until near their host-supplied expiry.
 /// Native SDK configurations should keep using their default credential chain.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct HostCredentialsProvider {
+pub struct HostCredentialsSource {
     #[cfg(test)]
     source: Option<fn() -> Result<HostCredentials, AwsCredentialError>>,
 }
 
-impl ProvideCredentials for HostCredentialsProvider {
-    fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
-    where
-        Self: 'a,
-    {
+impl HostCredentialsSource {
+    fn credentials(&self) -> Result<Credentials, CredentialsError> {
         #[cfg(test)]
         let source = self.source.unwrap_or(current_host_credentials);
         #[cfg(not(test))]
         let source = current_host_credentials;
+        source()
+            .map(|credentials| {
+                Credentials::new(
+                    credentials.access_key_id,
+                    credentials.secret_access_key,
+                    credentials.session_token,
+                    credentials.expires_at,
+                    "CarinaHost",
+                )
+            })
+            .map_err(|error| match error {
+                error @ AwsCredentialError::NotFound(_) => CredentialsError::not_loaded(error),
+                error @ AwsCredentialError::ProviderFailed(_) => {
+                    CredentialsError::provider_error(error)
+                }
+            })
+    }
+}
 
-        future::ProvideCredentials::ready(
-            source()
-                .map(|credentials| {
-                    Credentials::new(
-                        credentials.access_key_id,
-                        credentials.secret_access_key,
-                        credentials.session_token,
-                        credentials.expires_at,
-                        "CarinaHost",
-                    )
-                })
-                .map_err(|error| match error {
-                    // The host contract guarantees secret-free error messages.
-                    AwsCredentialError::NotFound(message) => CredentialsError::not_loaded(message),
-                    AwsCredentialError::ProviderFailed(message) => {
-                        CredentialsError::provider_error(message)
-                    }
-                }),
-        )
+impl AwsSessionSource for HostCredentialsSource {
+    fn current_session(&self) -> AwsSessionFuture<'_> {
+        Box::pin(std::future::ready(
+            self.credentials().map(AwsSessionMaterial::new),
+        ))
+    }
+}
+
+impl From<HostCredentialsSource> for crate::AwsCredentialsSource {
+    fn from(source: HostCredentialsSource) -> Self {
+        Self::new(move || std::future::ready(source.credentials()))
     }
 }
 
@@ -74,6 +81,23 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     use super::*;
+
+    use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
+    use carina_core::provider::ProviderPlan;
+    use carina_plugin_sdk::{ProviderDiagnostics, wasi_http::AwsSdkParts};
+
+    fn registered(
+        source: HostCredentialsSource,
+    ) -> (
+        carina_core::provider::ProviderSession,
+        SharedCredentialsProvider,
+    ) {
+        let session = ProviderPlan::state_only().session("aws", None, None);
+        let config = AwsSdkParts::new(source, ProviderDiagnostics::from_session(&session))
+            .apply(aws_types::SdkConfig::builder())
+            .build();
+        (session, config.credentials_provider().unwrap())
+    }
 
     const ACCESS_KEY: &str = "host-access-key-sentinel";
     const SECRET: &str = "host-secret-sentinel";
@@ -90,9 +114,10 @@ mod tests {
 
     #[tokio::test]
     async fn maps_credentials_and_expiry() {
-        let provider = HostCredentialsProvider {
+        let provider = HostCredentialsSource {
             source: Some(expiring_credentials),
         };
+        let (_session, provider) = registered(provider);
         let credentials = provider.provide_credentials().await.unwrap();
 
         assert_eq!(credentials.access_key_id(), ACCESS_KEY);
@@ -109,7 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn maps_credentials_without_token_or_expiry() {
-        let provider = HostCredentialsProvider {
+        let provider = HostCredentialsSource {
             source: Some(|| {
                 Ok(HostCredentials {
                     session_token: None,
@@ -118,6 +143,7 @@ mod tests {
                 })
             }),
         };
+        let (_session, provider) = registered(provider);
         let credentials = provider.provide_credentials().await.unwrap();
 
         assert_eq!(credentials.access_key_id(), ACCESS_KEY);
@@ -129,13 +155,22 @@ mod tests {
     #[tokio::test]
     async fn not_found_is_credentials_not_loaded_with_host_message() {
         const MESSAGE: &str = "no host credential source produced credentials";
-        let provider = HostCredentialsProvider {
+        let provider = HostCredentialsSource {
             source: Some(|| Err(AwsCredentialError::NotFound(MESSAGE.into()))),
         };
+        let (_session, provider) = registered(provider);
         let error = provider.provide_credentials().await.unwrap_err();
 
         assert!(matches!(error, CredentialsError::CredentialsNotLoaded(_)));
-        assert_eq!(error.source().unwrap().to_string(), MESSAGE);
+        assert!(error.source().unwrap().is::<AwsCredentialError>());
+        assert_eq!(
+            error.source().unwrap().to_string(),
+            AwsCredentialError::NotFound(MESSAGE.into()).to_string()
+        );
+        assert!(matches!(
+            error.source().unwrap().downcast_ref::<AwsCredentialError>(),
+            Some(AwsCredentialError::NotFound(message)) if message == MESSAGE
+        ));
         assert!(!format!("{error:?}").contains(SECRET));
         assert!(!format!("{error:?}").contains(TOKEN));
     }
@@ -143,13 +178,22 @@ mod tests {
     #[tokio::test]
     async fn provider_failed_keeps_host_message() {
         const MESSAGE: &str = "SSO session expired; run aws sso login --profile example";
-        let provider = HostCredentialsProvider {
+        let provider = HostCredentialsSource {
             source: Some(|| Err(AwsCredentialError::ProviderFailed(MESSAGE.into()))),
         };
+        let (_session, provider) = registered(provider);
         let error = provider.provide_credentials().await.unwrap_err();
 
         assert!(matches!(error, CredentialsError::ProviderError(_)));
-        assert_eq!(error.source().unwrap().to_string(), MESSAGE);
+        assert!(error.source().unwrap().is::<AwsCredentialError>());
+        assert_eq!(
+            error.source().unwrap().to_string(),
+            AwsCredentialError::ProviderFailed(MESSAGE.into()).to_string()
+        );
+        assert!(matches!(
+            error.source().unwrap().downcast_ref::<AwsCredentialError>(),
+            Some(AwsCredentialError::ProviderFailed(message)) if message == MESSAGE
+        ));
         assert!(!format!("{error:?}").contains(SECRET));
         assert!(!format!("{error:?}").contains(TOKEN));
     }
@@ -157,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn asks_the_host_again_when_credentials_are_requested_again() {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        let provider = HostCredentialsProvider {
+        let provider = HostCredentialsSource {
             source: Some(|| {
                 let call = CALLS.fetch_add(1, Ordering::Relaxed);
                 Ok(HostCredentials {
@@ -167,6 +211,7 @@ mod tests {
             }),
         };
 
+        let (_session, provider) = registered(provider);
         let first = provider.provide_credentials().await.unwrap();
         let second = provider.provide_credentials().await.unwrap();
         assert_eq!(CALLS.load(Ordering::Relaxed), 2);
@@ -176,10 +221,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn native_default_reports_the_sdk_stub_error() {
-        let error = HostCredentialsProvider::default()
-            .provide_credentials()
-            .await
-            .unwrap_err();
+        let (_session, provider) = registered(HostCredentialsSource::default());
+        let error = provider.provide_credentials().await.unwrap_err();
 
         assert!(matches!(error, CredentialsError::ProviderError(_)));
         assert!(

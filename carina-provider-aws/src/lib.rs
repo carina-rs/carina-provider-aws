@@ -110,6 +110,7 @@ use resend_safety_generated::{
 /// use carina_aws_types::sdk::s3::S3Client;
 /// ```
 pub struct AwsProvider {
+    diagnostics: carina_plugin_sdk::ProviderDiagnostics,
     s3_client: S3Client,
     ec2_client: Ec2Client,
     iam_client: IamClient,
@@ -136,8 +137,8 @@ pub struct AwsProvider {
 
 impl AwsProvider {
     /// Create a new AWS Provider
-    pub async fn new(region: &str) -> Self {
-        Self::new_with_account_guard(region, Vec::new(), Vec::new(), None).await
+    pub async fn new(region: &str, diagnostics: carina_plugin_sdk::ProviderDiagnostics) -> Self {
+        Self::new_with_account_guard(region, Vec::new(), Vec::new(), None, diagnostics).await
     }
 
     /// Create a new AWS Provider with provider-level account guard
@@ -154,8 +155,9 @@ impl AwsProvider {
         allowed_account_ids: Vec<String>,
         forbidden_account_ids: Vec<String>,
         assume_role: Option<crate::services::sts::assume_role::AssumeRoleConfig>,
+        diagnostics: carina_plugin_sdk::ProviderDiagnostics,
     ) -> Self {
-        let config = BoundedSdkConfig::load(region, assume_role).await;
+        let config = BoundedSdkConfig::load(region, assume_role, diagnostics).await;
 
         Self::from_sdk_config(
             region.to_string(),

@@ -108,6 +108,7 @@ mod tests {
             snapshot.schema_registry(),
             &std::collections::HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
     }
 
@@ -164,6 +165,7 @@ mod tests {
             snapshot.schema_registry(),
             &std::collections::HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .expect("ACM DNS validation example must validate with distinct enum identities");
     }
@@ -230,6 +232,7 @@ mod tests {
             snapshot.schema_registry(),
             &std::collections::HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
     }
 

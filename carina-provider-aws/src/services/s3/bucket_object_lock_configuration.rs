@@ -1,4 +1,5 @@
-use std::io::{self, Write};
+use carina_core::provider_text::ProviderDiagnostic;
+use carina_plugin_sdk::{EventLevel, ProviderDiagnostics, ProviderEvent};
 
 use carina_aws_types::sdk::s3::error::{ProvideErrorMetadata, SdkError};
 use carina_aws_types::sdk::s3::operation::put_object_lock_configuration::{
@@ -287,7 +288,7 @@ impl AwsProvider {
         // 2026-08-14; the paths checked were destroy -> read and destroy ->
         // read -> update. An unguarded destroy -> create without Rule can clear
         // that retained default, so create now reads first and rejects it.
-        let _ = write_destroy_warning(io::stderr().lock(), identifier);
+        emit_destroy_warning(&self.diagnostics, identifier);
         Ok(())
     }
 }
@@ -485,11 +486,23 @@ fn string_value(value: &str) -> Value {
     Value::Concrete(ConcreteValue::String(value.to_string().into()))
 }
 
-fn write_destroy_warning(mut writer: impl Write, bucket: &str) -> io::Result<()> {
-    writeln!(
-        writer,
-        "Warning: destroy removed only the Carina state entry for S3 bucket '{bucket}' and made no AWS request. Any remote Object Lock configuration remains; if a default retention rule exists, import/adopt the configuration or declare 'rule' explicitly before re-creating the resource."
-    )
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Warning: destroy removed only the Carina state entry for S3 bucket '{bucket}' and made no AWS request. Any remote Object Lock configuration remains; if a default retention rule exists, import/adopt the configuration or declare 'rule' explicitly before re-creating the resource."
+)]
+struct DestroyWarning {
+    bucket: String,
+}
+
+fn emit_destroy_warning(diagnostics: &ProviderDiagnostics, bucket: &str) {
+    let diagnostic = ProviderDiagnostic::new(DestroyWarning {
+        bucket: bucket.to_owned(),
+    });
+    diagnostics.emit(ProviderEvent::diagnostic(
+        EventLevel::Warn,
+        "S3 Object Lock".into(),
+        &diagnostic,
+    ));
 }
 
 #[cfg(test)]
@@ -662,11 +675,24 @@ mod tests {
 
     #[test]
     fn destroy_warning_names_bucket_and_preserved_remote_settings() {
-        let mut output = Vec::new();
-
-        write_destroy_warning(&mut output, "locked-bucket").expect("write warning");
-
-        let warning = String::from_utf8(output).expect("warning is UTF-8");
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = output.clone();
+        let session = carina_core::provider::ProviderPlan::state_only()
+            .session_builder("aws", None, None)
+            .with_diagnostic_sink(move |event| {
+                assert_eq!(event.severity(), EventLevel::Warn);
+                assert!(event.diagnostic().is_some());
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(carina_core::provider_text::present_event(&event).to_string());
+            })
+            .build();
+        emit_destroy_warning(
+            &ProviderDiagnostics::from_session(&session),
+            "locked-bucket",
+        );
+        let warning = output.lock().unwrap().join("\n");
         assert!(warning.contains("locked-bucket"), "{warning}");
         assert!(warning.contains("made no AWS request"), "{warning}");
         assert!(

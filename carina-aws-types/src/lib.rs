@@ -3,12 +3,20 @@
 //! This module contains type validators shared between `carina-provider-aws`
 //! and `carina-provider-awscc`. Provider-specific types (region with namespace,
 //! schema config structs) remain in their respective crates.
+//!
+//! Credential sources return each current session generation and optional expiry.
+//! [`AwsSdkConfig`] installs them through the SDK's `AwsSdkParts` on WASM and
+//! in native tests, registering each generation before returning signing
+//! credentials. Complete SDK credentials retain their expiry, account ID, provider
+//! name and properties through registration. Native production keeps aws-config's
+//! default loader; explicit overrides use a private native-only adapter. Both
+//! targets use [`AwsCredentialsSource`] and [`load_sdk_config`]. Service handles
+//! retain the provider session's diagnostics for typed retry warnings.
 
 #[cfg(feature = "sts")]
 mod assume_role;
 mod catalog;
 mod common;
-#[cfg(any(target_arch = "wasm32", test))]
 mod host_credentials;
 pub mod kms_reference;
 mod read_back;
@@ -26,10 +34,9 @@ pub mod __private {
 pub use assume_role::{AssumeRoleFailure, GuardedAssumeRoleProvider};
 pub use catalog::*;
 pub use common::*;
-#[cfg(any(target_arch = "wasm32", test))]
-pub use host_credentials::HostCredentialsProvider;
+pub use host_credentials::HostCredentialsSource;
 pub use read_back::ReadBackPredicate;
-pub use sdk_config::load_sdk_config;
+pub use sdk_config::{AwsCredentialsSource, AwsSdkConfig, load_sdk_config};
 pub use services::*;
 
 #[cfg(test)]

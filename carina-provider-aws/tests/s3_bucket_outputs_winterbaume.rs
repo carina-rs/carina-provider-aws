@@ -181,7 +181,8 @@ fn provider_from_config(sdk_config: aws_types::SdkConfig) -> AwsProvider {
 async fn provider_with_s3() -> (Arc<AwsProvider>, S3Client) {
     let mock = MockAws::builder().with_service(S3Service::new()).build();
     let sdk_config = mock.sdk_config(PROVIDER_REGION).await;
-    let s3_client = S3Client::new(&sdk_config, |_| Idempotency::NotIdempotent);
+    let setup_config = carina_aws_types::AwsSdkConfig::for_test(sdk_config.clone());
+    let s3_client = S3Client::new(&setup_config, |_| Idempotency::NotIdempotent);
     (Arc::new(provider_from_config(sdk_config)), s3_client)
 }
 
@@ -341,14 +342,18 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     .await
 }
 
-async fn create_request_without_schema_for_test(resource: Resource) -> CreateRequest {
+async fn create_transport_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
         &carina_core::parser::LoadedProviderContext::empty_for_test(),
         async |type_checks| {
             let bindings = carina_core::binding_index::ResolvedBindings::default();
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-            let schemas = carina_core::schema::SchemaRegistry::new();
+            // These fixtures exercise transport/read-back with raw SDK spellings.
+            let schemas = carina_core::test_utils::preparation_schemas(
+                &resource.id,
+                carina_core::schema::SchemaKind::Resource,
+            );
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
@@ -536,7 +541,7 @@ async fn bucket_namespace_is_sent_and_import_style_read_has_no_diff() {
     desired.set_attr("bucket", string(bucket));
     desired.set_attr("bucket_namespace", string("global"));
     desired.set_attr("tags", Value::Concrete(ConcreteValue::Map(IndexMap::new())));
-    let request = create_request_without_schema_for_test(desired.clone()).await;
+    let request = create_transport_request_for_test(desired.clone()).await;
 
     let current = create_state_for_test(&provider, request)
         .await

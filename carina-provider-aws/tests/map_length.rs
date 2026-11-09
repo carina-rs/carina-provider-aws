@@ -126,6 +126,7 @@ fn map_length_iam_and_acm_tags_use_the_core_resource_validation_path() {
                 snapshot.schema_registry(),
                 &HashSet::from(["aws".to_string()]),
                 context,
+                &mut Vec::new(),
             );
             assert_eq!(
                 result.is_ok(),
@@ -169,6 +170,7 @@ fn map_length_logs_tags_use_the_validate_and_lsp_resource_validation_path() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         );
         assert_eq!(result.is_ok(), accepted, "{source}\n{result:?}");
     }

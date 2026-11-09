@@ -238,7 +238,7 @@ async fn assert_no_diff_with_nested_write_only(
         HashMap::from([(desired.id.clone(), nested_write_only)]),
     )
     .lift(&registry);
-    let request = create_request_without_schema_for_test(desired.clone()).await;
+    let request = create_transport_request_for_test(desired.clone()).await;
     let accepted = carina_core::executor::AcceptedRequest::from_create_request(&request);
     let sent_desired = accepted.sent_desired_attributes(&desired);
     let explicit = carina_core::explicit::build_from_resource_for_stored_values_after_send(
@@ -282,14 +282,16 @@ async fn create_request_for_test(resource: Resource) -> CreateRequest {
     .await
 }
 
-async fn create_request_without_schema_for_test(resource: Resource) -> CreateRequest {
+async fn create_transport_request_for_test(resource: Resource) -> CreateRequest {
     carina_core::validation::deferred_types::with_session_for_test_async(
         &carina_core::parser::LoadedProviderContext::empty_for_test(),
         async |type_checks| {
             let bindings = carina_core::binding_index::ResolvedBindings::default();
             let module_gate =
                 carina_core::executor::ModuleConstraintGate::from_live_compositions(&[]);
-            let schemas = SchemaRegistry::new();
+            // These fixtures exercise transport/read-back with raw SDK spellings.
+            let schemas =
+                carina_core::test_utils::preparation_schemas(&resource.id, SchemaKind::Resource);
             let preparation = carina_core::executor::ProviderPreparationContext::new(
                 &bindings,
                 &module_gate,
@@ -347,7 +349,7 @@ async fn normalize_desired_for_test(mut resource: Resource) -> Resource {
 async fn create_round_trip_state(provider: &Arc<AwsProvider>, desired: &Resource) -> SnapshotState {
     create_state_for_test(
         provider,
-        create_request_without_schema_for_test(desired.clone()).await,
+        create_transport_request_for_test(desired.clone()).await,
     )
     .await
     .expect("scripted AWS create should succeed")
@@ -1708,7 +1710,7 @@ async fn account_write_only_create_inputs_and_import_read_round_trip() {
 
     let created = create_state_for_test(
         &provider,
-        create_request_without_schema_for_test(desired.clone()).await,
+        create_transport_request_for_test(desired.clone()).await,
     )
     .await
     .expect("create and read back Organizations account");
