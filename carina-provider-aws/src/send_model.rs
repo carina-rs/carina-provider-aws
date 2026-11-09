@@ -11,7 +11,8 @@ use indexmap::IndexMap;
 pub(crate) type StringList = Vec<String>;
 pub(crate) type Tags = IndexMap<String, String>;
 
-/// Attribute access shared by live create inputs and lazy update inputs.
+/// Attribute access for live values only. Lazy updates deliberately do not
+/// implement this trait: their removal decision must survive decoding.
 pub(crate) trait SendResource {
     fn id(&self) -> &ResourceId;
     fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>>;
@@ -27,13 +28,91 @@ impl<S, D> SendResource for Resource<S, NoPlaceholder, AbsoluteBindingAddress, D
     }
 }
 
-impl SendResource for crate::helpers::UpdateResource {
+pub(crate) struct AttributeValueResource<'a> {
+    id: &'a ResourceId,
+    name: &'a str,
+    value: Option<&'a Value>,
+}
+
+impl SendResource for AttributeValueResource<'_> {
     fn id(&self) -> &ResourceId {
-        &self.id
+        self.id
     }
 
     fn get_attr(&self, name: &str) -> ProviderResult<Option<&Value>> {
-        self.get_attr(name)
+        if name == self.name {
+            Ok(self.value)
+        } else {
+            Err(ProviderError::internal(format!(
+                "Update decoder for `{}` tried to access `{name}`",
+                self.name
+            ))
+            .for_resource(self.id.clone()))
+        }
+    }
+}
+
+pub(crate) fn decode_change<T>(
+    resource: &crate::helpers::UpdateResource,
+    name: &str,
+    decode: impl FnOnce(&AttributeValueResource<'_>) -> ProviderResult<T>,
+) -> ProviderResult<crate::helpers::AttributeChange<T>> {
+    resource.attribute_change(name)?.try_map(|value| {
+        decode(&AttributeValueResource {
+            id: &resource.id,
+            name,
+            value,
+        })
+    })
+}
+
+/// Required update inputs have a value, not a removal policy. Reject a malformed
+/// patch at decoding, before any guarded send parts are constructed.
+pub(crate) fn decode_required<T>(
+    resource: &crate::helpers::UpdateResource,
+    name: &str,
+    decode: impl FnOnce(&AttributeValueResource<'_>) -> ProviderResult<T>,
+) -> ProviderResult<T> {
+    let value = resource.attribute_change(name)?.resolve(|| {
+        Err(ProviderError::invalid_input(format!("{name} is required"))
+            .for_resource(resource.id.clone()))
+    })?;
+    decode(&AttributeValueResource {
+        id: &resource.id,
+        name,
+        value,
+    })
+}
+
+/// A struct `Replace` restores create-time defaults for fields omitted from the
+/// new struct but present in the previous state/read model, even if those fields
+/// came from read-back rather than configuration. Keep these removals typed so
+/// each handler applies its declared reset or rejects an undocumented reset.
+pub(crate) fn nested_update_field(
+    id: &ResourceId,
+    parent: &str,
+    change: &crate::helpers::AttributeChange<Option<Value>>,
+    current: Option<&carina_core::resource::SnapshotValue>,
+    field: &str,
+) -> ProviderResult<crate::helpers::AttributeChange<Option<Value>>> {
+    use crate::helpers::AttributeChange;
+    let lookup = |value: &Option<Value>| match value {
+        Some(Value::Concrete(ConcreteValue::Map(fields))) => Ok(fields.get(field).cloned()),
+        None => Ok(None),
+        Some(_) => Err(invalid_shape_for_id(id, parent, "a struct")),
+    };
+    match change {
+        AttributeChange::Removed => Ok(AttributeChange::Removed),
+        AttributeChange::Unchanged(value) => lookup(value).map(AttributeChange::Unchanged),
+        AttributeChange::Set(value) => {
+            let desired = lookup(value)?;
+            let was_present = matches!(current, Some(Value::Concrete(ConcreteValue::Map(fields))) if fields.contains_key(field));
+            if desired.is_none() && was_present {
+                Ok(AttributeChange::Removed)
+            } else {
+                Ok(AttributeChange::Set(desired))
+            }
+        }
     }
 }
 

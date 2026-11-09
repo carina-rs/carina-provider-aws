@@ -131,6 +131,10 @@ impl AwsProvider {
         let block_public_policy = block_public_policy.into_inner();
         let ignore_public_acls = ignore_public_acls.into_inner();
         let restrict_public_buckets = restrict_public_buckets.into_inner();
+        let block_public_acls = block_public_acls.resolve(|| Ok(None))?;
+        let block_public_policy = block_public_policy.resolve(|| Ok(None))?;
+        let ignore_public_acls = ignore_public_acls.resolve(|| Ok(None))?;
+        let restrict_public_buckets = restrict_public_buckets.resolve(|| Ok(None))?;
         self.put_s3_bucket_public_access_block(
             &id,
             identifier,

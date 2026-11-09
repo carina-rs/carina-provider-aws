@@ -262,7 +262,7 @@ impl AwsProvider {
             input.into_parts();
         let description = description.into_inner();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
+        let description = description.resolve(|| Ok(None))?;
         let from_description = match from.attributes.get("description") {
             Some(Value::Concrete(ConcreteValue::String(value))) => Some(value.expose_plaintext()),
             _ => None,
@@ -279,13 +279,8 @@ impl AwsProvider {
                         .for_resource(id.clone())
                 })?;
         }
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
         Ok(self.read_ec2_transit_gateway(&id, identifier).await)
     }
 

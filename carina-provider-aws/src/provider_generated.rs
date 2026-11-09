@@ -2846,14 +2846,8 @@ impl AwsProvider {
         let crate::send_models_generated::Ec2InternetGatewayUpdateParts { tags } =
             input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
         Ok(self.read_ec2_internet_gateway(&id, identifier).await)
     }
 
@@ -2868,14 +2862,8 @@ impl AwsProvider {
         let input = crate::send_models_generated::Ec2RouteTableUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2RouteTableUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
         Ok(self.read_ec2_route_table(&id, identifier).await)
     }
 
@@ -2890,14 +2878,8 @@ impl AwsProvider {
         let input = crate::send_models_generated::Ec2SecurityGroupUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2SecurityGroupUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
         Ok(self.read_ec2_security_group(&id, identifier).await)
     }
 

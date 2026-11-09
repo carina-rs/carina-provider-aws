@@ -2463,14 +2463,17 @@ impl AwsProvider {
                 };
                 match status {
                     CreatePoll::Ready(()) => {
-                        if let Err(error) = self
-                            .apply_ec2_tags(
+                        if let Err(error) = async {
+                            let tags = crate::send_model::optional_tags(resource, "tags")?;
+                            self.apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                resource.get_attr("tags"),
+                                crate::helpers::AttributeChange::Set(tags),
                                 None,
                             )
                             .await
+                        }
+                        .await
                         {
                             return Err(self.failed_issued(id, issued, error).await);
                         }
@@ -3014,14 +3017,17 @@ impl AwsProvider {
                 };
                 match status {
                     CreatePoll::Ready(()) => {
-                        if let Err(error) = self
-                            .apply_ec2_tags(
+                        if let Err(error) = async {
+                            let tags = crate::send_model::optional_tags(resource, "tags")?;
+                            self.apply_ec2_tags(
                                 id,
                                 nat_gateway_id.as_str(),
-                                resource.get_attr("tags"),
+                                crate::helpers::AttributeChange::Set(tags),
                                 None,
                             )
                             .await
+                        }
+                        .await
                         {
                             return Err(self.failed_resumed(id, resumed, error).await);
                         }
@@ -3355,7 +3361,8 @@ impl AwsProvider {
     ) -> ProviderResult<AwsUpdateStep> {
         let id = id.clone();
         if id.resource_type.as_str().starts_with("ec2.") {
-            to.get_attr("tags")?;
+            // Materialize present tags for reserved-key validation; the tag diff handles removal.
+            to.attribute_change("tags")?;
             crate::ec2_tags::validate_ec2_user_tags(&id, &to.materialized_attributes())?;
         }
         let requirements = self.update_read_back_requirements(to)?;

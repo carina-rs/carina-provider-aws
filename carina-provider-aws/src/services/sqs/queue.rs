@@ -7,6 +7,7 @@
 //! via `extra_attributes` (see `carina-codegen-aws/src/resource_defs.rs::
 //! sqs_resources`); the map↔flat packing lives here.
 
+use crate::helpers::AttributeChange;
 use carina_aws_types::sdk::sqs::types::QueueAttributeName;
 use indexmap::IndexMap;
 use std::collections::HashMap;
@@ -414,7 +415,9 @@ fn validate_sqs_queue_update_inputs(to: &crate::helpers::UpdateResource) -> Prov
             .split('.')
             .next()
             .expect("validation paths have a root");
-        let mut resource = to.materialize(&[name])?;
+        // Cross-field validation inspects desired configuration, where a
+        // removed input is absent. The send path separately declares resets.
+        let mut resource = to.materialize(&[name], |_removed| Ok(None))?;
         let desired = NativeDesiredNormalization::from_core(&mut resource)?;
         Ok(check(queue_validation_attribute(&desired.inputs(), path)))
     })
@@ -1107,8 +1110,6 @@ impl AwsProvider {
         to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
-        // Recheck decisions that were deferred until apply-time resolution.
-        validate_sqs_queue_update_inputs(to)?;
         let input = SqsQueueUpdateInput::decode(to)?;
         let crate::send_models_generated::SqsQueueUpdateParts {
             content_based_deduplication,
@@ -1137,8 +1138,107 @@ impl AwsProvider {
         let redrive_policy = redrive_policy.into_inner();
         let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
         let visibility_timeout = visibility_timeout.into_inner();
+        // Resolve removals from the resulting mode: the other selector covers
+        // selector removal. Active SSE-KMS reuse resets to its documented 300;
+        // omit the reuse period when inapplicable and reject uncovered selectors.
+        let resulting_sqs_managed_sse_enabled = match &sqs_managed_sse_enabled {
+            AttributeChange::Set(value) | AttributeChange::Unchanged(value) => *value,
+            AttributeChange::Removed => None,
+        };
+        let resulting_kms_key_is_nonempty = match &kms_master_key_id {
+            AttributeChange::Set(value) | AttributeChange::Unchanged(value) => {
+                value.as_ref().is_some_and(|key| !key.is_empty())
+            }
+            AttributeChange::Removed => false,
+        };
+        let resulting_mode_is_sse_kms =
+            resulting_kms_key_is_nonempty && resulting_sqs_managed_sse_enabled != Some(true);
+        let kms_master_key_id = kms_master_key_id.resolve(|| {
+            if resulting_sqs_managed_sse_enabled == Some(true) {
+                Ok(None)
+            } else {
+                Err(crate::helpers::removal_error(
+                    &id,
+                    "kms_master_key_id",
+                    "The KMS key can only be cleared by selecting SSE-SQS",
+                ))
+            }
+        })?;
+        let sqs_managed_sse_enabled = sqs_managed_sse_enabled.resolve(|| {
+            if resulting_kms_key_is_nonempty {
+                Ok(None)
+            } else {
+                Err(crate::helpers::removal_error(
+                    &id,
+                    "sqs_managed_sse_enabled",
+                    "The SSE-SQS setting can only be cleared by selecting a KMS key",
+                ))
+            }
+        })?;
+        let kms_data_key_reuse_period_seconds =
+            kms_data_key_reuse_period_seconds.resolve(|| {
+                Ok(if resulting_mode_is_sse_kms {
+                    Some(300)
+                } else {
+                    None
+                })
+            })?;
+
+        // Reset declarations follow the SetQueueAttributes API/SDK model:
+        // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SetQueueAttributes.html
+        // Mode-covered encryption removals above are omitted; other attributes
+        // require an explicit reset declaration or a typed rejection.
+        let content_based_deduplication = content_based_deduplication.resolve(|| {
+            let fifo_queue = crate::send_model::decode_change(to, "fifo_queue", |resource| {
+                crate::send_model::optional_bool(resource, "fifo_queue")
+            })?
+            .resolve(|| {
+                Err(crate::helpers::removal_error(
+                    &id,
+                    "content_based_deduplication",
+                    "Its reset depends on fifo_queue, which is not known in state",
+                ))
+            })?;
+            if fifo_queue == Some(true) {
+                Ok(Some(false))
+            } else {
+                Err(crate::helpers::removal_error(
+                    &id,
+                    "content_based_deduplication",
+                    "This reset is only documented for FIFO queues",
+                ))
+            }
+        })?;
+        let delay_seconds = delay_seconds.resolve(|| Ok(Some(0)))?;
+        let maximum_message_size = maximum_message_size.resolve(|| Ok(Some(1_048_576)))?;
+        let message_retention_period = message_retention_period.resolve(|| Ok(Some(345_600)))?;
+        let policy = policy.resolve(|| {
+            Err(crate::helpers::removal_error(
+                &id,
+                "policy",
+                "The SQS API model does not document a reset value",
+            ))
+        })?;
+        let receive_message_wait_time_seconds =
+            receive_message_wait_time_seconds.resolve(|| Ok(Some(0)))?;
+        let redrive_allow_policy = redrive_allow_policy.resolve(|| {
+            Err(crate::helpers::removal_error(
+                &id,
+                "redrive_allow_policy",
+                "The SQS API model does not document a reset matching create-time omission",
+            ))
+        })?;
+        let redrive_policy = redrive_policy.resolve(|| {
+            Err(crate::helpers::removal_error(
+                &id,
+                "redrive_policy",
+                "The SQS API model does not document a reset value",
+            ))
+        })?;
+        let visibility_timeout = visibility_timeout.resolve(|| Ok(Some(30)))?;
+        // Recheck decisions that were deferred until apply-time resolution.
+        validate_sqs_queue_update_inputs(to)?;
         let desired = HashMap::from([
             (
                 "content_based_deduplication",
@@ -1208,13 +1308,8 @@ impl AwsProvider {
                 })?;
         }
 
-        self.apply_sqs_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_sqs_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
 
         Ok(self.read_sqs_queue(&id, identifier).await)
     }
@@ -1242,23 +1337,29 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         queue_url: &str,
-        desired: Option<&Value>,
+        desired: AttributeChange<Option<crate::send_model::Tags>>,
         current: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired {
-            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
-            _ => IndexMap::new(),
-        };
         let current_tags = match current.and_then(|c| c.get("tags")) {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
-        let keys_to_remove: Vec<String> = current_tags
-            .keys()
-            .filter(|k| !desired_tags.contains_key(*k))
-            .cloned()
-            .collect();
+        let (desired_tags, keys_to_remove): (_, Vec<String>) = match desired {
+            AttributeChange::Set(tags) | AttributeChange::Unchanged(tags) => {
+                let tags = tags.unwrap_or_default();
+                let removed = current_tags
+                    .keys()
+                    .filter(|key| !tags.contains_key(*key))
+                    .cloned()
+                    .collect();
+                (tags, removed)
+            }
+            AttributeChange::Removed => (
+                crate::send_model::Tags::new(),
+                current_tags.keys().cloned().collect(),
+            ),
+        };
 
         if !keys_to_remove.is_empty() {
             self.sqs_client
@@ -1273,15 +1374,15 @@ impl AwsProvider {
         }
 
         let mut tags_to_add: HashMap<String, String> = HashMap::new();
-        for (key, value) in &desired_tags {
-            if let Value::Concrete(ConcreteValue::String(val)) = value {
-                let should_add = match current_tags.get(key) {
-                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
-                    _ => true,
-                };
-                if should_add {
-                    tags_to_add.insert(key.clone(), val.expose_plaintext().to_string());
+        for (key, val) in &desired_tags {
+            let should_add = match current_tags.get(key) {
+                Some(Value::Concrete(ConcreteValue::String(current_val))) => {
+                    current_val.expose_plaintext() != val.as_str()
                 }
+                _ => true,
+            };
+            if should_add {
+                tags_to_add.insert(key.clone(), val.clone());
             }
         }
 

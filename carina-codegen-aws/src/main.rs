@@ -4355,8 +4355,7 @@ fn generate_provider_code(
                  \x20       let input = crate::send_models_generated::{}::decode(to)?;\n\
                  \x20       let crate::send_models_generated::{} {{ tags }} = input.into_parts();\n\
                  \x20       let tags = tags.into_inner();\n\
-                 \x20       let tags = crate::send_model::optional_tags_value(tags);\n\
-                 \x20       self.apply_ec2_tags(&id, identifier.as_str(), tags.as_ref(), Some(&from.attributes))\n\
+                 \x20       self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))\n\
                  \x20           .await?;\n\
                  \x20       Ok(self.{}(&id, identifier).await)\n\
                  \x20   }}\n\n",
@@ -5277,7 +5276,7 @@ fn send_decode_expression(field: &SendInputField) -> String {
         ""
     };
     let decoded = format!(
-        "crate::send_model::{requiredness}_{kind}(_resource, {schema_arg}\"{}\")?",
+        "crate::send_model::{requiredness}_{kind}(_resource, {schema_arg}\"{}\")",
         field.snake_name
     );
     if field.sdk_i32_paths.is_empty() {
@@ -5295,9 +5294,11 @@ fn send_decode_expression(field: &SendInputField) -> String {
         field.snake_name
     );
     if field.is_required {
-        format!("{{ let value = {decoded}; {check} value }}")
+        format!("{decoded}.and_then(|value| {{ {check} Ok(value) }})")
     } else {
-        format!("{{ let value = {decoded}; if let Some(value) = &value {{ {check} }} value }}")
+        format!(
+            "{decoded}.and_then(|value| {{ if let Some(value) = &value {{ {check} }} Ok(value) }})"
+        )
     }
 }
 
@@ -5310,6 +5311,14 @@ fn emit_send_input(
     let type_name = send_input_type_name(res.name, operation);
     let parts_name = send_parts_type_name(res.name, operation);
     let is_create = operation == "Create";
+    let field_type = |field: &SendInputField| {
+        let value_type = send_field_rust_type(field);
+        if is_create || field.is_required {
+            value_type
+        } else {
+            format!("crate::helpers::AttributeChange<{value_type}>")
+        }
+    };
     let (service, resource) = split_service_resource(res.name);
     let resource_module = pascal_to_snake(resource);
     let config_fn = format!("{}_config", module_name(res.name));
@@ -5326,7 +5335,7 @@ fn emit_send_input(
             code.push_str(&format!(
                 "    {}: {},\n",
                 escape_rust_keyword(&field.snake_name),
-                send_field_rust_type(field)
+                field_type(field)
             ));
         }
         code.push_str("}\n\n");
@@ -5340,7 +5349,7 @@ fn emit_send_input(
             code.push_str(&format!(
                 "    pub(crate) {}: crate::send_model::Sent<{}>,\n",
                 escape_rust_keyword(&field.snake_name),
-                send_field_rust_type(field)
+                field_type(field)
             ));
         }
         code.push_str("}\n\n");
@@ -5351,7 +5360,7 @@ fn emit_send_input(
     if is_create {
         code.push_str("        _resource: &Resource<impl Sized, NoPlaceholder, AbsoluteBindingAddress, impl Sized>,\n");
     } else {
-        code.push_str("        _resource: &impl crate::send_model::SendResource,\n");
+        code.push_str("        _resource: &crate::helpers::UpdateResource,\n");
     }
     let needs_schema = fields
         .iter()
@@ -5373,7 +5382,20 @@ fn emit_send_input(
             code.push_str(&format!(
                 "            {}: {},\n",
                 escape_rust_keyword(&field.snake_name),
-                send_decode_expression(field)
+                if is_create {
+                    format!("{}?", send_decode_expression(field))
+                } else {
+                    let decoder = send_decode_expression(field);
+                    let decode = if field.is_required {
+                        "decode_required"
+                    } else {
+                        "decode_change"
+                    };
+                    format!(
+                        "crate::send_model::{decode}(_resource, {:?}, |_resource| {decoder})?",
+                        field.snake_name
+                    )
+                }
             ));
         }
         code.push_str("        })\n");
@@ -5435,6 +5457,42 @@ fn emit_send_input(
     code.push_str("}\n\n");
 }
 
+/// A service that updates struct members individually must match this closed
+/// model-derived field set when declaring resets. A new Smithy member then
+/// makes that service's reset match non-exhaustive at compile time.
+fn emit_update_field_enum(
+    code: &mut String,
+    model: &SmithyModel,
+    shape_id: &str,
+    name: &str,
+) -> Result<()> {
+    let shape = model
+        .get_structure(shape_id)
+        .with_context(|| format!("missing nested update shape {shape_id}"))?;
+    code.push_str(&format!(
+        "#[derive(Clone, Copy)]\npub(crate) enum {name} {{\n"
+    ));
+    for field in shape.members.keys() {
+        code.push_str(&format!("    {},\n", field.to_upper_camel_case()));
+    }
+    code.push_str(&format!(
+        "}}\nimpl {name} {{\n    pub(crate) const ALL: &'static [Self] = &[\n"
+    ));
+    for field in shape.members.keys() {
+        code.push_str(&format!("        Self::{},\n", field.to_upper_camel_case()));
+    }
+    code.push_str("    ];\n    pub(crate) fn name(self) -> &'static str {\n        match self {\n");
+    for field in shape.members.keys() {
+        code.push_str(&format!(
+            "            Self::{} => {:?},\n",
+            field.to_upper_camel_case(),
+            field.to_snake_case()
+        ));
+    }
+    code.push_str("        }\n    }\n}\n\n");
+    Ok(())
+}
+
 fn generate_send_models_code(
     resources: &[(&ResourceDef, &[resource_defs::SendDisposition])],
     models: &HashMap<&str, SmithyModel>,
@@ -5457,6 +5515,14 @@ fn generate_send_models_code(
                 res.service_namespace, res.name
             )
         })?;
+        for declaration in res.nested_update_field_enums {
+            emit_update_field_enum(
+                &mut code,
+                model,
+                &format!("{}#{}", res.service_namespace, declaration.structure),
+                declaration.rust_name,
+            )?;
+        }
         let read_dispositions = res.read_dispositions();
         let mut collected =
             collect_resource_attributes_unvalidated(res, model, &read_dispositions)?;
@@ -11754,6 +11820,7 @@ mod tests {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes,
         }
@@ -11823,6 +11890,7 @@ mod tests {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         }
@@ -12282,6 +12350,101 @@ mod tests {
         assert!(
             code.contains("capture_names: &[\"WireDescription\"]"),
             "capture lookup must use the same snake_case normalization as classification: {code}"
+        );
+    }
+
+    #[test]
+    fn nested_update_field_set_tracks_new_model_members() {
+        let model = carina_smithy::parse(
+            r##"{
+            "smithy":"2.0", "shapes": {
+                "test#Dns": { "type":"structure", "members": {
+                    "HostnameType": {"target":"smithy.api#String"},
+                    "FutureOption": {"target":"smithy.api#Boolean"}
+                } }
+            }
+        }"##,
+        )
+        .unwrap();
+        let mut code = String::new();
+        emit_update_field_enum(&mut code, &model, "test#Dns", "DnsField").unwrap();
+        assert!(code.contains("    FutureOption,"), "{code}");
+        assert!(code.contains("Self::FutureOption,"), "{code}");
+        assert!(
+            code.contains("Self::FutureOption => \"future_option\""),
+            "{code}"
+        );
+        assert!(!code.contains("_ =>"), "{code}");
+        let error =
+            emit_update_field_enum(&mut String::new(), &model, "test#Absent", "Field").unwrap_err();
+        assert!(error.to_string().contains("test#Absent"), "{error}");
+    }
+
+    #[test]
+    fn generated_update_fields_require_a_removal_decision() {
+        let model = string_fixture_model(
+            &[("Description", false), ("Name", true)],
+            &[("Description", false), ("Name", true)],
+        );
+        let mut resource =
+            provider_fixture_resource("test.RemovalFixture", "", &["Description", "Name"], vec![]);
+        resource.update_ops.push(resource_defs::UpdateOp {
+            operation: "UpdateFixture",
+            fields: resource_defs::FieldLayout::Flat(vec!["Description", "Name"]),
+        });
+        resource.nested_update_field_enums = &[resource_defs::NestedUpdateFieldEnum {
+            structure: "ReadFixture",
+            rust_name: "DeclaredFixtureField",
+        }];
+        let dispositions = [
+            resource_defs::SendDisposition::sent("Description"),
+            resource_defs::SendDisposition::sent("Name"),
+        ];
+        let code = generate_send_models_code(
+            &[(&resource, dispositions.as_slice())],
+            &HashMap::from([(resource.service_namespace, model)]),
+        )
+        .expect("generate update change types");
+        assert!(code.contains("enum DeclaredFixtureField"), "{code}");
+        assert!(
+            code.contains("Self::Description => \"description\""),
+            "{code}"
+        );
+        let update = code
+            .split("pub(crate) struct TestRemovalFixtureUpdateInput")
+            .nth(1)
+            .unwrap();
+        assert!(
+            update.contains("description: crate::helpers::AttributeChange<Option<String>>"),
+            "{update}"
+        );
+        assert!(update.contains("pub(crate) description: crate::send_model::Sent<crate::helpers::AttributeChange<Option<String>>>"), "{update}");
+        assert!(update.contains("crate::send_model::Sent::new(\"test.RemovalFixture.update.description\", description)"), "{update}");
+        assert!(
+            update.contains("pub(crate) name: crate::send_model::Sent<String>"),
+            "{update}"
+        );
+        assert!(
+            !update.contains("crate::helpers::AttributeChange<String>"),
+            "{update}"
+        );
+        assert!(
+            update.contains(
+                "crate::send_model::Sent::new(\"test.RemovalFixture.update.name\", name)"
+            ),
+            "{update}"
+        );
+        assert!(
+            update.contains("_resource: &crate::helpers::UpdateResource"),
+            "{update}"
+        );
+        assert!(
+            update.contains("crate::send_model::decode_change"),
+            "{update}"
+        );
+        assert!(
+            !update.contains("&impl crate::send_model::SendResource"),
+            "{update}"
         );
     }
 
@@ -13387,6 +13550,7 @@ mod tests {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![resource_defs::DerivedAttribute { attr, source }],
         }
@@ -15705,6 +15869,7 @@ mod tests {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         };

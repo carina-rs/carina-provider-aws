@@ -9,6 +9,8 @@ use carina_core::resource::{ConcreteValue, ResourceId, SnapshotValue, Value};
 use crate::AwsProvider;
 use crate::aws_operation::EC2_CREATE_TOKEN_TAG;
 use crate::error_helpers::api_error_with_meta;
+use crate::helpers::AttributeChange;
+use crate::send_model::Tags;
 
 /// Convert user-authored tag values to SDK tags.
 ///
@@ -83,80 +85,74 @@ impl AwsProvider {
         }
     }
 
-    /// Apply tags to an EC2 resource
-    ///
-    /// When `from_attributes` is provided, tags that exist in `from` but not in `to`
-    /// will be deleted from the resource.
+    /// Apply a tag change, deleting all old user keys on explicit removal.
     pub(crate) async fn apply_ec2_tags(
         &self,
         resource_id: &ResourceId,
         ec2_resource_id: &str,
-        tags: Option<&Value>,
+        change: AttributeChange<Option<Tags>>,
         from_attributes: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
-        if matches!(
-            tags,
-            Some(Value::Concrete(ConcreteValue::Map(tags)))
-                if tags.contains_key(EC2_CREATE_TOKEN_TAG)
-        ) {
-            return Err(ProviderError::invalid_input(format!(
-                "tag key `{EC2_CREATE_TOKEN_TAG}` is reserved for provider-managed create discovery"
-            ))
-            .for_resource(resource_id.clone()));
-        }
-
-        // Delete tags that were removed (present in from but not in to)
-        if let Some(from_attrs) = from_attributes {
-            let old_keys: std::collections::HashSet<&String> = if let Some(Value::Concrete(
-                ConcreteValue::Map(old_map),
-            )) = from_attrs.get("tags")
+        let old_keys: std::collections::HashSet<&String> =
+            if let Some(Value::Concrete(ConcreteValue::Map(tags))) =
+                from_attributes.and_then(|attrs| attrs.get("tags"))
             {
-                old_map.keys().collect()
+                tags.keys()
+                    .filter(|key| key.as_str() != EC2_CREATE_TOKEN_TAG)
+                    .collect()
             } else {
                 std::collections::HashSet::new()
             };
-            let new_keys: std::collections::HashSet<&String> =
-                if let Some(Value::Concrete(ConcreteValue::Map(new_map))) = tags {
-                    new_map.keys().collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
-            let removed_keys: Vec<&String> = old_keys
-                .difference(&new_keys)
-                .copied()
-                .filter(|key| key.as_str() != EC2_CREATE_TOKEN_TAG)
-                .collect();
-            if !removed_keys.is_empty() {
-                let mut req = self.ec2_client.delete_tags().resources(ec2_resource_id);
-                for key in removed_keys {
-                    req = req.tags(
-                        carina_aws_types::sdk::ec2::types::Tag::builder()
-                            .key(key.as_str())
-                            .build(),
-                    );
+        let (tags, removed_keys): (_, Vec<&String>) = match change {
+            AttributeChange::Set(tags) | AttributeChange::Unchanged(tags) => {
+                if tags
+                    .as_ref()
+                    .is_some_and(|tags| tags.contains_key(EC2_CREATE_TOKEN_TAG))
+                {
+                    return Err(ProviderError::invalid_input(format!(
+                        "tag key `{EC2_CREATE_TOKEN_TAG}` is reserved for provider-managed create discovery"
+                    )).for_resource(resource_id.clone()));
                 }
-                req.send().await.map_err(|e| {
-                    api_error_with_meta("Failed to delete tags", e)
-                        .for_resource(resource_id.clone())
-                })?;
+                let removed = old_keys
+                    .into_iter()
+                    .filter(|key| !tags.as_ref().is_some_and(|tags| tags.contains_key(*key)))
+                    .collect();
+                (tags, removed)
             }
-        }
-
-        // Add/update tags
-        if let Some(tag_value) = tags {
-            let tags = value_to_ec2_tags(tag_value);
-            if !tags.is_empty() {
-                let mut req = self.ec2_client.create_tags().resources(ec2_resource_id);
-                for tag in tags {
-                    req = req.tags(tag);
-                }
-                req.send().await.map_err(|e| {
-                    api_error_with_meta("Failed to tag resource", e)
-                        .for_resource(resource_id.clone())
-                })?;
+            AttributeChange::Removed => (None, old_keys.into_iter().collect()),
+        };
+        if !removed_keys.is_empty() {
+            let mut req = self.ec2_client.delete_tags().resources(ec2_resource_id);
+            for key in removed_keys {
+                req = req.tags(
+                    carina_aws_types::sdk::ec2::types::Tag::builder()
+                        .key(key.as_str())
+                        .build(),
+                );
             }
+            req.send().await.map_err(|error| {
+                api_error_with_meta("Failed to delete tags", error)
+                    .for_resource(resource_id.clone())
+            })?;
         }
-
+        // EC2 upserts every desired tag, including unchanged values.
+        if let Some(tags) = tags
+            && !tags.is_empty()
+        {
+            let mut req = self.ec2_client.create_tags().resources(ec2_resource_id);
+            for (key, value) in tags {
+                req = req.tags(
+                    carina_aws_types::sdk::ec2::types::Tag::builder()
+                        .key(key)
+                        .value(value)
+                        .build(),
+                );
+            }
+            req.send().await.map_err(|error| {
+                api_error_with_meta("Failed to tag resource", error)
+                    .for_resource(resource_id.clone())
+            })?;
+        }
         Ok(())
     }
 }
@@ -429,7 +425,17 @@ mod tests {
             .apply_ec2_tags(
                 &id,
                 "vpc-12345678",
-                Some(&new_tags),
+                AttributeChange::Set(
+                    crate::send_model::optional_tags(
+                        &{
+                            let mut resource = Resource::from_id(id.clone());
+                            resource.attributes.insert("tags".into(), new_tags);
+                            resource
+                        },
+                        "tags",
+                    )
+                    .unwrap(),
+                ),
                 Some(&HashMap::from([("tags".to_string(), old_tags)])),
             )
             .await

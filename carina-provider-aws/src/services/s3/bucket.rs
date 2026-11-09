@@ -1,3 +1,4 @@
+use crate::helpers::AttributeChange;
 #[cfg(test)]
 use std::collections::HashMap;
 
@@ -318,22 +319,9 @@ impl AwsProvider {
         let input = S3BucketUpdateInput::decode(to)?;
         let crate::send_models_generated::S3BucketUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
 
-        // Update tags: if tags were removed entirely, delete all tags
-        if from.attributes.contains_key("tags") && tags.is_none() {
-            self.s3_client
-                .delete_bucket_tagging()
-                .bucket(bucket_name)
-                .send()
-                .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to delete bucket tags", e).for_resource(id.clone())
-                })?;
-        } else {
-            self.write_s3_bucket_tags(&id, bucket_name, tags.as_ref())
-                .await?;
-        }
+        self.apply_s3_bucket_tags(&id, bucket_name, tags, from)
+            .await?;
 
         Ok(self.read_s3_bucket(&id, identifier).await)
     }
@@ -454,6 +442,40 @@ impl AwsProvider {
                 Ok(empty_map_value())
             }
         }
+    }
+
+    /// Apply tag changes: delete bucket tagging on removal when tags existed
+    /// in state, otherwise put the desired tag set.
+    async fn apply_s3_bucket_tags(
+        &self,
+        id: &ResourceId,
+        bucket_name: &str,
+        change: AttributeChange<Option<crate::send_model::Tags>>,
+        from: &SnapshotState,
+    ) -> ProviderResult<()> {
+        match change {
+            AttributeChange::Removed
+            | AttributeChange::Set(None)
+            | AttributeChange::Unchanged(None) => {
+                if from.attributes.contains_key("tags") {
+                    self.s3_client
+                        .delete_bucket_tagging()
+                        .bucket(bucket_name)
+                        .send()
+                        .await
+                        .map_err(|error| {
+                            api_error_with_meta("Failed to delete bucket tags", error)
+                                .for_resource(id.clone())
+                        })?;
+                }
+            }
+            AttributeChange::Set(Some(tags)) | AttributeChange::Unchanged(Some(tags)) => {
+                let value = crate::send_model::optional_tags_value(Some(tags));
+                self.write_s3_bucket_tags(id, bucket_name, value.as_ref())
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     /// Write S3 bucket tags

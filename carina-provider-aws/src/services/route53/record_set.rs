@@ -682,6 +682,9 @@ impl AwsProvider {
         let alias_target = alias_target.into_inner();
         let resource_records = resource_records.into_inner();
         let ttl = ttl.into_inner();
+        let alias_target = alias_target.resolve(|| Ok(None))?;
+        let resource_records = resource_records.resolve(|| Ok(None))?;
+        let ttl = ttl.resolve(|| Ok(None))?;
         let Some((hosted_zone_id, name, record_type)) = parse_identifier(identifier.as_str())
         else {
             return Err(ProviderError::invalid_input(format!(

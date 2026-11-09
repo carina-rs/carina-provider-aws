@@ -1,3 +1,4 @@
+use crate::helpers::AttributeChange;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
@@ -178,16 +179,10 @@ impl AwsProvider {
         let input = IamRoleUpdateInput::decode(to)?;
         let crate::send_models_generated::IamRoleUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
 
         // Update tags
-        self.apply_iam_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_iam_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
 
         Ok(self.read_iam_role(&id, identifier).await)
     }
@@ -215,24 +210,30 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         role_name: &str,
-        desired: Option<&Value>,
+        desired: AttributeChange<Option<crate::send_model::Tags>>,
         current: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired {
-            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
-            _ => IndexMap::new(),
-        };
         let current_tags = match current.and_then(|c| c.get("tags")) {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
         // Tags to remove
-        let keys_to_remove: Vec<String> = current_tags
-            .keys()
-            .filter(|k| !desired_tags.contains_key(*k))
-            .cloned()
-            .collect();
+        let (desired_tags, keys_to_remove): (_, Vec<String>) = match desired {
+            AttributeChange::Set(tags) | AttributeChange::Unchanged(tags) => {
+                let tags = tags.unwrap_or_default();
+                let removed = current_tags
+                    .keys()
+                    .filter(|key| !tags.contains_key(*key))
+                    .cloned()
+                    .collect();
+                (tags, removed)
+            }
+            AttributeChange::Removed => (
+                crate::send_model::Tags::new(),
+                current_tags.keys().cloned().collect(),
+            ),
+        };
 
         if !keys_to_remove.is_empty() {
             let mut req = self.iam_client.untag_role().role_name(role_name);
@@ -246,23 +247,23 @@ impl AwsProvider {
 
         // Tags to add/update
         let mut tags_to_add = Vec::new();
-        for (key, value) in &desired_tags {
-            if let Value::Concrete(ConcreteValue::String(val)) = value {
-                let should_add = match current_tags.get(key) {
-                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
-                    _ => true,
-                };
-                if should_add {
-                    let tag = carina_aws_types::sdk::iam::types::Tag::builder()
-                        .key(key)
-                        .value(val.expose_plaintext())
-                        .build()
-                        .map_err(|e| {
-                            ProviderError::api_error_caused_by("Failed to build tag", e)
-                                .for_resource(id.clone())
-                        })?;
-                    tags_to_add.push(tag);
+        for (key, val) in &desired_tags {
+            let should_add = match current_tags.get(key) {
+                Some(Value::Concrete(ConcreteValue::String(current_val))) => {
+                    current_val.expose_plaintext() != val.as_str()
                 }
+                _ => true,
+            };
+            if should_add {
+                let tag = carina_aws_types::sdk::iam::types::Tag::builder()
+                    .key(key)
+                    .value(val)
+                    .build()
+                    .map_err(|e| {
+                        ProviderError::api_error_caused_by("Failed to build tag", e)
+                            .for_resource(id.clone())
+                    })?;
+                tags_to_add.push(tag);
             }
         }
 

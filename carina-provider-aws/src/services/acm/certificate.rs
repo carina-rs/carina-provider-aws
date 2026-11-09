@@ -10,6 +10,7 @@
 //! block downstream resources on `status == ISSUED`. See
 //! `examples/acm-cert-with-wait/` for the pattern.
 
+use crate::helpers::AttributeChange;
 use std::collections::HashMap;
 
 use carina_aws_types::sdk::acm::operation::request_certificate::{
@@ -735,8 +736,7 @@ impl AwsProvider {
         let input = AcmCertificateUpdateInput::decode(to)?;
         let crate::send_models_generated::AcmCertificateUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        self.apply_acm_tags(&id, identifier.as_str(), tags.as_ref(), from)
+        self.apply_acm_tags(&id, identifier.as_str(), tags, from)
             .await?;
 
         Ok(())
@@ -751,20 +751,27 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         arn: &str,
-        desired_tags: Option<&Value>,
+        desired_tags: AttributeChange<Option<crate::send_model::Tags>>,
         from: &SnapshotState,
     ) -> ProviderResult<()> {
-        let empty = IndexMap::new();
-        let desired = match desired_tags {
-            Some(Value::Concrete(ConcreteValue::Map(m))) => m,
-            _ => &empty,
-        };
         let current_empty = IndexMap::new();
         let current = match from.attributes.get("tags") {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m,
             _ => &current_empty,
         };
-        let (to_add, to_remove) = compute_tag_diff(desired, current);
+        let (to_add, to_remove) = match desired_tags {
+            AttributeChange::Set(tags) | AttributeChange::Unchanged(tags) => {
+                let value = crate::send_model::optional_tags_value(tags);
+                let empty = IndexMap::new();
+                let desired = if let Some(Value::Concrete(ConcreteValue::Map(tags))) = &value {
+                    tags
+                } else {
+                    &empty
+                };
+                compute_tag_diff(desired, current)
+            }
+            AttributeChange::Removed => (Vec::new(), current.keys().cloned().collect()),
+        };
 
         if !to_add.is_empty() {
             let mut req = self

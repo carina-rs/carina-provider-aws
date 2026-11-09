@@ -127,14 +127,8 @@ impl AwsProvider {
         let input = Ec2EipUpdateInput::decode(to)?;
         let crate::send_models_generated::Ec2EipUpdateParts { tags } = input.into_parts();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
         Ok(self.read_ec2_eip(&id, identifier).await)
     }
 

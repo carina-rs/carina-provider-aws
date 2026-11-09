@@ -1,3 +1,4 @@
+use crate::helpers::AttributeChange;
 use indexmap::IndexMap;
 use std::collections::HashMap;
 
@@ -210,10 +211,11 @@ impl AwsProvider {
         let deletion_protection_enabled = deletion_protection_enabled.into_inner();
         let retention_in_days = retention_in_days.into_inner();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
+        let deletion_protection_enabled =
+            deletion_protection_enabled.resolve(|| Ok(Some(false)))?;
         // Update retention
         match retention_in_days {
-            Some(days) => {
+            AttributeChange::Set(Some(days)) | AttributeChange::Unchanged(Some(days)) => {
                 self.logs_client
                     .put_retention_policy()
                     .log_group_name(identifier.as_str())
@@ -225,7 +227,7 @@ impl AwsProvider {
                             .for_resource(id.clone())
                     })?;
             }
-            None if from.attributes.contains_key("retention_in_days") => {
+            AttributeChange::Removed => {
                 // If retention was previously set but now removed, delete the policy
                 self.logs_client
                     .delete_retention_policy()
@@ -237,7 +239,7 @@ impl AwsProvider {
                             .for_resource(id.clone())
                     })?;
             }
-            _ => {}
+            AttributeChange::Set(None) | AttributeChange::Unchanged(None) => {}
         }
 
         let current_deletion_protection = match from.attributes.get("deletion_protection_enabled") {
@@ -261,13 +263,8 @@ impl AwsProvider {
         }
 
         // Update tags
-        self.apply_logs_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_logs_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
 
         Ok(self.read_logs_log_group(&id, identifier).await)
     }
@@ -295,24 +292,30 @@ impl AwsProvider {
         &self,
         id: &ResourceId,
         log_group_name: &str,
-        desired: Option<&Value>,
+        desired: AttributeChange<Option<crate::send_model::Tags>>,
         current: Option<&HashMap<String, SnapshotValue>>,
     ) -> ProviderResult<()> {
-        let desired_tags = match desired {
-            Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
-            _ => IndexMap::new(),
-        };
         let current_tags = match current.and_then(|c| c.get("tags")) {
             Some(Value::Concrete(ConcreteValue::Map(m))) => m.clone(),
             _ => IndexMap::new(),
         };
 
         // Tags to remove
-        let keys_to_remove: Vec<String> = current_tags
-            .keys()
-            .filter(|k| !desired_tags.contains_key(*k))
-            .cloned()
-            .collect();
+        let (desired_tags, keys_to_remove): (_, Vec<String>) = match desired {
+            AttributeChange::Set(tags) | AttributeChange::Unchanged(tags) => {
+                let tags = tags.unwrap_or_default();
+                let removed = current_tags
+                    .keys()
+                    .filter(|key| !tags.contains_key(*key))
+                    .cloned()
+                    .collect();
+                (tags, removed)
+            }
+            AttributeChange::Removed => (
+                crate::send_model::Tags::new(),
+                current_tags.keys().cloned().collect(),
+            ),
+        };
 
         if !keys_to_remove.is_empty() {
             #[allow(deprecated)]
@@ -330,15 +333,15 @@ impl AwsProvider {
 
         // Tags to add/update
         let mut tags_to_add = HashMap::new();
-        for (key, value) in &desired_tags {
-            if let Value::Concrete(ConcreteValue::String(val)) = value {
-                let should_add = match current_tags.get(key) {
-                    Some(Value::Concrete(ConcreteValue::String(current_val))) => current_val != val,
-                    _ => true,
-                };
-                if should_add {
-                    tags_to_add.insert(key.clone(), val.expose_plaintext().to_string());
+        for (key, val) in &desired_tags {
+            let should_add = match current_tags.get(key) {
+                Some(Value::Concrete(ConcreteValue::String(current_val))) => {
+                    current_val.expose_plaintext() != val.as_str()
                 }
+                _ => true,
+            };
+            if should_add {
+                tags_to_add.insert(key.clone(), val.clone());
             }
         }
 

@@ -248,6 +248,12 @@ impl ReadBackOverrides {
     }
 }
 
+/// Declare a closed enum for exhaustive handling of a nested update struct.
+pub struct NestedUpdateFieldEnum {
+    pub structure: &'static str,
+    pub rust_name: &'static str,
+}
+
 /// Defines how to map an AWS API resource to a Carina schema.
 pub struct ResourceDef {
     /// Portable desired-input rules, emitted on the resource schema unchanged.
@@ -285,6 +291,8 @@ pub struct ResourceDef {
     pub delete_op: &'static str,
     /// Operations that modify existing resources
     pub update_ops: Vec<UpdateOp>,
+    /// Nested Smithy structures whose update fields require exhaustive handling.
+    pub nested_update_field_enums: &'static [NestedUpdateFieldEnum],
     /// Primary identifier field name (e.g., "VpcId")
     pub identifier: &'static str,
     /// Whether this resource supports tags
@@ -1224,6 +1232,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1267,6 +1276,10 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[NestedUpdateFieldEnum {
+                structure: "PrivateDnsNameOptionsOnLaunch",
+                rust_name: "Ec2SubnetDnsField",
+            }],
             read_shape_overrides: vec![],
             // private_dns_name_options_on_launch is a nested struct on the
             // read shape; collapse it into a single Value::Map attribute
@@ -1320,6 +1333,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1354,6 +1368,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1406,6 +1421,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1440,6 +1456,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1502,6 +1519,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1564,6 +1582,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1598,6 +1617,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             // VpcId lives on Attachments[0].VpcId in the read response;
             // there is no top-level VpcId getter on EgressOnlyInternetGateway.
@@ -1648,6 +1668,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1703,6 +1724,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1747,6 +1769,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             // AllocationId lives on NatGatewayAddresses[0].AllocationId in the
             // read response; there is no top-level AllocationId getter on
@@ -1790,6 +1813,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -1827,6 +1851,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             // The TransitGatewayRequestOptions sub-struct on the response
             // is preserved as a nested Map matching the schema struct.
@@ -1881,6 +1906,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![DerivedAttribute {
                 attr: "Options",
@@ -1936,6 +1962,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             // SecurityGroupIds is a write-side input
             // (CreateVpcEndpointRequest.SecurityGroupIds: List<String>) but
@@ -1991,6 +2018,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2026,6 +2054,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             // The peering response carries the requester / accepter VPCs
             // in two parallel `VpcPeeringConnectionVpcInfo` sub-structs;
@@ -2087,6 +2116,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2221,6 +2251,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2261,6 +2292,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2431,6 +2463,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2482,6 +2515,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2551,6 +2585,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2626,6 +2661,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2681,6 +2717,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2734,6 +2771,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2791,6 +2829,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2850,6 +2889,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2902,6 +2942,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -2973,6 +3014,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3023,6 +3065,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3117,6 +3160,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3185,6 +3229,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3275,6 +3320,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             deferred_populate_overrides: vec![],
             deferred_populate_struct_field_overrides: vec![],
             struct_field_type_overrides: vec![],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3450,6 +3496,7 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         // (the CNAME the user must publish), `validation_status`,
         // etc. — the part downstream resources actually want to
         // chain into. carina-rs/carina#3032 trigger lives here.
+        nested_update_field_enums: &[],
         read_shape_overrides: vec!["DomainValidationOptions"],
         derived_attributes: vec![],
     }]
@@ -3526,6 +3573,7 @@ pub fn route53_resources() -> Vec<ResourceDef> {
                 "HostedZoneId",
                 "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
             )],
+            nested_update_field_enums: &[],
             read_shape_overrides: vec![],
             derived_attributes: vec![],
         },
@@ -3611,6 +3659,7 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],
+        nested_update_field_enums: &[],
         read_shape_overrides: vec![],
         derived_attributes: vec![],
     }]
@@ -3671,6 +3720,7 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],
+        nested_update_field_enums: &[],
         read_shape_overrides: vec![],
         derived_attributes: vec![],
     }]
@@ -3934,6 +3984,7 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
         deferred_populate_overrides: vec![],
         deferred_populate_struct_field_overrides: vec![],
         struct_field_type_overrides: vec![],
+        nested_update_field_enums: &[],
         read_shape_overrides: vec![],
         derived_attributes: vec![],
     }]

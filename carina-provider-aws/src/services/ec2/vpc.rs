@@ -290,7 +290,8 @@ impl AwsProvider {
         let enable_dns_hostnames = enable_dns_hostnames.into_inner();
         let enable_dns_support = enable_dns_support.into_inner();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
+        let enable_dns_hostnames = enable_dns_hostnames.resolve(|| Ok(Some(false)))?;
+        let enable_dns_support = enable_dns_support.resolve(|| Ok(Some(true)))?;
         // identifier is the VPC ID (e.g., vpc-12345678)
         let vpc_id = identifier.to_string();
 
@@ -330,7 +331,7 @@ impl AwsProvider {
         }
 
         // Update tags
-        self.apply_ec2_tags(&id, &vpc_id, tags.as_ref(), Some(&from.attributes))
+        self.apply_ec2_tags(&id, &vpc_id, tags, Some(&from.attributes))
             .await?;
 
         Ok(self.read_ec2_vpc(&id, identifier).await)

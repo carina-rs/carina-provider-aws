@@ -1,3 +1,4 @@
+use crate::helpers::AttributeChange;
 use carina_core::provider::{AppliedIdentifier, ReadOutcome};
 use carina_core::provider::{ProviderError, ProviderResult};
 use carina_core::resource::{
@@ -31,11 +32,17 @@ use std::net::Ipv6Addr;
 // an authored DSL spelling.
 
 #[derive(Debug)]
+enum LniChange {
+    Enable(i32),
+    Disable,
+}
+
+#[derive(Debug)]
 struct ModifySubnetAttrs {
     assign_ipv6_address_on_creation: Option<bool>,
     enable_dns64: Option<bool>,
     hostname_type: Option<HostnameType>,
-    enable_lni_at_device_index: Option<i32>,
+    lni: Option<LniChange>,
     map_public_ip_on_launch: Option<bool>,
     enable_resource_name_dns_a_record: Option<bool>,
     enable_resource_name_dns_aaaa_record: Option<bool>,
@@ -93,7 +100,7 @@ fn resolve_modify_subnet_attrs(
             "hostname_type",
         )?
         .map(HostnameType::from),
-        enable_lni_at_device_index,
+        lni: enable_lni_at_device_index.map(LniChange::Enable),
         map_public_ip_on_launch,
         enable_resource_name_dns_a_record: optional_bool_struct_field(
             &projected,
@@ -454,27 +461,103 @@ impl AwsProvider {
         let map_public_ip_on_launch = map_public_ip_on_launch.into_inner();
         let private_dns_name_options_on_launch = private_dns_name_options_on_launch.into_inner();
         let tags = tags.into_inner();
-        let tags = crate::send_model::optional_tags_value(tags);
-        let modify_attrs = resolve_modify_subnet_attrs(
-            &id,
-            schema,
-            assign_ipv6_address_on_creation,
-            enable_dns64,
-            enable_lni_at_device_index.map(i64::from),
-            map_public_ip_on_launch,
-            private_dns_name_options_on_launch.as_ref(),
-        )?;
+        let ipv6_native = |removed_attribute: &str| -> ProviderResult<bool> {
+            let unknown_mode = || {
+                crate::helpers::removal_error(
+                    &id,
+                    removed_attribute,
+                    "Its reset depends on ipv6_native, which is not known in state",
+                )
+            };
+            crate::send_model::decode_change(to, "ipv6_native", |resource| {
+                crate::send_model::optional_bool(resource, "ipv6_native")
+            })?
+            .resolve(|| Err(unknown_mode()))?
+            .ok_or_else(unknown_mode)
+        };
+        let mut modify_attrs = ModifySubnetAttrs {
+            assign_ipv6_address_on_creation: assign_ipv6_address_on_creation
+                .resolve(|| Ok(Some(ipv6_native("assign_ipv6_address_on_creation")?)))?,
+            enable_dns64: enable_dns64.resolve(|| Ok(Some(false)))?,
+            lni: match enable_lni_at_device_index {
+                AttributeChange::Set(value) | AttributeChange::Unchanged(value) => {
+                    value.map(LniChange::Enable)
+                }
+                AttributeChange::Removed => Some(LniChange::Disable),
+            },
+            map_public_ip_on_launch: map_public_ip_on_launch.resolve(|| Ok(Some(false)))?,
+            hostname_type: None,
+            enable_resource_name_dns_a_record: None,
+            enable_resource_name_dns_aaaa_record: None,
+        };
+        // ModifySubnetAttribute requires one call per nested option. Each
+        // removed field explicitly restores its documented DNS mode.
+        let parent = "private_dns_name_options_on_launch";
+        let current = from.attributes.get(parent);
+        let decode_dns_bool = |value: Option<Value>| -> ProviderResult<Option<bool>> {
+            Ok(value.and_then(|value| {
+                if let Value::Concrete(ConcreteValue::Bool(value)) = value {
+                    Some(value)
+                } else {
+                    None
+                }
+            }))
+        };
+        use crate::send_models_generated::Ec2SubnetDnsField;
+        for field in Ec2SubnetDnsField::ALL {
+            let change = crate::send_model::nested_update_field(
+                &id,
+                parent,
+                &private_dns_name_options_on_launch,
+                current,
+                field.name(),
+            )?;
+            match field {
+                Ec2SubnetDnsField::HostnameType => {
+                    let removed_attribute =
+                        if matches!(private_dns_name_options_on_launch, AttributeChange::Removed) {
+                            parent
+                        } else {
+                            "private_dns_name_options_on_launch.hostname_type"
+                        };
+                    modify_attrs.hostname_type = change
+                        .try_map(|value| {
+                            carina_core::resource::enum_attr_at_schema_path(
+                                schema,
+                                parent,
+                                &["hostname_type"],
+                                value.as_ref(),
+                            )
+                            .map(|value| value.map(|value| HostnameType::from(value.api_value())))
+                            .map_err(|error| crate::helpers::enum_attr_error(&id, error))
+                        })?
+                        .resolve(|| {
+                            // Consume historical mode only for hostname removal.
+                            Ok(Some(if ipv6_native(removed_attribute)? {
+                                HostnameType::ResourceName
+                            } else {
+                                HostnameType::IpName
+                            }))
+                        })?;
+                }
+                Ec2SubnetDnsField::EnableResourceNameDnsARecord => {
+                    modify_attrs.enable_resource_name_dns_a_record = change
+                        .try_map(decode_dns_bool)?
+                        .resolve(|| Ok(Some(false)))?;
+                }
+                Ec2SubnetDnsField::EnableResourceNameDnsAaaaRecord => {
+                    modify_attrs.enable_resource_name_dns_aaaa_record = change
+                        .try_map(decode_dns_bool)?
+                        .resolve(|| Ok(Some(false)))?;
+                }
+            }
+        }
 
         self.modify_subnet_attributes(&id, identifier.as_str(), &modify_attrs)
             .await?;
 
-        self.apply_ec2_tags(
-            &id,
-            identifier.as_str(),
-            tags.as_ref(),
-            Some(&from.attributes),
-        )
-        .await?;
+        self.apply_ec2_tags(&id, identifier.as_str(), tags, Some(&from.attributes))
+            .await?;
 
         Ok(self.read_ec2_subnet(&id, identifier).await)
     }
@@ -527,17 +610,28 @@ impl AwsProvider {
                 })?;
         }
 
-        if let Some(device_index) = attrs.enable_lni_at_device_index {
-            self.ec2_client
+        if let Some(change) = &attrs.lni {
+            let req = self
+                .ec2_client
                 .modify_subnet_attribute()
-                .subnet_id(subnet_id)
-                .enable_lni_at_device_index(device_index)
-                .send()
+                .subnet_id(subnet_id);
+            let (req, context) = match change {
+                LniChange::Enable(device_index) => (
+                    req.enable_lni_at_device_index(*device_index),
+                    "Failed to set enable_lni_at_device_index",
+                ),
+                // DisableLniAtDeviceIndex.Value=true disables local network
+                // interfaces at the current position.
+                LniChange::Disable => (
+                    req.disable_lni_at_device_index(
+                        AttributeBooleanValue::builder().value(true).build(),
+                    ),
+                    "Failed to disable enable_lni_at_device_index",
+                ),
+            };
+            req.send()
                 .await
-                .map_err(|e| {
-                    api_error_with_meta("Failed to set enable_lni_at_device_index", e)
-                        .for_resource(id.clone())
-                })?;
+                .map_err(|error| api_error_with_meta(context, error).for_resource(id.clone()))?;
         }
 
         // The ModifySubnetAttribute API only allows modifying one attribute at a time.

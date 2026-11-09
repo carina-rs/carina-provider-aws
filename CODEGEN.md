@@ -154,7 +154,8 @@ capture mappings use the same Smithy-to-snake-case normalization.
 
 For every managed resource, codegen emits `XCreateInput` containing all `Sent`
 attributes and `XUpdateInput` containing the non-create-only subset. Each input
-decodes the desired `Resource` once. Known shapes use typed values—including
+decodes its source: create inputs use the desired `Resource`, while update
+inputs use `UpdateResource`. Known shapes use typed values—including
 `Vec<String>` and string-to-string tag maps—so malformed values fail at this
 boundary instead of being silently ignored.
 
@@ -171,6 +172,14 @@ runs every generated create and update path and looks for the synthesized value
 in the URI, query, or body of a mutating request. General headers and read calls
 are excluded; modeled `@httpHeader` inputs require an explicit mapping and an
 exact header-name/value match because those values have no URI/query/body form.
+
+Optional update parts use `Sent<AttributeChange<T>>`, preserving `Set`, `Removed`,
+and `Unchanged`; required update fields use `decode_required` and remain
+`Sent<T>`. After `into_inner()`, the handler must handle `Removed` explicitly
+through a match or a `resolve` callback and choose a reset value, a delete call,
+or a typed `removal_error`. Removal must have the same effect as create-time
+omission. If no reset is documented, return
+`removal_error`.
 
 ### Step 3: Register in Codegen
 
