@@ -8,7 +8,7 @@ use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
-use crate::error_helpers::api_error_with_meta;
+use crate::error_helpers::{AwsItemFailures, api_error_with_item_failure, api_error_with_meta};
 use crate::helpers::{
     RetryPolicy, build_tag_specification_with_create_token, retry_aws_operation_with_token,
 };
@@ -16,6 +16,8 @@ use crate::provider::{AwsCreateAttempt, TaggedEc2Create};
 use crate::read_model::{empty_map_value, found_managed_read};
 use crate::read_models_generated::Ec2VpcEndpointReadModelSupplement;
 use crate::send_models_generated::{Ec2VpcEndpointCreateInput, Ec2VpcEndpointUpdateInput};
+use aws_types::request_id::RequestId;
+use carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError;
 
 fn decode_endpoint_policy(id: &ResourceId, raw: Option<&str>) -> ProviderResult<Option<Value>> {
     raw.map(crate::services::iam::role::iam_policy_json_to_value)
@@ -276,16 +278,13 @@ impl AwsProvider {
             })?;
 
         // Check for unsuccessful items
-        if let Some(err) = result.unsuccessful().first() {
-            let msg = err
-                .error()
-                .and_then(|e| e.message())
-                .unwrap_or("unknown error");
-            return Err(ProviderError::api_error(format!(
-                "Failed to delete VPC endpoint: {}",
-                msg
-            ))
-            .for_resource(id.clone()));
+        if let Some(failures) = AwsItemFailures::from_items(result.unsuccessful()) {
+            return Err(api_error_with_item_failure::<DeleteVpcEndpointsError>(
+                "Failed to delete VPC endpoint",
+                failures,
+                result.request_id(),
+            )
+            .for_resource(id));
         }
 
         Ok(())
@@ -297,6 +296,57 @@ mod tests {
     use super::*;
     use crate::services::iam::role::IamPolicyDecodeError;
     use carina_core::provider::ProviderErrorKind;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn delete_vpc_endpoints_keeps_typed_item_failure() {
+        use crate::error_helpers::AwsItemFailures;
+        use crate::test_http::provider;
+
+        const AWS_MESSAGE: &str = "private VPC endpoint per-item diagnostic";
+        const AWS_CODE: &str = "InvalidVpcEndpointState";
+
+        let (provider, responses) = provider([(
+            200,
+            format!(
+                r#"<DeleteVpcEndpointsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><unsuccessful><item><resourceId>vpce-b</resourceId><error><code>{AWS_CODE}</code><message>{AWS_MESSAGE}</message></error></item></unsuccessful></DeleteVpcEndpointsResponse>"#
+            ),
+        )]);
+        let id = ResourceId::with_provider_identity("aws", "ec2.VpcEndpoint", "test", None);
+        let error = provider
+            .delete_ec2_vpc_endpoint(
+                id,
+                &AppliedIdentifier::new("vpce-0123456789abcdef0").unwrap(),
+            )
+            .await
+            .unwrap_err();
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].contains("Action=DeleteVpcEndpoints"));
+        responses.assert_finished();
+        assert_eq!(error.detail().context(), "Failed to delete VPC endpoint");
+        let wire = error.to_wire();
+        assert_eq!(wire.operation.as_deref(), Some("ec2.DeleteVpcEndpoints"));
+        assert_eq!(wire.request_id.as_deref(), Some("test-request"));
+        assert!(error.to_string().contains("vpce-b"));
+        assert_eq!(
+            error.detail().code().as_ref().map(|code| code.as_str()),
+            Some(AWS_CODE)
+        );
+        assert!(
+            error
+                .detail()
+                .cause()
+                .expect("typed item failure")
+                .as_cause()
+                .matches_for_test::<AwsItemFailures>(|failures| failures.iter().count() == 1
+                    && failures.first().code() == Some(AWS_CODE)
+                    && failures.first().message() == Some(AWS_MESSAGE))
+        );
+    }
 
     #[test]
     fn endpoint_read_policy_decode_failure_keeps_its_typed_cause() {

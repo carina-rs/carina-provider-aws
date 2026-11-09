@@ -15,7 +15,29 @@ use super::{FinalAttempt, SendClassification, Transience};
 // Keep the provider's existing carve-out alongside the SDK classifier.
 const S3_RETRYABLE_ERROR_CODES: &[&str] = &["RequestTimeout", "SlowDown", "OperationAborted"];
 
+// Successful batch responses have no per-item HTTP status or modeled retry kind.
+const SERVER_ERROR_CODES: &[&str] = &[
+    "InternalError",
+    "InternalFailure",
+    "ServiceUnavailable",
+    "Unavailable",
+];
+
 impl Transience {
+    /// Classify a per-item AWS error code without HTTP status or a modeled retry kind.
+    pub fn of_code(code: Option<&str>) -> Self {
+        if code.is_some_and(|code| {
+            THROTTLING_ERRORS.contains(&code)
+                || TRANSIENT_ERRORS.contains(&code)
+                || S3_RETRYABLE_ERROR_CODES.contains(&code)
+                || SERVER_ERROR_CODES.contains(&code)
+        }) {
+            Self::Transient
+        } else {
+            Self::Permanent
+        }
+    }
+
     /// Classify an SDK failure independently of mutation resend safety.
     ///
     /// Guard-proven final-attempt transience takes precedence. Otherwise use
@@ -96,6 +118,7 @@ mod tests {
         for (status, code, expected) in [
             (403, "AccessDenied", Transience::Permanent),
             (400, "ValidationException", Transience::Permanent),
+            (400, "Unavailable", Transience::Permanent),
             (400, "ThrottlingException", Transience::Transient),
             (400, "RequestTimeout", Transience::Transient),
             (409, "OperationAborted", Transience::Transient),
@@ -108,6 +131,31 @@ mod tests {
                 response(status),
             );
             assert_eq!(Transience::of(&error), expected, "{status} {code}");
+        }
+    }
+
+    #[test]
+    fn server_item_codes_match_sdk_server_errors() {
+        for (status, code) in [
+            (500, "InternalError"),
+            (500, "InternalFailure"),
+            (503, "ServiceUnavailable"),
+            (503, "Unavailable"),
+        ] {
+            let sdk = SdkError::service_error(
+                ErrorMetadata::builder().code(code).build(),
+                response(status),
+            );
+            assert_eq!(
+                Transience::of(&sdk),
+                Transience::Transient,
+                "{status} {code}"
+            );
+            assert_eq!(
+                Transience::of_code(Some(code)),
+                Transience::of(&sdk),
+                "{code}"
+            );
         }
     }
 

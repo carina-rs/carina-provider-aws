@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use aws_smithy_runtime_api::client::result::SdkError;
-use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use aws_smithy_types::retry::ProvideErrorKind;
 use carina_aws_types::sdk::ec2::types::{ResourceType, Tag, TagSpecification};
@@ -319,15 +318,6 @@ pub enum DeletePoll {
     Pending,
     /// The resource no longer exists.
     Gone,
-}
-
-/// Format an AWS SDK error with the full error chain.
-///
-/// Uses `DisplayErrorContext` to walk the source chain, producing messages like:
-/// `ChangeResourceRecordSets failed: service error: InvalidChangeBatch: ...`
-/// instead of the unhelpful `ChangeResourceRecordSets failed: service error`.
-pub fn sdk_error_message(context: &str, err: &(impl std::error::Error + 'static)) -> String {
-    format!("{}: {}", context, DisplayErrorContext(err))
 }
 
 /// Exponential-backoff retry budget for [`retry_aws_operation`].
@@ -1363,7 +1353,23 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_error_message_includes_full_chain() {
+    fn sdk_builder_error_retains_source_chain() {
+        use aws_smithy_types::error::operation::BuildError;
+        use carina_core::provider_text::ProviderDiagnostic;
+
+        let builder = BuildError::other(std::io::Error::other("builder source witness"));
+        let error = ProviderError::api_error_caused_by("Failed to build tag", builder);
+        let diagnostic = ProviderDiagnostic::new(error.clone());
+        assert!(diagnostic.source_is::<BuildError>());
+        assert!(diagnostic.source_is::<std::io::Error>());
+        let host =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+        assert_eq!(host.detail().context(), "Failed to build tag");
+        assert!(host.to_string().contains("builder source witness"));
+    }
+
+    #[test]
+    fn caused_by_renders_full_chain() {
         // Simulate a chained error: outer wraps inner
         #[derive(Debug)]
         struct InnerError;
@@ -1389,12 +1395,10 @@ mod tests {
 
         let err = OuterError(InnerError);
 
-        // Without DisplayErrorContext, we'd get "ChangeResourceRecordSets failed: service error"
-        let bad = format!("ChangeResourceRecordSets failed: {}", err);
-        assert_eq!(bad, "ChangeResourceRecordSets failed: service error");
-
-        // With our helper, the full chain is included
-        let good = sdk_error_message("ChangeResourceRecordSets failed", &err);
+        let error = ProviderError::api_error_caused_by("ChangeResourceRecordSets failed", err);
+        let good =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string();
         assert!(
             good.contains("InvalidChangeBatch"),
             "expected full chain, got: {}",
@@ -1403,7 +1407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_error_message_single_error() {
+    fn caused_by_renders_single_error() {
         #[derive(Debug)]
         struct SimpleError;
         impl std::fmt::Display for SimpleError {
@@ -1413,7 +1417,10 @@ mod tests {
         }
         impl std::error::Error for SimpleError {}
 
-        let msg = sdk_error_message("CreateBucket failed", &SimpleError);
+        let error = ProviderError::api_error_caused_by("CreateBucket failed", SimpleError);
+        let msg =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string();
         assert!(
             msg.starts_with("CreateBucket failed: something went wrong"),
             "expected context + message, got: {}",

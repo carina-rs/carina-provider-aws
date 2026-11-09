@@ -30,6 +30,8 @@ mod send_contract_test;
 mod send_model;
 mod send_models_generated;
 pub mod services;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod test_http;
 #[cfg(test)]
 mod tests;
 

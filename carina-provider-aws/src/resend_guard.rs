@@ -250,7 +250,10 @@ mod tests {
             classification,
             SendClassification::NotSent(Transience::Permanent)
         );
-        let rendered = crate::helpers::sdk_error_message("GetCallerIdentity failed", &error);
+        let error = crate::error_helpers::api_error_with_meta("GetCallerIdentity failed", error);
+        let rendered =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string();
         assert!(
             rendered.contains("test credentials unavailable"),
             "{rendered}"
@@ -413,7 +416,10 @@ mod tests {
             .expect_err("the resend guard must refuse the ambiguous retry");
         // This is the same source-chain rendering used by provider call sites;
         // `SdkError`'s own Display intentionally prints only its outer variant.
-        let rendered = crate::helpers::sdk_error_message("CreateVpc failed", &error);
+        let error = crate::error_helpers::api_error_with_meta("CreateVpc failed", error);
+        let rendered =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string();
 
         assert_eq!(connector.requests().len(), 1);
         assert!(rendered.contains("InternalError"), "{rendered}");

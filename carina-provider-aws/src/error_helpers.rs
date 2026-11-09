@@ -11,13 +11,10 @@
 //! `api_error_with_meta` helper here is the provider-side one-shot
 //! constructor.
 //!
-//! `helpers::sdk_error_message` is intentionally left in place; it
-//! still serves call sites that hand off non-SDK errors (builder
-//! errors from AWS SDK type-state builders, JSON encode errors,
-//! validator failures). Those don't implement `ProvideErrorMetadata`
-//! and have no HTTP-response shape — for them the host renderer's
-//! fallback path (PR carina-rs/carina#3247, design D5) handles the
-//! display correctly.
+//! Errors without an HTTP response or `ProvideErrorMetadata` (such as SDK
+//! builder errors) use `ProviderError::*_caused_by` directly. Their context
+//! contains only provider-authored text, and the typed cause preserves the
+//! source chain for the host renderer.
 //!
 //! Scope: `pub(crate)` on purpose. carina-provider-awscc faces the
 //! same shape and would copy this helper verbatim — but that goes
@@ -27,7 +24,7 @@
 //! promoting it to `pub` here.
 
 use carina_core::provider::ProviderError;
-use carina_core::provider_text::Retryability;
+use carina_core::provider_text::{ProviderContext, Retryability};
 use thiserror::Error;
 
 use carina_aws_types::{Idempotency, SendClassification, Transience};
@@ -48,6 +45,201 @@ pub(crate) type AwsSdkError<E> = aws_smithy_runtime_api::client::result::SdkErro
     E,
     aws_smithy_runtime_api::client::orchestrator::HttpResponse,
 >;
+
+/// An AWS per-item rejection. Empty codes are absent; messages stay as returned.
+#[derive(Debug)]
+pub(crate) struct AwsItemFailure {
+    resource_id: Option<String>,
+    code: Option<String>,
+    message: Option<String>,
+}
+
+impl AwsItemFailure {
+    pub(crate) fn code(&self) -> Option<&str> {
+        self.code.as_deref()
+    }
+
+    pub(crate) fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+}
+
+impl From<&carina_aws_types::sdk::ec2::types::UnsuccessfulItem> for AwsItemFailure {
+    fn from(item: &carina_aws_types::sdk::ec2::types::UnsuccessfulItem) -> Self {
+        Self {
+            resource_id: item.resource_id().map(str::to_owned),
+            code: item
+                .error()
+                .and_then(|error| error.code())
+                .filter(|code| !code.is_empty())
+                .map(str::to_owned),
+            message: item
+                .error()
+                .and_then(|error| error.message())
+                .map(str::to_owned),
+        }
+    }
+}
+
+impl std::fmt::Display for AwsItemFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(resource_id) = &self.resource_id {
+            write!(f, "{resource_id}: ")?;
+        }
+        match (
+            self.code(),
+            self.message().filter(|message| !message.is_empty()),
+        ) {
+            (Some(code), Some(message)) => write!(f, "{code}: {message}"),
+            (Some(code), None) => f.write_str(code),
+            (None, Some(message)) => f.write_str(message),
+            (None, None) => f.write_str("no message"),
+        }
+    }
+}
+
+impl std::error::Error for AwsItemFailure {}
+
+/// Every unsuccessful item from an AWS response, guaranteed to be non-empty.
+#[derive(Debug)]
+pub(crate) struct AwsItemFailures {
+    first: AwsItemFailure,
+    rest: Vec<AwsItemFailure>,
+}
+
+impl AwsItemFailures {
+    pub(crate) fn from_items(
+        items: &[carina_aws_types::sdk::ec2::types::UnsuccessfulItem],
+    ) -> Option<Self> {
+        let (first, rest) = items.split_first()?;
+        Some(Self {
+            first: first.into(),
+            rest: rest.iter().map(AwsItemFailure::from).collect(),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn first(&self) -> &AwsItemFailure {
+        &self.first
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &AwsItemFailure> {
+        std::iter::once(&self.first).chain(self.rest.iter())
+    }
+
+    fn classification(&self) -> AwsErrorClass {
+        if self
+            .iter()
+            .all(|failure| failure.code().is_some_and(is_not_found_error_code))
+        {
+            AwsErrorClass::NotFound
+        } else if self.iter().all(|failure| {
+            failure.code().is_some_and(|code| {
+                is_not_found_error_code(code)
+                    || Transience::of_code(Some(code)) == Transience::Transient
+            })
+        }) {
+            AwsErrorClass::Transient
+        } else {
+            AwsErrorClass::Permanent
+        }
+    }
+
+    fn code(&self) -> Option<&str> {
+        self.iter()
+            .filter_map(AwsItemFailure::code)
+            .min_by_key(|&code| {
+                let tier = if is_not_found_error_code(code) {
+                    2
+                } else if Transience::of_code(Some(code)) == Transience::Transient {
+                    1
+                } else {
+                    0
+                };
+                (tier, code)
+            })
+    }
+}
+
+impl std::fmt::Display for AwsItemFailures {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.first)?;
+        for failure in &self.rest {
+            write!(f, "; {failure}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for AwsItemFailures {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AwsErrorClass {
+    NotFound,
+    Transient,
+    Permanent,
+}
+
+/// Attach all per-item AWS diagnostics beneath a provider-authored context.
+pub(crate) fn api_error_with_item_failure<E: DecidedOperationError>(
+    context: impl Into<ProviderContext>,
+    failures: AwsItemFailures,
+    request_id: Option<&str>,
+) -> ProviderError {
+    let class = failures.classification();
+    item_failure_error::<E>(context, failures, request_id, class)
+}
+
+/// Some items were created, so the issued operation must never be retried or
+/// treated as missing. Keep the item codes as diagnostics only.
+pub(crate) fn api_error_with_partial_item_failure<E: DecidedOperationError>(
+    context: impl Into<ProviderContext>,
+    failures: AwsItemFailures,
+    request_id: Option<&str>,
+) -> ProviderError {
+    item_failure_error::<E>(context, failures, request_id, AwsErrorClass::Permanent)
+}
+
+fn item_failure_error<E: DecidedOperationError>(
+    context: impl Into<ProviderContext>,
+    failures: AwsItemFailures,
+    request_id: Option<&str>,
+    class: AwsErrorClass,
+) -> ProviderError {
+    let code = failures.code().map(str::to_owned);
+    let retryability = match class {
+        AwsErrorClass::Transient => Retryability::Transient,
+        AwsErrorClass::NotFound | AwsErrorClass::Permanent => Retryability::Unclassified,
+    };
+    let mut error = api_error_with_code(context, code, None, class, retryability, failures)
+        .with_operation(E::NAME);
+    if let Some(request_id) = request_id {
+        error = error.with_request_id(request_id);
+    }
+    error
+}
+
+fn api_error_with_code(
+    context: impl Into<ProviderContext>,
+    code: Option<String>,
+    status: Option<u16>,
+    class: AwsErrorClass,
+    retryability: Retryability,
+    cause: impl std::error::Error + Send + Sync + 'static,
+) -> ProviderError {
+    let mut error = if class == AwsErrorClass::NotFound {
+        ProviderError::not_found_caused_by(context, cause)
+    } else {
+        ProviderError::api_error_caused_by(context, cause)
+    };
+    if let Some(status) = status {
+        error = error.with_status(status);
+    }
+    if let Some(code) = code {
+        error = error.with_code(code);
+    }
+    error.with_retryability(retryability)
+}
 
 /// A failed send together with its complete send classification.
 ///
@@ -202,8 +394,8 @@ where
 /// ```
 ///
 /// `context` is the per-operation human-readable header (the same
-/// string the legacy `sdk_error_message` used, e.g. `"Failed to list
-/// IAM roles"`). It remains the first-line `ProviderError` context.
+/// string, e.g. `"Failed to list IAM roles"`). It remains the first-line
+/// `ProviderError` context.
 /// The AWS-side message lives in the typed cause and is omitted there
 /// when the SDK source chain already renders it.
 ///
@@ -211,7 +403,10 @@ where
 /// transport-level diagnostics (DNS, TLS, network timeouts — none of
 /// which populate the HTTP-response fields) still reach the operator
 /// via the renderer's appended `cause:` line.
-pub(crate) fn api_error_with_meta<F>(context: &'static str, failure: F) -> ProviderError
+pub(crate) fn api_error_with_meta<F>(
+    context: impl Into<ProviderContext>,
+    failure: F,
+) -> ProviderError
 where
     F: IntoSendFailure,
     F::Error: std::error::Error
@@ -257,7 +452,7 @@ where
 }
 
 fn api_error_with_meta_cause<E, Cause>(
-    context: &'static str,
+    context: impl Into<ProviderContext>,
     classification: SendClassification,
     err: AwsSdkError<E>,
     make_cause: impl FnOnce(AwsServiceMessage, AwsSdkError<E>) -> Cause,
@@ -287,32 +482,34 @@ where
     let aws_message = AwsServiceMessage::new(err.message().map(str::to_owned), &err);
     let request_id = err.request_id().map(str::to_owned);
     let transience = Transience::of(&err);
-    let cause = make_cause(aws_message, err);
-
-    let not_found = code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404);
-    let mut pe = if append_outcome_unknown {
-        let cause = OutcomeUnknownCause { source: cause };
-        if not_found {
-            ProviderError::not_found_caused_by(context, cause)
-        } else {
-            ProviderError::api_error_caused_by(context, cause)
-        }
-    } else if not_found {
-        ProviderError::not_found_caused_by(context, cause)
-    } else {
-        ProviderError::api_error_caused_by(context, cause)
-    }
-    .with_operation(operation)
-    .with_retryability(match transience {
+    // SDK retryability is independent of kind: a NotFound response can still
+    // carry a transient modeled error, code, or HTTP status.
+    let retryability = match transience {
         Transience::Transient => Retryability::Transient,
         Transience::Permanent => Retryability::Unclassified,
-    });
-    if let Some(s) = status {
-        pe = pe.with_status(s);
+    };
+    let class = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
+        AwsErrorClass::NotFound
+    } else if transience == Transience::Transient {
+        AwsErrorClass::Transient
+    } else {
+        AwsErrorClass::Permanent
+    };
+    let cause = make_cause(aws_message, err);
+
+    let mut pe = if append_outcome_unknown {
+        api_error_with_code(
+            context,
+            code,
+            status,
+            class,
+            retryability,
+            OutcomeUnknownCause { source: cause },
+        )
+    } else {
+        api_error_with_code(context, code, status, class, retryability, cause)
     }
-    if let Some(c) = code {
-        pe = pe.with_code(c);
-    }
+    .with_operation(operation);
     if let Some(id) = request_id {
         pe = pe.with_request_id(id);
     }
@@ -351,15 +548,484 @@ fn is_not_found_error_code(code: &str) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn unsuccessful_item(
+    resource_id: Option<&str>,
+    code: Option<&str>,
+    message: Option<&str>,
+) -> carina_aws_types::sdk::ec2::types::UnsuccessfulItem {
+    use carina_aws_types::sdk::ec2::types::{UnsuccessfulItem, UnsuccessfulItemError};
+
+    UnsuccessfulItem::builder()
+        .set_resource_id(resource_id.map(str::to_owned))
+        .set_error((code.is_some() || message.is_some()).then(|| {
+            UnsuccessfulItemError::builder()
+                .set_code(code.map(str::to_owned))
+                .set_message(message.map(str::to_owned))
+                .build()
+        }))
+        .build()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use aws_smithy_runtime_api::http::{Response, StatusCode};
     use aws_smithy_types::body::SdkBody;
     use aws_smithy_types::error::metadata::ErrorMetadata;
+    use carina_aws_types::sdk::ec2::operation::delete_flow_logs::DeleteFlowLogsError;
     use carina_aws_types::sdk::iam::error::SdkError;
     use carina_aws_types::sdk::iam::operation::list_roles::ListRolesError;
     use carina_aws_types::sdk::iam::types::error::ServiceFailureException;
     use carina_core::provider::HostError as CoreProviderError;
+
+    #[test]
+    fn item_failure_preserves_optional_aws_data() {
+        for (code, message) in [
+            (None, None),
+            (Some("403"), None),
+            (None, Some("AWS diagnostic")),
+            (Some(""), Some("")),
+            (Some("InvalidParameterValue"), Some("AWS diagnostic")),
+        ] {
+            let item = unsuccessful_item(None, code, message);
+            let failure = AwsItemFailure::from(&item);
+            assert_eq!(failure.code(), code.filter(|code| !code.is_empty()));
+            assert_eq!(failure.message(), message);
+            assert_eq!(failure.resource_id, None);
+        }
+        let failure = AwsItemFailure::from(&unsuccessful_item(None, None, None));
+        assert_eq!(failure.code(), None);
+        assert_eq!(failure.message(), None);
+    }
+
+    #[test]
+    fn item_failures_require_at_least_one_item() {
+        assert!(AwsItemFailures::from_items(&[]).is_none());
+        let failures = AwsItemFailures::from_items(&[unsuccessful_item(None, None, None)]).unwrap();
+        assert_eq!(failures.iter().count(), 1);
+        assert!(failures.first().code().is_none());
+        assert!(failures.first().message().is_none());
+    }
+
+    #[test]
+    fn item_failure_preserves_aws_resource_id() {
+        let item = unsuccessful_item(
+            Some("vpc-b"),
+            Some("DependencyViolation"),
+            Some("still in use"),
+        );
+        let failure = AwsItemFailure::from(&item);
+        assert_eq!(failure.resource_id.as_deref(), Some("vpc-b"));
+        assert_eq!(failure.code(), Some("DependencyViolation"));
+        assert_eq!(failure.message(), Some("still in use"));
+        assert_eq!(
+            failure.to_string(),
+            "vpc-b: DependencyViolation: still in use"
+        );
+    }
+
+    #[test]
+    fn item_failures_display_every_code_and_optional_message() {
+        let items = [
+            (
+                Some("vpc-a"),
+                Some("InvalidParameterValue"),
+                Some("bad input"),
+            ),
+            (Some("vpc-b"), Some("DependencyViolation"), None),
+            (None, Some("RequestLimitExceeded"), Some("try later")),
+            (None, Some("403"), None),
+            (None, Some("403"), Some("")),
+            (None, None, Some("AWS diagnostic")),
+            (None, None, None),
+            (Some("vpc-c"), None, Some("")),
+        ]
+        .map(|(resource_id, code, message)| unsuccessful_item(resource_id, code, message));
+        let failures = AwsItemFailures::from_items(&items).unwrap();
+        assert_eq!(
+            failures.to_string(),
+            "vpc-a: InvalidParameterValue: bad input; vpc-b: DependencyViolation; RequestLimitExceeded: try later; 403; 403; AWS diagnostic; no message; vpc-c: no message"
+        );
+    }
+
+    #[test]
+    fn item_failures_code_skips_uncoded_and_prefers_non_not_found() {
+        const NOT_FOUND: &str = "InvalidFlowLogId.NotFound";
+        for (codes, expected, class) in [
+            (
+                [Some(NOT_FOUND), None, Some("DependencyViolation")],
+                Some("DependencyViolation"),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [None, Some(NOT_FOUND), None],
+                Some(NOT_FOUND),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [Some(NOT_FOUND), None, Some(NOT_FOUND)],
+                Some(NOT_FOUND),
+                AwsErrorClass::Permanent,
+            ),
+            ([None, Some(""), None], None, AwsErrorClass::Permanent),
+            (
+                [
+                    Some("InvalidParameterValue"),
+                    None,
+                    Some("DependencyViolation"),
+                ],
+                Some("DependencyViolation"),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [Some("RequestLimitExceeded"), None, Some("RequestTimeout")],
+                Some("RequestLimitExceeded"),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [
+                    Some("RequestTimeout"),
+                    Some("RequestLimitExceeded"),
+                    Some("RequestTimeout"),
+                ],
+                Some("RequestLimitExceeded"),
+                AwsErrorClass::Transient,
+            ),
+            (
+                [
+                    Some("InvalidVpcID.NotFound"),
+                    Some(NOT_FOUND),
+                    Some(NOT_FOUND),
+                ],
+                Some(NOT_FOUND),
+                AwsErrorClass::NotFound,
+            ),
+            (
+                [
+                    Some(NOT_FOUND),
+                    Some("RequestLimitExceeded"),
+                    Some(NOT_FOUND),
+                ],
+                Some("RequestLimitExceeded"),
+                AwsErrorClass::Transient,
+            ),
+            (
+                [
+                    Some(NOT_FOUND),
+                    Some("ServiceUnavailable"),
+                    Some("RequestLimitExceeded"),
+                ],
+                Some("RequestLimitExceeded"),
+                AwsErrorClass::Transient,
+            ),
+            (
+                [Some(NOT_FOUND), None, Some("RequestLimitExceeded")],
+                Some("RequestLimitExceeded"),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [
+                    Some("DependencyViolation"),
+                    None,
+                    Some("RequestLimitExceeded"),
+                ],
+                Some("DependencyViolation"),
+                AwsErrorClass::Permanent,
+            ),
+            (
+                [
+                    Some("RequestLimitExceeded"),
+                    None,
+                    Some("DependencyViolation"),
+                ],
+                Some("DependencyViolation"),
+                AwsErrorClass::Permanent,
+            ),
+        ] {
+            let items = codes.map(|code| unsuccessful_item(None, code, None));
+            let failures = AwsItemFailures::from_items(&items).unwrap();
+            assert_eq!(
+                (failures.code(), failures.classification()),
+                (expected, class),
+                "{codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn item_failures_classification_is_order_independent() {
+        use carina_core::provider::ProviderErrorKind;
+
+        for (codes, expected_code, transient) in [
+            (
+                ["RequestLimitExceeded", "InvalidParameterValue"],
+                "InvalidParameterValue",
+                false,
+            ),
+            (
+                ["DependencyViolation", "InvalidParameterValue"],
+                "DependencyViolation",
+                false,
+            ),
+            (
+                ["InvalidFlowLogId.NotFound", "RequestLimitExceeded"],
+                "RequestLimitExceeded",
+                true,
+            ),
+            (
+                ["InvalidParameterValue", "AccessDenied"],
+                "AccessDenied",
+                false,
+            ),
+        ] {
+            let [first, reversed] = [codes, [codes[1], codes[0]]].map(|codes| {
+                let items = codes.map(|code| unsuccessful_item(None, Some(code), None));
+                let error = api_error_with_item_failure::<DeleteFlowLogsError>(
+                    "Failed batch",
+                    AwsItemFailures::from_items(&items).unwrap(),
+                    None,
+                );
+                assert_eq!(error.kind(), ProviderErrorKind::ApiError, "{codes:?}");
+                assert_eq!(error.is_transient(), transient, "{codes:?}");
+                if !codes.contains(&"DependencyViolation") {
+                    assert!(!error.is_delete_dependency(), "{codes:?}");
+                }
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
+                assert_eq!(
+                    error.detail().code().as_ref().map(|code| code.as_str()),
+                    Some(expected_code),
+                    "{codes:?}"
+                );
+                (
+                    error.is_delete_dependency(),
+                    error.detail().code().map(|code| code.as_str().to_owned()),
+                    error.kind(),
+                    error.retryability(),
+                )
+            });
+            // Core derives dependency from the bound cause text, which contains
+            // every item's code; both orderings must produce the same classification.
+            assert_eq!(first, reversed, "{codes:?}");
+        }
+    }
+
+    #[test]
+    fn item_failures_classify_all_items_and_keep_each_diagnostic() {
+        use carina_core::provider::ProviderErrorKind;
+
+        const NOT_FOUND: &str = "InvalidFlowLogId.NotFound";
+        for (first, second, kind, code, transient) in [
+            (
+                Some(NOT_FOUND),
+                Some(NOT_FOUND),
+                ProviderErrorKind::NotFound,
+                Some(NOT_FOUND),
+                false,
+            ),
+            (
+                Some(NOT_FOUND),
+                Some("DependencyViolation"),
+                ProviderErrorKind::ApiError,
+                Some("DependencyViolation"),
+                false,
+            ),
+            (
+                Some(NOT_FOUND),
+                None,
+                ProviderErrorKind::ApiError,
+                Some(NOT_FOUND),
+                false,
+            ),
+            (
+                Some(NOT_FOUND),
+                Some(""),
+                ProviderErrorKind::ApiError,
+                Some(NOT_FOUND),
+                false,
+            ),
+            (
+                Some("RequestLimitExceeded"),
+                None,
+                ProviderErrorKind::ApiError,
+                Some("RequestLimitExceeded"),
+                false,
+            ),
+            (
+                None,
+                Some(NOT_FOUND),
+                ProviderErrorKind::ApiError,
+                Some(NOT_FOUND),
+                false,
+            ),
+            (
+                None,
+                Some("RequestLimitExceeded"),
+                ProviderErrorKind::ApiError,
+                Some("RequestLimitExceeded"),
+                false,
+            ),
+            (
+                Some("InvalidParameterValue"),
+                Some("RequestLimitExceeded"),
+                ProviderErrorKind::ApiError,
+                Some("InvalidParameterValue"),
+                false,
+            ),
+            (
+                Some("RequestLimitExceeded"),
+                Some(NOT_FOUND),
+                ProviderErrorKind::ApiError,
+                Some("RequestLimitExceeded"),
+                true,
+            ),
+        ] {
+            let items = [
+                (first, "first item diagnostic"),
+                (second, "second item diagnostic"),
+            ]
+            .map(|(code, message)| unsuccessful_item(None, code, Some(message)));
+            let failures = AwsItemFailures::from_items(&items).unwrap();
+            assert_eq!(
+                failures
+                    .iter()
+                    .map(AwsItemFailure::code)
+                    .collect::<Vec<_>>(),
+                [first, second].map(|code| code.filter(|code| !code.is_empty()))
+            );
+            let error =
+                api_error_with_item_failure::<DeleteFlowLogsError>("Failed batch", failures, None);
+            assert_eq!(error.kind(), kind, "{first:?} {second:?}");
+            assert_eq!(error.is_transient(), transient, "{first:?} {second:?}");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+            assert_eq!(
+                error.detail().code().as_ref().map(|code| code.as_str()),
+                code
+            );
+            assert!(
+                error
+                    .detail()
+                    .cause()
+                    .unwrap()
+                    .as_cause()
+                    .matches_for_test::<AwsItemFailures>(|failures| failures.iter().count() == 2)
+            );
+            assert_eq!(error.detail().context(), "Failed batch");
+            let rendered = error.to_string();
+            assert!(rendered.contains("first item diagnostic"), "{rendered}");
+            assert!(rendered.contains("second item diagnostic"), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn partial_item_failure_is_permanent_even_for_not_found_or_transient_codes() {
+        use carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError;
+        use carina_core::provider::ProviderErrorKind;
+
+        for code in [
+            "InvalidVpcID.NotFound",
+            "RequestLimitExceeded",
+            "InvalidParameterValue",
+        ] {
+            let item = unsuccessful_item(None, Some(code), Some("AWS diagnostic"));
+            let error = api_error_with_partial_item_failure::<CreateFlowLogsError>(
+                "CreateFlowLogs created 1 flow log(s), but another item failed",
+                AwsItemFailures::from_items(&[item]).unwrap(),
+                Some("partial-request"),
+            );
+            assert_eq!(error.kind(), ProviderErrorKind::ApiError, "{code}");
+            assert!(!error.is_transient(), "{code}");
+            let error =
+                carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+            let wire = error.to_wire();
+            assert_eq!(wire.code.as_deref(), Some(code));
+            assert_eq!(wire.operation.as_deref(), Some("ec2.CreateFlowLogs"));
+            assert_eq!(wire.request_id.as_deref(), Some("partial-request"));
+            assert!(error.detail().cause().is_some_and(|cause| {
+                cause.is::<AwsItemFailures>()
+                    && cause.to_string() == format!("{code}: AWS diagnostic")
+            }));
+            assert!(!wire.message.contains("AWS diagnostic"));
+        }
+    }
+
+    #[test]
+    fn item_failure_classification_matches_delete_sdk_errors() {
+        use carina_aws_types::sdk::ec2::operation::delete_flow_logs::DeleteFlowLogsError;
+        use carina_aws_types::sdk::ec2::operation::delete_vpc_endpoints::DeleteVpcEndpointsError;
+
+        for (status, code) in [
+            (400, "InvalidFlowLogId.NotFound"),
+            (400, "InvalidVpcEndpointId.NotFound"),
+            (400, "RequestLimitExceeded"),
+            (400, "RequestTimeout"),
+            (400, "SlowDown"),
+            (400, "OperationAborted"),
+            (500, "InternalError"),
+            (500, "InternalFailure"),
+            (503, "ServiceUnavailable"),
+            (503, "Unavailable"),
+            (400, "DependencyViolation"),
+            (400, "InvalidParameterValue"),
+        ] {
+            let sdk_errors = [
+                api_error_with_meta(
+                    "delete flow logs",
+                    operation_service_error_with_meta(
+                        status,
+                        Some(code),
+                        Some("AWS diagnostic"),
+                        DeleteFlowLogsError::generic,
+                    ),
+                ),
+                api_error_with_meta(
+                    "delete VPC endpoints",
+                    operation_service_error_with_meta(
+                        status,
+                        Some(code),
+                        Some("AWS diagnostic"),
+                        DeleteVpcEndpointsError::generic,
+                    ),
+                ),
+            ];
+            for sdk_error in sdk_errors {
+                let item_error = api_error_with_item_failure::<DeleteFlowLogsError>(
+                    "delete items",
+                    AwsItemFailures::from_items(&[unsuccessful_item(
+                        None,
+                        Some(code),
+                        Some("AWS diagnostic"),
+                    )])
+                    .unwrap(),
+                    None,
+                );
+                assert_eq!(item_error.kind(), sdk_error.kind(), "{code}");
+                assert_eq!(
+                    item_error.is_transient(),
+                    sdk_error.is_transient(),
+                    "{code}"
+                );
+                assert_eq!(
+                    item_error.retryability(),
+                    sdk_error.retryability(),
+                    "{code}"
+                );
+                assert_eq!(
+                    item_error.is_throttled(),
+                    sdk_error.is_throttled(),
+                    "{code}"
+                );
+                assert_eq!(
+                    item_error.is_delete_dependency(),
+                    sdk_error.is_delete_dependency(),
+                    "{code}"
+                );
+            }
+        }
+    }
 
     fn list_roles_service_error_with_meta(
         status: u16,
@@ -393,7 +1059,9 @@ mod tests {
             (403, "AccessDenied", Retryability::Unclassified),
             (400, "ValidationException", Retryability::Unclassified),
             (400, "ThrottlingException", Retryability::Transient),
+            (404, "RequestLimitExceeded", Retryability::Transient),
             (429, "Unmodeled", Retryability::Transient),
+            (503, "NoSuchEntity", Retryability::Transient),
             (503, "Unmodeled", Retryability::Transient),
         ] {
             let error = api_error_with_meta(

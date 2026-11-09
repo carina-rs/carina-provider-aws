@@ -567,7 +567,7 @@ impl Ec2TaggedResourceKind {
         }
     }
 
-    fn create_error_context(self) -> &'static str {
+    pub(crate) fn create_error_context(self) -> &'static str {
         match self {
             Self::Vpc => "Failed to create VPC",
             Self::Subnet => "Failed to create subnet",

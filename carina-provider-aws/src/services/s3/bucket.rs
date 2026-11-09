@@ -14,7 +14,7 @@ use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, retry_aws_operation};
 use crate::provider::AwsCreateAttempt;
 use crate::read_model::found_data_source_read;
 use crate::read_model::{empty_map_value, found_managed_read};
@@ -486,7 +486,7 @@ impl AwsProvider {
                 .set_tag_set(Some(tags))
                 .build()
                 .map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to build tagging", &e))
+                    ProviderError::api_error_caused_by("Failed to build tagging", e)
                         .for_resource(id.clone())
                 })?;
 

@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketServerSideEncryptionConfigurationReadModel;
@@ -141,10 +141,10 @@ impl AwsProvider {
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                ProviderError::api_error_caused_by(
                     "Failed to build server-side encryption configuration",
-                    &e,
-                ))
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -242,10 +242,10 @@ fn build_by_default(
         builder = builder.kms_master_key_id(k.expose_plaintext());
     }
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message(
+        ProviderError::api_error_caused_by(
             "Failed to build apply_server_side_encryption_by_default",
-            &e,
-        ))
+            e,
+        )
         .for_resource(id.clone())
     })
 }

@@ -10,7 +10,6 @@ use carina_core::resource::{
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::sdk_error_message;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::IamRoleReadModelSupplement;
@@ -142,7 +141,7 @@ impl AwsProvider {
                         .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
-                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error_caused_by("Failed to build tag", e)
                                 .for_resource(resource.id.clone())
                         })?;
                     req = req.tags(tag);
@@ -259,7 +258,7 @@ impl AwsProvider {
                         .value(val.expose_plaintext())
                         .build()
                         .map_err(|e| {
-                            ProviderError::api_error(sdk_error_message("Failed to build tag", &e))
+                            ProviderError::api_error_caused_by("Failed to build tag", e)
                                 .for_resource(id.clone())
                         })?;
                     tags_to_add.push(tag);

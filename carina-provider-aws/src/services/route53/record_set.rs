@@ -22,7 +22,6 @@ use carina_plugin_sdk::{DesiredInputs, DesiredScalar, DesiredValue, DesiredValue
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::sdk_error_message;
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::Route53RecordSetReadModelSupplement;
@@ -165,7 +164,7 @@ fn build_resource_records(
         .iter()
         .map(|value| {
             ResourceRecord::builder().value(value).build().map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Invalid resource record", &e))
+                ProviderError::api_error_caused_by("Invalid resource record", e)
                     .for_resource(id.clone())
             })
         })
@@ -201,8 +200,7 @@ fn build_alias_target_from_map(
         .evaluate_target_health(evaluate)
         .build()
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Invalid alias_target", &e))
-                .for_resource(id.clone())
+            ProviderError::api_error_caused_by("Invalid alias_target", e).for_resource(id.clone())
         })
 }
 
@@ -254,7 +252,7 @@ fn build_record_set(
     }
 
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build ResourceRecordSet", &e))
+        ProviderError::api_error_caused_by("Failed to build ResourceRecordSet", e)
             .for_resource(id.clone())
     })
 }
@@ -465,15 +463,14 @@ async fn change_record_set(
         .resource_record_set(record_set)
         .build()
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to build change", &e))
-                .for_resource(id.clone())
+            ProviderError::api_error_caused_by("Failed to build change", e).for_resource(id.clone())
         })?;
 
     let batch = ChangeBatch::builder()
         .changes(change)
         .build()
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to build change batch", &e))
+            ProviderError::api_error_caused_by("Failed to build change batch", e)
                 .for_resource(id.clone())
         })?;
 
@@ -779,11 +776,8 @@ impl AwsProvider {
         }
 
         let record_set = builder.build().map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
-                "Failed to build record set for deletion",
-                &e,
-            ))
-            .for_resource(id.clone())
+            ProviderError::api_error_caused_by("Failed to build record set for deletion", e)
+                .for_resource(id.clone())
         })?;
 
         change_record_set(
