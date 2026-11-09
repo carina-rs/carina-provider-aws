@@ -16,7 +16,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketLifecycleConfigurationReadModel;
@@ -146,10 +146,10 @@ impl AwsProvider {
             .set_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
+                ProviderError::api_error_caused_by(
                     "Failed to build BucketLifecycleConfiguration",
-                    &e,
-                ))
+                    e,
+                )
                 .for_resource(id.clone())
             })?;
 
@@ -270,7 +270,7 @@ fn build_rule(
     }
 
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build LifecycleRule", &e))
+        ProviderError::api_error_caused_by("Failed to build LifecycleRule", e)
             .for_resource(id.clone())
     })
 }
@@ -298,8 +298,7 @@ fn build_filter_tag(id: &ResourceId, value: &Value) -> ProviderResult<Tag> {
         }
     };
     Tag::builder().key(key).value(val).build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build filter tag", &e))
-            .for_resource(id.clone())
+        ProviderError::api_error_caused_by("Failed to build filter tag", e).for_resource(id.clone())
     })
 }
 

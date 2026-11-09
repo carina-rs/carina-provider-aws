@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketWebsiteConfigurationReadModel;
@@ -248,11 +248,8 @@ fn build_website_configuration(
                     .suffix(suffix)
                     .build()
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build IndexDocument",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
+                        ProviderError::api_error_caused_by("Failed to build IndexDocument", e)
+                            .for_resource(id.clone())
                     })?,
             );
         }
@@ -276,7 +273,7 @@ fn build_website_configuration(
             };
             config_builder = config_builder.error_document(
                 ErrorDocument::builder().key(key).build().map_err(|e| {
-                    ProviderError::api_error(sdk_error_message("Failed to build ErrorDocument", &e))
+                    ProviderError::api_error_caused_by("Failed to build ErrorDocument", e)
                         .for_resource(id.clone())
                 })?,
             );
@@ -311,11 +308,8 @@ fn build_website_configuration(
                 rb = rb.protocol(Protocol::from(protocol.api_value()));
             }
             config_builder = config_builder.redirect_all_requests_to(rb.build().map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
-                    "Failed to build RedirectAllRequestsTo",
-                    &e,
-                ))
-                .for_resource(id.clone())
+                ProviderError::api_error_caused_by("Failed to build RedirectAllRequestsTo", e)
+                    .for_resource(id.clone())
             })?);
         }
         Some(_) => {

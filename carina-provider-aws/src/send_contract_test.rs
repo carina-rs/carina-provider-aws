@@ -323,9 +323,9 @@ impl MockService for CaptureService {
     }
 }
 
-struct CaptureAttempt;
+pub(crate) struct CaptureAttempt;
 
-struct CaptureIssued {
+pub(crate) struct CaptureIssued {
     identifier: AppliedIdentifier,
 }
 

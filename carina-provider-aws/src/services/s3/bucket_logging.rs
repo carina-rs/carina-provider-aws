@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, enum_attr_error, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketLoggingReadModel;
@@ -156,7 +156,7 @@ impl AwsProvider {
         }
 
         let le = le_builder.build().map_err(|e| {
-            ProviderError::api_error(sdk_error_message("Failed to build LoggingEnabled", &e))
+            ProviderError::api_error_caused_by("Failed to build LoggingEnabled", e)
                 .for_resource(id.clone())
         })?;
 

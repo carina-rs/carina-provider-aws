@@ -16,7 +16,7 @@ use carina_core::resource::{
 
 use crate::AwsProvider;
 use crate::error_helpers::{AwsSdkError, api_error_with_meta_and_subject};
-use crate::helpers::{sdk_error_message, value_as_str};
+use crate::helpers::value_as_str;
 use crate::read_model::found_data_source_read;
 use crate::read_models_generated::IdentitystoreUserDataSourceReadModel;
 use crate::resend_safety_generated::IdentityStoreClient;
@@ -28,7 +28,6 @@ enum IdentityStoreUserSubject {
         identity_store_id: String,
     },
     UserName {
-        user_name: String,
         identity_store_id: String,
     },
 }
@@ -40,10 +39,9 @@ impl fmt::Display for IdentityStoreUserSubject {
                 user_id,
                 identity_store_id,
             } => write!(f, "user '{user_id}' in store '{identity_store_id}'"),
-            Self::UserName {
-                user_name,
-                identity_store_id,
-            } => write!(f, "user_name '{user_name}' in store '{identity_store_id}'"),
+            Self::UserName { identity_store_id } => {
+                write!(f, "user lookup by user_name in store '{identity_store_id}'")
+            }
         }
     }
 }
@@ -64,14 +62,12 @@ fn describe_user_api_error(
 }
 
 fn lookup_user_id_api_error(
-    user_name: &str,
     identity_store_id: &str,
     error: AwsSdkError<GetUserIdError>,
 ) -> ProviderError {
     api_error_with_meta_and_subject(
         "Failed to look up identitystore user_id",
         IdentityStoreUserSubject::UserName {
-            user_name: user_name.to_string(),
             identity_store_id: identity_store_id.to_string(),
         },
         error,
@@ -155,11 +151,8 @@ async fn resolve_user_id(
         .attribute_value(aws_smithy_types::Document::String(user_name.to_string()))
         .build()
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
-                "Failed to build userName lookup request",
-                &e,
-            ))
-            .for_resource(resource.id.clone())
+            ProviderError::api_error_caused_by("Failed to build userName lookup request", e)
+                .for_resource(resource.id.clone())
         })?;
 
     let alt = AlternateIdentifier::UniqueAttribute(unique_attribute);
@@ -171,8 +164,7 @@ async fn resolve_user_id(
         .send()
         .await
         .map_err(|e| {
-            lookup_user_id_api_error(user_name, identity_store_id, e)
-                .for_resource(resource.id.clone())
+            lookup_user_id_api_error(identity_store_id, e).for_resource(resource.id.clone())
         })?;
 
     Ok(resp.user_id().to_string())
@@ -283,6 +275,42 @@ mod tests {
                 "{expected:?} must appear exactly once: {rendered}"
             );
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn lookup_error_omits_user_name_and_keeps_identity_store() {
+        use crate::test_http::provider;
+
+        const USER_NAME: &str = "private-lookup@example.test";
+        const IDENTITY_STORE_ID: &str = "d-store-456";
+
+        let (provider, responses) = provider([(
+            400,
+            r#"{"__type":"AccessDeniedException","message":"lookup denied"}"#.into(),
+        )]);
+        let string = |value: &str| Value::Concrete(ConcreteValue::String(value.to_string().into()));
+        let resource = DataSource::with_provider("aws", "identitystore.User", "test", None)
+            .with_attribute("identity_store_id", string(IDENTITY_STORE_ID))
+            .with_attribute("user_name", string(USER_NAME));
+        let error = resolve_user_id(&provider.identitystore_client, IDENTITY_STORE_ID, &resource)
+            .await
+            .unwrap_err();
+        let rendered =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error)
+                .to_string();
+
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].contains(USER_NAME),
+            "lookup must send the supplied name"
+        );
+        responses.assert_finished();
+        assert!(!rendered.contains(USER_NAME), "{rendered}");
+        assert!(rendered.contains("user lookup by user_name"), "{rendered}");
+        assert_eq!(rendered.matches(IDENTITY_STORE_ID).count(), 1, "{rendered}");
+        assert!(rendered.contains("lookup denied"), "{rendered}");
     }
 
     fn name_block() -> Name {

@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketCorsConfigurationReadModel;
@@ -123,7 +123,7 @@ impl AwsProvider {
             .set_cors_rules(Some(sdk_rules))
             .build()
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to build CorsConfiguration", &e))
+                ProviderError::api_error_caused_by("Failed to build CorsConfiguration", e)
                     .for_resource(id.clone())
             })?;
 
@@ -199,8 +199,7 @@ fn build_rule(id: &ResourceId, rule_value: &Value) -> ProviderResult<CorsRule> {
     }
 
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build CorsRule", &e))
-            .for_resource(id.clone())
+        ProviderError::api_error_caused_by("Failed to build CorsRule", e).for_resource(id.clone())
     })
 }
 

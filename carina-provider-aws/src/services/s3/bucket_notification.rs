@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketNotificationConfigurationReadModel;
@@ -276,7 +276,7 @@ fn build_topic(id: &ResourceId, value: &Value) -> ProviderResult<TopicConfigurat
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build TopicConfiguration", &e))
+        ProviderError::api_error_caused_by("Failed to build TopicConfiguration", e)
             .for_resource(id.clone())
     })
 }
@@ -301,7 +301,7 @@ fn build_queue(id: &ResourceId, value: &Value) -> ProviderResult<QueueConfigurat
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message("Failed to build QueueConfiguration", &e))
+        ProviderError::api_error_caused_by("Failed to build QueueConfiguration", e)
             .for_resource(id.clone())
     })
 }
@@ -331,11 +331,8 @@ fn build_lambda(id: &ResourceId, value: &Value) -> ProviderResult<LambdaFunction
         builder = builder.filter(filter);
     }
     builder.build().map_err(|e| {
-        ProviderError::api_error(sdk_error_message(
-            "Failed to build LambdaFunctionConfiguration",
-            &e,
-        ))
-        .for_resource(id.clone())
+        ProviderError::api_error_caused_by("Failed to build LambdaFunctionConfiguration", e)
+            .for_resource(id.clone())
     })
 }
 

@@ -9,7 +9,7 @@ use carina_core::schema::CompiledResourceSchema;
 
 use crate::AwsProvider;
 use crate::error_helpers::api_error_with_meta;
-use crate::helpers::{RetryPolicy, retry_aws_operation, sdk_error_message};
+use crate::helpers::{RetryPolicy, retry_aws_operation};
 use crate::provider::TypedCreateCompletion;
 use crate::read_model::found_managed_read;
 use crate::read_models_generated::S3BucketOwnershipControlsReadModel;
@@ -126,17 +126,14 @@ impl AwsProvider {
             .object_ownership(ObjectOwnership::from(object_ownership.as_str()))
             .build()
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message(
-                    "Failed to build OwnershipControlsRule",
-                    &e,
-                ))
-                .for_resource(id.clone())
+                ProviderError::api_error_caused_by("Failed to build OwnershipControlsRule", e)
+                    .for_resource(id.clone())
             })?;
         let controls = OwnershipControls::builder()
             .rules(rule)
             .build()
             .map_err(|e| {
-                ProviderError::api_error(sdk_error_message("Failed to build OwnershipControls", &e))
+                ProviderError::api_error_caused_by("Failed to build OwnershipControls", e)
                     .for_resource(id.clone())
             })?;
 

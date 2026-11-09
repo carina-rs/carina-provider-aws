@@ -30,7 +30,7 @@ use carina_plugin_sdk::{DesiredScalar, DesiredValue, DesiredValueMut, DesiredVie
 use crate::AwsProvider;
 use crate::aws_operation::ClientToken;
 use crate::error_helpers::{SendFailure, api_error_with_meta};
-use crate::helpers::{enum_attr_error, sdk_error_message, send_aws_operation_with_token};
+use crate::helpers::{enum_attr_error, send_aws_operation_with_token};
 use crate::provider::CreateCompletion;
 use crate::provider_generated::AcmCertificateReadFields;
 use crate::read_back::{ReadBackKind, ReadBackRequirements};
@@ -222,7 +222,7 @@ fn build_request_certificate_input(
                     .value(value)
                     .build()
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message("Failed to build ACM tag", &e))
+                        ProviderError::api_error_caused_by("Failed to build ACM tag", e)
                             .for_resource(resource.id.clone())
                     })?,
             );
@@ -238,11 +238,8 @@ fn build_request_certificate_input(
         .set_key_algorithm(request_enums.key_algorithm)
         .build()
         .map_err(|e| {
-            ProviderError::api_error(sdk_error_message(
-                "Failed to build RequestCertificate input",
-                &e,
-            ))
-            .for_resource(resource.id.clone())
+            ProviderError::api_error_caused_by("Failed to build RequestCertificate input", e)
+                .for_resource(resource.id.clone())
         })
 }
 
@@ -780,7 +777,7 @@ impl AwsProvider {
                     .value(v)
                     .build()
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message("Failed to build ACM tag", &e))
+                        ProviderError::api_error_caused_by("Failed to build ACM tag", e)
                             .for_resource(id.clone())
                     })?;
                 req = req.tags(tag);
@@ -801,11 +798,8 @@ impl AwsProvider {
                     .key(k)
                     .build()
                     .map_err(|e| {
-                        ProviderError::api_error(sdk_error_message(
-                            "Failed to build ACM tag for removal",
-                            &e,
-                        ))
-                        .for_resource(id.clone())
+                        ProviderError::api_error_caused_by("Failed to build ACM tag for removal", e)
+                            .for_resource(id.clone())
                     })?;
                 req = req.tags(tag);
             }
