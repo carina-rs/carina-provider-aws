@@ -1,4 +1,5 @@
-use std::io::{self, Write};
+use carina_core::provider_text::ProviderDiagnostic;
+use carina_plugin_sdk::{EventLevel, ProviderDiagnostics, ProviderEvent};
 
 use crate::AwsProvider;
 use crate::error_helpers::{IntoSendFailure, api_error_with_meta};
@@ -142,7 +143,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation(RetryPolicy::default(), || {
+        let result = retry_aws_operation(&self.diagnostics, RetryPolicy::default(), || {
             let client = &self.s3_client;
             client
                 .put_bucket_versioning()
@@ -154,7 +155,7 @@ impl AwsProvider {
                 )
         })
         .await;
-        finish_s3_bucket_versioning_suspend(id, identifier, result)
+        finish_s3_bucket_versioning_suspend(&self.diagnostics, id, identifier, result)
     }
 }
 
@@ -181,6 +182,7 @@ fn classify_suspension_error(code: Option<&str>, message: Option<&str>) -> Suspe
 }
 
 fn finish_s3_bucket_versioning_suspend<Failure>(
+    diagnostics: &ProviderDiagnostics,
     id: ResourceId,
     identifier: &str,
     result: Result<
@@ -204,7 +206,7 @@ where
                     // enabled -> versioning suspension rejected. Ignore this
                     // suspension failure so destroy can continue to the parent;
                     // parent deletion can still fail when retained versions exist.
-                    let _ = write_suspension_warning(io::stderr().lock(), identifier);
+                    emit_suspension_warning(diagnostics, identifier);
                     Ok(())
                 }
                 SuspensionErrorKind::Other => Err(api_error_with_meta(
@@ -217,11 +219,23 @@ where
     }
 }
 
-fn write_suspension_warning(mut writer: impl Write, bucket: &str) -> io::Result<()> {
-    writeln!(
-        writer,
-        "Warning: versioning could not be suspended on S3 bucket '{bucket}' because Object Lock is present; deleting the bucket will fail if any object versions remain under retention."
-    )
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Warning: versioning could not be suspended on S3 bucket '{bucket}' because Object Lock is present; deleting the bucket will fail if any object versions remain under retention."
+)]
+struct SuspensionWarning {
+    bucket: String,
+}
+
+fn emit_suspension_warning(diagnostics: &ProviderDiagnostics, bucket: &str) {
+    let diagnostic = ProviderDiagnostic::new(SuspensionWarning {
+        bucket: bucket.to_owned(),
+    });
+    diagnostics.emit(ProviderEvent::diagnostic(
+        EventLevel::Warn,
+        "S3 bucket versioning".into(),
+        &diagnostic,
+    ));
 }
 
 #[cfg(test)]
@@ -246,11 +260,24 @@ mod tests {
 
     #[test]
     fn suspension_warning_states_the_remaining_bucket_deletion_risk() {
-        let mut output = Vec::new();
-
-        write_suspension_warning(&mut output, "locked-bucket").expect("write warning");
-
-        let warning = String::from_utf8(output).expect("warning is UTF-8");
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = output.clone();
+        let session = carina_core::provider::ProviderPlan::state_only()
+            .session_builder("aws", None, None)
+            .with_diagnostic_sink(move |event| {
+                assert_eq!(event.severity(), EventLevel::Warn);
+                assert!(event.diagnostic().is_some());
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(carina_core::provider_text::present_event(&event).to_string());
+            })
+            .build();
+        emit_suspension_warning(
+            &ProviderDiagnostics::from_session(&session),
+            "locked-bucket",
+        );
+        let warning = output.lock().unwrap().join("\n");
         assert!(warning.contains("locked-bucket"), "{warning}");
         assert!(
             warning.contains("versioning could not be suspended"),
@@ -266,7 +293,9 @@ mod tests {
 
     #[test]
     fn object_lock_invalid_bucket_state_allows_versioning_teardown_to_continue() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
         finish_s3_bucket_versioning_suspend(
+            &ProviderDiagnostics::from_session(&session),
             versioning_id(),
             "locked-bucket",
             Err(suspension_service_error(
@@ -279,7 +308,9 @@ mod tests {
 
     #[test]
     fn unrelated_invalid_bucket_state_still_fails_versioning_teardown() {
+        let session = carina_core::provider::ProviderPlan::state_only().session("aws", None, None);
         let error = finish_s3_bucket_versioning_suspend(
+            &ProviderDiagnostics::from_session(&session),
             versioning_id(),
             "unlocked-bucket",
             Err(suspension_service_error(

@@ -188,6 +188,7 @@ fn directory_fixture_defers_creation_rules_until_plan() {
         registry,
         &std::collections::HashSet::from(["aws".into()]),
         context,
+        &mut Vec::new(),
     )
     .unwrap();
     // CLI validate and LSP use this same entry. Without state they cannot

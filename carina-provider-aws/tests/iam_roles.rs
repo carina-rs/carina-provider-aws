@@ -166,6 +166,7 @@ fn validate_iam_roles_name_reference(
         snapshot.schema_registry(),
         &HashSet::from(["aws".to_string()]),
         context,
+        &mut Vec::new(),
     )
     .expect("reference fixture must pass non-reference validation");
     // Value validation skips deferred references; check their declared types too.
@@ -183,6 +184,7 @@ fn validate_iam_roles_name_reference(
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
 }
 

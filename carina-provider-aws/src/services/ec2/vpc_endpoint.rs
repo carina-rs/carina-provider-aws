@@ -176,9 +176,13 @@ impl AwsProvider {
             req = req.configure(|builder| builder.service_region(value));
         }
 
-        let result =
-            retry_aws_operation_with_token(client_token, RetryPolicy::default(), || req.clone())
-                .await;
+        let result = retry_aws_operation_with_token(
+            &self.diagnostics,
+            client_token,
+            RetryPolicy::default(),
+            || req.clone(),
+        )
+        .await;
         self.finish_tagged_ec2_create(
             resource,
             attempt,

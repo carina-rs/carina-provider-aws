@@ -4,11 +4,13 @@ use std::fmt;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use aws_credential_types::Credentials;
-use aws_credential_types::credential_feature::AwsCredentialFeature;
-use aws_credential_types::provider::{self, ProvideCredentials, error::CredentialsError, future};
-use aws_smithy_runtime::client::identity::IdentityCache;
+use aws_credential_types::{
+    Credentials, credential_feature::AwsCredentialFeature, provider::error::CredentialsError,
+};
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
+use carina_plugin_sdk::protected_material::{
+    AwsSessionFuture, AwsSessionMaterial, AwsSessionSource,
+};
 
 use crate::common::ServiceErrorCode;
 use crate::sdk::sts::StsClient;
@@ -130,6 +132,7 @@ impl std::error::Error for AssumeRoleFailure {}
 #[derive(Debug)]
 pub struct GuardedAssumeRoleProvider {
     request: AssumeRoleFluentBuilder,
+    _base: crate::AwsSdkConfig,
     duration_seconds: Result<Option<i32>, std::num::TryFromIntError>,
     in_flight: Mutex<Option<PendingAssumeRole>>,
 }
@@ -138,7 +141,7 @@ impl GuardedAssumeRoleProvider {
     /// Retain the base credentials, region, transport, retry and timeout policy.
     /// An omitted session name uses the SDK's timestamp-based naming convention.
     pub fn new(
-        config: &aws_types::SdkConfig,
+        config: &crate::AwsSdkConfig,
         role_arn: String,
         session_name: Option<String>,
         external_id: Option<String>,
@@ -146,22 +149,22 @@ impl GuardedAssumeRoleProvider {
     ) -> Self {
         let session_name = session_name.unwrap_or_else(|| {
             let now = config
+                .sdk_config()
                 .time_source()
                 .map(|source| source.now())
                 .unwrap_or_else(SystemTime::now);
             format!(
                 "assume-role-provider-{}",
-                now.duration_since(UNIX_EPOCH)
-                    .expect("post epoch")
-                    .as_millis()
+                carina_plugin_sdk::expect_diagnostic(
+                    now.duration_since(UNIX_EPOCH)
+                        .map_err(carina_core::provider_text::ProviderDiagnostic::new)
+                )
+                .as_millis()
             )
         });
         // Match aws-config's AssumeRole provider: do not cache base identities
         // inside STS. The consuming service caches the resulting role identity.
-        let config = config
-            .to_builder()
-            .identity_cache(IdentityCache::no_cache())
-            .build();
+        let config = config.clone().without_identity_cache();
         let client = StsClient::new(&config, sts_idempotency);
         let duration_seconds = session_length
             .map(|duration| i32::try_from(duration.as_secs()))
@@ -174,17 +177,24 @@ impl GuardedAssumeRoleProvider {
                 .role_session_name(session_name)
                 .set_external_id(external_id)
                 .set_duration_seconds(duration_seconds.as_ref().ok().copied().flatten()),
+            _base: config,
             duration_seconds,
             in_flight: Mutex::new(None),
         }
     }
 
-    async fn credentials(&self) -> provider::Result {
+    async fn credentials(&self) -> Result<Credentials, CredentialsError> {
         self.duration_seconds
             .as_ref()
             .map_err(|error| CredentialsError::invalid_configuration(*error))?;
         let pending = {
-            let mut slot = self.in_flight.lock().expect("AssumeRole in-flight lock");
+            let mut slot = self.in_flight.lock().unwrap_or_else(|_| {
+                carina_plugin_sdk::panic_diagnostic(
+                    carina_core::provider_text::ProviderDiagnostic::message(
+                        "AssumeRole in-flight lock poisoned".into(),
+                    ),
+                )
+            });
             // A completed request is never a credentials cache. Another waiter
             // may have completed it before reaching the cleanup below.
             if slot
@@ -212,7 +222,13 @@ impl GuardedAssumeRoleProvider {
         // needed: the next waiter polls that same future.
         let result = pending.clone().await;
         {
-            let mut slot = self.in_flight.lock().expect("AssumeRole in-flight lock");
+            let mut slot = self.in_flight.lock().unwrap_or_else(|_| {
+                carina_plugin_sdk::panic_diagnostic(
+                    carina_core::provider_text::ProviderDiagnostic::message(
+                        "AssumeRole in-flight lock poisoned".into(),
+                    ),
+                )
+            });
             // A late waiter must not clear a newer request's slot.
             if slot
                 .as_ref()
@@ -225,11 +241,8 @@ impl GuardedAssumeRoleProvider {
         let credentials = output
             .credentials
             .ok_or_else(|| CredentialsError::unhandled("STS credentials must be defined"))?;
-        let expiry = SystemTime::try_from(credentials.expiration).map_err(|error| {
-            CredentialsError::unhandled(format!(
-                "credential expiration time cannot be represented by a SystemTime: {error}"
-            ))
-        })?;
+        let expiry =
+            SystemTime::try_from(credentials.expiration).map_err(CredentialsError::unhandled)?;
         let mut builder = Credentials::builder()
             .access_key_id(credentials.access_key_id)
             .secret_access_key(credentials.secret_access_key)
@@ -255,12 +268,19 @@ fn sts_idempotency(_: &str) -> Idempotency {
     Idempotency::NotIdempotent
 }
 
-impl ProvideCredentials for GuardedAssumeRoleProvider {
-    fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
-    where
-        Self: 'a,
-    {
-        future::ProvideCredentials::new(self.credentials())
+impl AwsSessionSource for GuardedAssumeRoleProvider {
+    fn current_session(&self) -> AwsSessionFuture<'_> {
+        Box::pin(async move { self.credentials().await.map(AwsSessionMaterial::new) })
+    }
+}
+
+impl From<GuardedAssumeRoleProvider> for crate::AwsCredentialsSource {
+    fn from(source: GuardedAssumeRoleProvider) -> Self {
+        let source = std::sync::Arc::new(source);
+        Self::new(move || {
+            let source = source.clone();
+            async move { source.credentials().await }
+        })
     }
 }
 

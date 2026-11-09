@@ -243,6 +243,7 @@ fn organizations_account_email_reference_types_require_annotation_or_matching_ou
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .expect("literal validation must defer references");
         let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -259,6 +260,7 @@ fn organizations_account_email_reference_types_require_annotation_or_matching_ou
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         if let Some(expected) = expected_error {
             let error = result
@@ -324,6 +326,7 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         );
         assert!(result.is_ok(), "{field} = {expression}: {result:?}");
         // Deferred values skip literal validation; check declared reference types.
@@ -341,6 +344,7 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         if let Some(expected_error) = expected_error {
             let error = result

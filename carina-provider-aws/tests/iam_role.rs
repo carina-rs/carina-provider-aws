@@ -184,6 +184,7 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         );
         assert!(result.is_ok(), "{field} = {expression}: {result:?}");
         // Value validation skips deferred references; check their declared types too.
@@ -201,6 +202,7 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         if let Some(expected_error) = expected_error {
             let error = result.expect_err("plain String references must not satisfy Role.Name");
@@ -250,6 +252,7 @@ fn iam_role_examples_and_acceptance_fixtures_validate() {
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .unwrap_or_else(|error| panic!("{fixture}: {error}"));
     }

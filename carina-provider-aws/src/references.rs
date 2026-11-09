@@ -38,7 +38,14 @@ impl KmsClient {
 
     #[cfg(test)]
     pub(crate) fn guarded_client(&self) -> kms::KmsClient {
-        self.client_in_region(self.config.sdk_config().region().unwrap().as_ref())
+        self.client_in_region(
+            self.config
+                .sdk_config()
+                .sdk_config()
+                .region()
+                .unwrap()
+                .as_ref(),
+        )
     }
 }
 

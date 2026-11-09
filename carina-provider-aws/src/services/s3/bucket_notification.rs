@@ -235,7 +235,7 @@ impl AwsProvider {
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
         let identifier = identifier.as_str();
-        let result = retry_aws_operation(RetryPolicy::default(), || {
+        let result = retry_aws_operation(&self.diagnostics, RetryPolicy::default(), || {
             let client = &self.s3_client;
             client
                 .put_bucket_notification_configuration()

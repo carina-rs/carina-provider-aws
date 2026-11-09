@@ -159,6 +159,7 @@ fn validate(snapshot: &LoadedProviderSnapshot, source: &str) -> Result<(), Strin
         snapshot.schema_registry(),
         &HashSet::from(["aws".to_string()]),
         context,
+        &mut Vec::new(),
     )?;
     let bindings = carina_core::binding_index::BindingIndex::from_parsed(
         &parsed,
@@ -174,6 +175,7 @@ fn validate(snapshot: &LoadedProviderSnapshot, source: &str) -> Result<(), Strin
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
     .map_err(|error| error.to_string())
 }

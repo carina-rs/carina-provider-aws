@@ -24,6 +24,7 @@ fn validate_source(source: &str, registry: SchemaRegistry, expected_resources: u
         snapshot.schema_registry(),
         &HashSet::from(["aws".into()]),
         context,
+        &mut Vec::new(),
     )
     .unwrap();
     let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -40,6 +41,7 @@ fn validate_source(source: &str, registry: SchemaRegistry, expected_resources: u
         configuration.judged(),
         &HashSet::new(),
         &bindings,
+        &mut Vec::new(),
     )
     .unwrap();
 }

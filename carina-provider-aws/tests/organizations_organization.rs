@@ -162,6 +162,7 @@ fn organizations_organization_output_reference_types_distinguish_accounts_from_o
             snapshot.schema_registry(),
             &HashSet::from(["aws".to_string(), "probe".to_string()]),
             context,
+            &mut Vec::new(),
         )
         .unwrap();
         let bindings = carina_core::binding_index::BindingIndex::from_parsed(
@@ -178,6 +179,7 @@ fn organizations_organization_output_reference_types_distinguish_accounts_from_o
             configuration.judged(),
             &HashSet::new(),
             &bindings,
+            &mut Vec::new(),
         );
         if let Some(expected) = expected_error {
             let error = result

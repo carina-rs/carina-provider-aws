@@ -86,7 +86,7 @@ impl AwsProvider {
             carina_aws_types::sdk::ec2::types::ResourceType::SecurityGroup,
             client_token,
         );
-        let result = retry_aws_operation(RetryPolicy::default(), || {
+        let result = retry_aws_operation(&self.diagnostics, RetryPolicy::default(), || {
             let group_name = group_name.clone();
             let description = description.clone();
             let vpc_id = vpc_id.clone();

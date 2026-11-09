@@ -31,26 +31,32 @@ cargo fmt --check
 WASM providers use base credentials resolved by the Carina host's standard AWS
 credential chain. Named profiles and SSO work through the host; select a profile
 with `AWS_PROFILE`. The host supplies credentials and expiry through the typed
-`aws-credentials` import and refreshes them when needed. The provider uses these
-base credentials for any provider-level `assume_role` call.
+`aws-credentials` import. `HostCredentialsSource` implements `AwsSessionSource`
+and requests the current access key, secret, token and expiry on every lookup.
+`AwsSdkParts::new(source, diagnostics).apply(builder)` installs the registering
+credentials provider and HTTP transport together. Registration must be acknowledged
+before any credential generation reaches the signer, including explicit overrides
+and credentials returned by `GuardedAssumeRoleProvider`. The SDK identity cache
+refreshes using the source's expiry; each refreshed generation is registered too.
+Base credentials sign provider-level `assume_role` calls through the same path.
+Sources wrap complete `aws_credential_types::Credentials` in `AwsSessionMaterial`.
+Registration preserves expiry, account ID, provider name and all credential
+properties, including the STS AssumeRole feature metadata.
 
 Carina never starts an interactive login. When an SSO session has expired, run
 `aws sso login --profile <profile>` and retry. Service regions remain explicit
 provider configuration, defaulting to `ap-northeast-1`.
 
-Native builds keep the AWS SDK's default credential chain. For native tests that
-require AWS credentials:
-
-```bash
-aws-vault exec <profile> -- cargo test
-```
+Native production builds keep the AWS SDK's default credential chain. Native
+unit and integration tests inject synthetic credentials and transports through
+`AwsSdkConfig::for_test` and exercise the real registration path without AWS calls.
 
 ## Crate Structure
 
 - **carina-provider-aws**: The AWS provider implementation. Builds as both a native binary and a WASM component.
 - **carina-codegen-aws**: Code generator that produces resource definitions from AWS Smithy models.
 - **carina-smithy**: Smithy 2.0 JSON AST parser used by the code generator.
-- **carina-aws-types**: Shared AWS-specific types, guarded SDK handles, `HostCredentialsProvider`, and `GuardedAssumeRoleProvider`. This crate lives in this repo; `carina-provider-awscc` consumes it by pinning this repository.
+- **carina-aws-types**: Shared AWS-specific types, guarded SDK handles, `HostCredentialsSource`, and `GuardedAssumeRoleProvider`. This crate lives in this repo; `carina-provider-awscc` consumes it by pinning this repository.
 
 ## Dependencies on carina (main repo)
 
@@ -101,12 +107,36 @@ the same facade factories. Provider-level AssumeRole uses
 non-idempotent and retain the base credentials and expiration-based refresh path.
 Concurrent loads share one pending AssumeRole request, including after a caller
 is cancelled; completed results are left to the consuming SDK identity cache.
-Shared configuration loading uses `carina_aws_types::load_sdk_config`; its API
-defaults to `HostCredentialsProvider` on WASM when no override is supplied,
-returns only `aws_types::SdkConfig`, and never exposes aws-config's loaders or
-credential-provider builders. Use `aws-types` for `SdkConfig` and `Region`,
+Shared configuration loading uses `carina_aws_types::load_sdk_config`, supplied
+with the provider session's `ProviderDiagnostics` (the guest runtime supplies
+`ProviderDiagnostics::guest()` on WASM). It defaults to `HostCredentialsSource`
+on WASM. The public loader has the same signature on both targets:
+`load_sdk_config(region, timeout, retry, diagnostics, Option<AwsCredentialsSource>)`.
+`AwsCredentialsSource` implements the SDK's `AwsSessionSource` and accepts
+`HostCredentialsSource`, `GuardedAssumeRoleProvider` or complete `Credentials`
+through `Into`. `AwsCredentialsSource::new` accepts a refreshing async callback
+returning `Result<Credentials, CredentialsError>`; it accepts no raw credentials
+provider or HTTP client. Host and AssumeRole sources also implement the SDK trait.
+
+On WASM the loader receives the configuration paired by `AwsSdkParts` through its
+existing transport and credentials overrides. Native production keeps aws-config's
+default loader and chain; a source override uses a private native-only adapter.
+Native tests and `test-utils` use the real `AwsSdkParts` registration path, with
+`AwsSdkConfig::for_test` as their native-only emulator injection point.
+The loader returns `AwsSdkConfig`, which retains the session diagnostics and is
+required by all guarded service factories. `AwsSdkConfig::with_source` replaces a
+source without bypassing the target's credential policy; `in_region` and
+`with_policy` preserve the source and diagnostics. No global diagnostic handle is
+used. The crate never exposes aws-config's loaders or credential-provider builders. Use `aws-types` for `SdkConfig` and `Region`,
 `aws-smithy-runtime-api` for `BehaviorVersion`, and `aws-smithy-runtime` for
 `IdentityCache`.
+
+Provider diagnostics require protocol 25. Emit warnings through
+`ProviderDiagnostics::emit` with typed errors or diagnostics. `ResendGuard::new`
+requires the service's idempotency lookup and the session diagnostics handle;
+retry summaries retain typed status, validated service code, connector kind and
+attempt counters. Guest stdout/stderr are discarded by the host. Use
+`panic_diagnostic` / `expect_diagnostic` for typed panic payloads.
 
 Client safety comes from dependency visibility and permanent interceptors.
 The hand-maintained `clippy.toml` governs read-state construction and is not a

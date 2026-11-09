@@ -12,7 +12,7 @@ required-features = ["s3"]
 
 [features]
 default = []
-guest = ["dep:carina-plugin-sdk"]
+guest = []
 account = ["dep:aws-sdk-account"]
 acm = ["dep:aws-sdk-acm"]
 cloudcontrol = ["dep:aws-sdk-cloudcontrol"]
@@ -26,10 +26,10 @@ route53 = ["dep:aws-sdk-route53"]
 s3 = ["dep:aws-sdk-s3"]
 sqs = ["dep:aws-sdk-sqs"]
 sts = ["dep:aws-sdk-sts"]
-test-utils = ["dep:carina-plugin-sdk", "dep:wasi"]
+test-utils = ["dep:wasi", "carina-core/provider-host", "carina-plugin-sdk/test-utils"]
 
 [dev-dependencies]
-carina-core = { workspace = true, features = ["test-utils"] }
+carina-core = { workspace = true, features = ["test-utils", "provider-host"] }
 aws-smithy-async = { version = "1", features = ["test-util"] }
 aws-smithy-runtime-api = { version = "1.19", features = ["client", "test-util"] }
 carina-plugin-sdk = { workspace = true, features = ["test-utils"] }
@@ -63,6 +63,7 @@ aws-smithy-runtime-api = { version = "1.19", features = ["client"] }
 aws-smithy-types = { version = "1" }
 carina-core = { workspace = true }
 carina-provider-protocol = { workspace = true }
+carina-plugin-sdk = { workspace = true }
 futures = "0.3"
 heck = "0.5"
 idna = "1.1.0"
@@ -70,9 +71,7 @@ regex = "1"
 url = "2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-carina-plugin-sdk = { workspace = true, optional = true }
 wasi = { version = "0.14", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-carina-plugin-sdk = { workspace = true }
 wasi = "0.14"

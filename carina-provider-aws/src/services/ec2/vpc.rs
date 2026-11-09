@@ -205,8 +205,10 @@ impl AwsProvider {
             create_vpc_builder = create_vpc_builder.instance_tenancy(tenancy_enum);
         }
 
-        let result =
-            retry_aws_operation(RetryPolicy::default(), || create_vpc_builder.clone()).await;
+        let result = retry_aws_operation(&self.diagnostics, RetryPolicy::default(), || {
+            create_vpc_builder.clone()
+        })
+        .await;
 
         self.finish_tagged_ec2_create(
             resource,
