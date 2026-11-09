@@ -948,6 +948,180 @@ async fn queue_kms_reuse_removal_while_staying_sse_kms_sends_default_300() {
     http.assert_finished();
 }
 
+async fn assert_queue_update_attributes(
+    from: &SnapshotState,
+    to: &UpdateResource,
+    expected_attributes: serde_json::Value,
+) {
+    const QUEUE_URL: &str = "https://example.test/123/removal";
+    let (provider, http) = provider([(200, "{}".into()), sqs_missing_queue_response()]);
+    let _read = provider
+        .update_sqs_queue(
+            from.id.clone(),
+            &AppliedIdentifier::new(QUEUE_URL).unwrap(),
+            from,
+            to,
+            crate::test_resource_schema("sqs.Queue"),
+        )
+        .await
+        .expect("queue attribute update must succeed");
+    let requests = http.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[0].contains("action=AmazonSQS.SetQueueAttributes;"),
+        "{}",
+        requests[0]
+    );
+    let body: serde_json::Value =
+        serde_json::from_str(requests[0].split_once("; body=").unwrap().1).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"QueueUrl": QUEUE_URL, "Attributes": expected_attributes})
+    );
+    assert!(
+        requests[1].contains("action=AmazonSQS.GetQueueAttributes;"),
+        "{}",
+        requests[1]
+    );
+    http.assert_finished();
+}
+
+#[tokio::test]
+async fn queue_kms_reuse_absent_on_sse_sqs_switch_sends_default_300() {
+    let from = snapshot("sqs.Queue", [("sqs_managed_sse_enabled", boolean(true))]);
+    let to = UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![
+                PatchOp::Remove {
+                    key: "sqs_managed_sse_enabled".into(),
+                },
+                PatchOp::Add {
+                    key: "kms_master_key_id".into(),
+                    value: string("alias/test"),
+                },
+            ],
+        },
+    );
+    assert_queue_update_attributes(
+        &from,
+        &to,
+        serde_json::json!({"KmsMasterKeyId": "alias/test", "KmsDataKeyReusePeriodSeconds": "300"}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn queue_kms_reuse_absent_on_unencrypted_switch_sends_default_300() {
+    let from = snapshot("sqs.Queue", [("sqs_managed_sse_enabled", boolean(false))]);
+    let to = UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![PatchOp::Add {
+                key: "kms_master_key_id".into(),
+                value: string("alias/test"),
+            }],
+        },
+    );
+    assert_queue_update_attributes(
+        &from,
+        &to,
+        serde_json::json!({"KmsMasterKeyId": "alias/test", "KmsDataKeyReusePeriodSeconds": "300"}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn queue_kms_reuse_configured_on_sse_sqs_switch_sends_600() {
+    let from = snapshot("sqs.Queue", [("sqs_managed_sse_enabled", boolean(true))]);
+    let to = UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![
+                PatchOp::Remove {
+                    key: "sqs_managed_sse_enabled".into(),
+                },
+                PatchOp::Add {
+                    key: "kms_master_key_id".into(),
+                    value: string("alias/test"),
+                },
+                PatchOp::Add {
+                    key: "kms_data_key_reuse_period_seconds".into(),
+                    value: integer(600),
+                },
+            ],
+        },
+    );
+    assert_queue_update_attributes(
+        &from,
+        &to,
+        serde_json::json!({"KmsMasterKeyId": "alias/test", "KmsDataKeyReusePeriodSeconds": "600"}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn queue_kms_reuse_explicit_with_empty_kms_key_is_sent() {
+    let from = snapshot(
+        "sqs.Queue",
+        [
+            ("kms_master_key_id", string("alias/test")),
+            ("kms_data_key_reuse_period_seconds", integer(60)),
+            ("sqs_managed_sse_enabled", boolean(false)),
+        ],
+    );
+    let to = UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![
+                PatchOp::Replace {
+                    key: "kms_master_key_id".into(),
+                    value: string(""),
+                },
+                PatchOp::Replace {
+                    key: "kms_data_key_reuse_period_seconds".into(),
+                    value: integer(600),
+                },
+            ],
+        },
+    );
+    assert_queue_update_attributes(
+        &from,
+        &to,
+        serde_json::json!({"KmsMasterKeyId": "", "KmsDataKeyReusePeriodSeconds": "600"}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn queue_kms_reuse_default_in_state_is_not_sent_when_desired_is_absent() {
+    let from = snapshot(
+        "sqs.Queue",
+        [
+            ("kms_master_key_id", string("alias/test")),
+            ("kms_data_key_reuse_period_seconds", integer(300)),
+            ("sqs_managed_sse_enabled", boolean(false)),
+            ("visibility_timeout", integer(60)),
+        ],
+    );
+    let to = UpdateResource::new(
+        &from,
+        &UpdatePatch {
+            ops: vec![
+                PatchOp::Remove {
+                    key: "kms_data_key_reuse_period_seconds".into(),
+                },
+                PatchOp::Replace {
+                    key: "visibility_timeout".into(),
+                    value: integer(30),
+                },
+            ],
+        },
+    );
+    assert_queue_update_attributes(&from, &to, serde_json::json!({"VisibilityTimeout": "30"}))
+        .await;
+}
+
 #[tokio::test]
 async fn queue_encryption_switches_send_only_the_resulting_mode() {
     const QUEUE_URL: &str = "https://example.test/123/removal";

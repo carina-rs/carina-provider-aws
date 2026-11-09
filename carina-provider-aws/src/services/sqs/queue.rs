@@ -1139,9 +1139,11 @@ impl AwsProvider {
         let sqs_managed_sse_enabled = sqs_managed_sse_enabled.into_inner();
         let tags = tags.into_inner();
         let visibility_timeout = visibility_timeout.into_inner();
-        // Resolve removals from the resulting mode: the other selector covers
-        // selector removal. Active SSE-KMS reuse resets to its documented 300;
-        // omit the reuse period when inapplicable and reject uncovered selectors.
+        // Resolve encryption from the resulting mode: the other selector covers
+        // selector removal. SSE-KMS uses the configured reuse period or the
+        // documented default 300, overriding any value SQS retained in another
+        // mode. Outside SSE-KMS, preserve explicit reuse values for the API and
+        // omit unchanged or removed values. Reject uncovered selector removals.
         let resulting_sqs_managed_sse_enabled = match &sqs_managed_sse_enabled {
             AttributeChange::Set(value) | AttributeChange::Unchanged(value) => *value,
             AttributeChange::Removed => None,
@@ -1177,13 +1179,14 @@ impl AwsProvider {
             }
         })?;
         let kms_data_key_reuse_period_seconds =
-            kms_data_key_reuse_period_seconds.resolve(|| {
-                Ok(if resulting_mode_is_sse_kms {
-                    Some(300)
-                } else {
-                    None
-                })
-            })?;
+            match (resulting_mode_is_sse_kms, kms_data_key_reuse_period_seconds) {
+                (true, AttributeChange::Set(value) | AttributeChange::Unchanged(value)) => {
+                    Some(value.unwrap_or(300))
+                }
+                (true, AttributeChange::Removed) => Some(300),
+                (false, AttributeChange::Set(value)) => value,
+                (false, AttributeChange::Unchanged(_) | AttributeChange::Removed) => None,
+            };
 
         // Reset declarations follow the SetQueueAttributes API/SDK model:
         // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SetQueueAttributes.html
