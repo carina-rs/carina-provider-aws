@@ -1100,7 +1100,11 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "ec2.VpnGateway")
             .unwrap();
         let RawShape::Int {
-            identity: Some(identity),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    ..
+                },
             ..
         } = vgw.parts().attributes["amazon_side_asn"]
             .attr_type()
@@ -1208,10 +1212,18 @@ mod tests {
     ) {
         match attribute_type.raw_shape() {
             RawShape::String {
-                identity, validate, ..
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity, validate, ..
+                    },
+                ..
             }
             | RawShape::Int {
-                identity, validate, ..
+                identity_layer:
+                    carina_core::schema::IntIdentityParts {
+                        identity, validate, ..
+                    },
+                ..
             }
             | RawShape::Float {
                 identity, validate, ..
@@ -1632,10 +1644,14 @@ mod tests {
                 .find(|schema| schema.parts().resource_type == resource)
                 .unwrap();
             let RawShape::String {
-                identity: Some(identity),
-                pattern,
-                length,
-                validate: Some(_),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(identity),
+                        pattern,
+                        length,
+                        validate: Some(_),
+                        ..
+                    },
                 ..
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {
@@ -1680,10 +1696,14 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "iam.Role")
             .expect("generated Role schema");
         let RawShape::String {
-            identity: Some(identity),
-            pattern,
-            length,
-            validate: Some(_),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    pattern,
+                    length,
+                    validate: Some(_),
+                    ..
+                },
             ..
         } = role.parts().attributes["role_name"].attr_type().raw_shape()
         else {
@@ -1732,9 +1752,13 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "logs.LogGroup")
             .expect("generated LogGroup schema");
         let RawShape::Int {
-            identity: Some(identity),
-            range: None,
-            validate: Some(_),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    range: None,
+                    validate: Some(_),
+                },
+            ..
         } = logs.parts().attributes["retention_in_days"]
             .attr_type()
             .raw_shape()

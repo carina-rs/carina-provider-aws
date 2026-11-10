@@ -80,10 +80,14 @@ mod tests {
             (iam_path_prefix(), r"^/[\x21-\x7F]*\z"),
         ] {
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                validate,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        validate,
+                        ..
+                    },
                 ..
             } = attr.raw_shape()
             else {

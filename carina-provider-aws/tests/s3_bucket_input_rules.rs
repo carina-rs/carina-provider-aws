@@ -191,13 +191,18 @@ fn directory_fixture_defers_creation_rules_until_plan() {
         &mut Vec::new(),
     )
     .unwrap();
-    // CLI validate and LSP use this same entry. Without state they cannot
-    // distinguish a new bucket from an imported/existing legacy bucket.
-    assert!(
-        carina_core::input_rules::check_authored_inputs(parsed.parsed(), registry)
-            .unwrap()
-            .is_empty()
+    // Authored CreateOnly previews warn before state is known; the finalized
+    // create plan below still rejects the same invalid bucket name.
+    let report = carina_core::input_rules::check_authored_inputs(
+        parsed.parsed().authored_inputs().unwrap(),
+        registry,
     );
+    assert!(report.preparation_errors().is_empty());
+    assert!(report.pending().is_empty());
+    assert!(!report.findings().is_empty());
+    assert!(report.findings().iter().all(|finding| {
+        finding.severity() == carina_core::input_rules::InputFindingSeverity::Warning
+    }));
     let Value::Concrete(ConcreteValue::String(name)) = &parsed.resources[0].attributes["bucket"]
     else {
         panic!("fixture must provide a literal bucket name");

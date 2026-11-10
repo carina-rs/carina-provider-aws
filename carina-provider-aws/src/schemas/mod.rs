@@ -355,7 +355,10 @@ mod tests {
                 Shape::Reference {
                     identity, pattern, ..
                 } => check(pattern, Some(identity)),
-                Shape::String { pattern, .. } => check(pattern, None),
+                Shape::String {
+                    identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+                    ..
+                } => check(pattern, None),
                 Shape::UnloadedSchemaType(unloaded) => panic!(
                     "KMS coverage requires a loaded schema type for {}",
                     unloaded.identity(),
@@ -737,7 +740,11 @@ mod tests {
         expected_pattern: Option<&str>,
     ) {
         let RawShape::String {
-            identity, pattern, ..
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity, pattern, ..
+                },
+            ..
         } = attr.raw_shape()
         else {
             panic!("expected refined String, got {:?}", attr.raw_shape());
@@ -753,10 +760,17 @@ mod tests {
     }
 
     fn assert_refined_int_range(attr: &AttributeType, expected_range: (Option<i64>, Option<i64>)) {
-        let RawShape::Int { range, .. } = attr.raw_shape() else {
+        let RawShape::Int {
+            identity_layer,
+            member_layer,
+        } = attr.raw_shape()
+        else {
             panic!("expected refined Int, got {:?}", attr.raw_shape());
         };
-        assert_eq!(range, Some(expected_range));
+        assert_eq!(
+            carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range),
+            Some(expected_range)
+        );
     }
 
     #[test]

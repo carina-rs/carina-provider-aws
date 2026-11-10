@@ -194,8 +194,10 @@ mod tests {
     }
 
     fn assert_refined_string_identity(attr: &AttributeType, expected: &str) {
-        if let carina_core::schema::Shape::String { identity, .. } =
-            attr.shape_ref_free().expect("test schema is Ref-free")
+        if let carina_core::schema::Shape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+            ..
+        } = attr.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(identity.map(|id| id.to_string()).as_deref(), Some(expected));
         } else {
@@ -525,10 +527,14 @@ mod tests {
     fn aws_account_id_carries_pattern_and_length() {
         let t = aws_account_id();
         if let carina_core::schema::Shape::String {
-            identity,
-            pattern,
-            length,
-            to_dsl: None,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    to_dsl: None,
+                    ..
+                },
             ..
         } = t.shape_ref_free().expect("test schema is Ref-free")
         {
@@ -550,9 +556,13 @@ mod tests {
     fn vpc_id_carries_identity_and_pattern() {
         let t = vpc_id();
         if let carina_core::schema::Shape::String {
-            identity,
-            pattern,
-            to_dsl: None,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    to_dsl: None,
+                    ..
+                },
             ..
         } = t.shape_ref_free().expect("test schema is Ref-free")
         {
@@ -1749,7 +1759,11 @@ mod tests {
         let attr = route53_hosted_zone_id();
         assert_refined_string_identity(&attr, "aws.route53.HostedZone.Id");
         let carina_core::schema::Shape::String {
-            pattern, length, ..
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    pattern, length, ..
+                },
+            ..
         } = attr.shape_ref_free().expect("test schema is Ref-free")
         else {
             panic!("expected refined String");

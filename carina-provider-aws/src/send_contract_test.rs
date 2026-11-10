@@ -534,10 +534,14 @@ fn sample_value(
             path.join("."),
         ),
         Shape::String {
-            identity,
-            pattern,
-            length,
-            validate,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    validate,
+                    ..
+                },
             ..
         } => sample_typed_string(resource_type, path, identity, pattern, length, validate),
         Shape::Reference {
@@ -545,7 +549,12 @@ fn sample_value(
             pattern,
             length,
         } => sample_typed_string(resource_type, path, Some(identity), pattern, length, None),
-        Shape::Int { range, .. } => {
+        Shape::Int {
+            identity_layer,
+            member_layer,
+        } => {
+            let range =
+                carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);
             let preferred = match path.last().map(String::as_str) {

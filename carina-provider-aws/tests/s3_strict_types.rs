@@ -573,8 +573,12 @@ fn s3_website_index_suffix_is_nonempty_without_slashes() {
 fn s3_bucket_domain_outputs_use_the_shared_route53_dns_contract() {
     let shared = carina_aws_types::route53_dns_name();
     let RawShape::String {
-        pattern: shared_pattern,
-        length: shared_length,
+        identity_layer:
+            carina_core::schema::StringIdentityParts {
+                pattern: shared_pattern,
+                length: shared_length,
+                ..
+            },
         ..
     } = shared.raw_shape()
     else {
@@ -584,9 +588,13 @@ fn s3_bucket_domain_outputs_use_the_shared_route53_dns_contract() {
         for schema in schemas("Bucket") {
             let ty = field(&schema, path);
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = ty.as_type().raw_shape()
             else {
