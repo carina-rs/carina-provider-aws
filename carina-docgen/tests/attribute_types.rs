@@ -349,6 +349,43 @@ fn pattern_constraints_use_core_display_and_preserve_modes_in_table_cells() {
 }
 
 #[test]
+fn scalars_render_identity_and_member_constraints_in_order() {
+    let string = AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::with_validator(
+            TypeIdentity::bare("Name"),
+            Some(PatternSpec::new("[a-z]+", PatternMatch::Full)),
+            Some((Some(1), Some(64))),
+            Arc::new(|_| Ok(())),
+            Some(DslTransform::Identity),
+        ),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new("a.*", PatternMatch::Full)),
+            Some((Some(3), Some(16))),
+        ),
+    );
+    let int = AttributeType::int_member(
+        carina_core::schema::IntIdentityLayer::new(
+            Some(TypeIdentity::bare("Count")),
+            Some((Some(0), Some(100))),
+        ),
+        carina_core::schema::IntMemberConstraints::new(Some((Some(2), Some(8)))),
+    );
+    for (ty, expected) in [
+        (
+            string,
+            "identity constraints: pattern: /[a-z]+/ (Full), len: 1..=64, member constraints: pattern: /a.*/ (Full), len: 3..=16",
+        ),
+        (
+            int,
+            "identity constraints: range: 0..=100, member constraints: range: 2..=8",
+        ),
+    ] {
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        assert_eq!(markdown.matches(expected).count(), 2, "{markdown}");
+    }
+}
+
+#[test]
 fn scalars_render_all_refinements_in_github_order() {
     let validator = Arc::new(|_: &carina_core::resource::Value| Ok(()));
     let cases = [
@@ -390,7 +427,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 validator.clone(),
                 Some(DslTransform::HyphenToUnderscore),
             ),
-            "N (identity constraints: pattern: /^a$/ (Full), len: 1.., custom validator, DSL transform: HyphenToUnderscore)",
+            "N (pattern: /^a$/ (Full), len: 1.., custom validator, DSL transform: HyphenToUnderscore)",
         ),
         (
             AttributeType::refined_int_with_validator(
@@ -398,7 +435,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 Some((Some(-1), Some(8))),
                 validator.clone(),
             ),
-            "I (identity constraints: range: -1..=8, custom validator)",
+            "I (range: -1..=8, custom validator)",
         ),
         (
             AttributeType::refined_int(None, Some((Some(1), None))),
@@ -566,7 +603,7 @@ fn open_enums_preserve_numeric_base_ranges_before_validator_and_transform() {
     for (base, range) in [
         (
             AttributeType::refined_int(None, Some((Some(-1), Some(8)))),
-            "identity constraints: range: -1..=8, ",
+            "range: -1..=8, ",
         ),
         (
             AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
@@ -607,7 +644,7 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
                 validate.clone(),
                 Some(DslTransform::HyphenToUnderscore),
             ),
-            "identity constraints: pattern: /^a$/ (Full), len: 1..=8",
+            "pattern: /^a$/ (Full), len: 1..=8",
         ),
         (
             AttributeType::refined_int_with_validator(
@@ -615,7 +652,7 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
                 Some((Some(-1), Some(8))),
                 validate.clone(),
             ),
-            "identity constraints: range: -1..=8",
+            "range: -1..=8",
         ),
         (
             AttributeType::refined_float_with_validator(
@@ -672,11 +709,11 @@ fn open_enums_preserve_nested_enum_scalar_refinements() {
                 Some((Some(1), Some(8))),
                 None,
             ),
-            "identity constraints: pattern: /^a$/ (Full), len: 1..=8",
+            "pattern: /^a$/ (Full), len: 1..=8",
         ),
         (
             AttributeType::refined_int(None, Some((Some(-1), Some(8)))),
-            "identity constraints: range: -1..=8",
+            "range: -1..=8",
         ),
         (
             AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
@@ -925,41 +962,4 @@ fn field_group_sentences_share_cardinality_and_safe_code_spans() {
         page.finish().unwrap(),
         "**Field groups:**\n\n- Exactly one of: `a`, `b`.\n- At least one of: `a`, `b`.\n- At most one of: `a`, `b`.\n\n"
     );
-}
-
-#[test]
-fn docs_distinguish_identity_and_member_constraints() {
-    use carina_core::schema::{StringIdentityLayer, StringMemberConstraints};
-    let ty = AttributeType::string_member(
-        StringIdentityLayer::new(
-            Some(TypeIdentity::new(Some("aws"), ["test"], "Name")),
-            Some(PatternSpec::new("[a-z]+", PatternMatch::Full)),
-            Some((Some(1), Some(32))),
-            None,
-        ),
-        StringMemberConstraints::new(
-            Some(PatternSpec::new("a.*", PatternMatch::Full)),
-            Some((Some(3), Some(8))),
-        ),
-    );
-    let rendered = page(&ty, &mut Hooks::default()).unwrap();
-    assert!(rendered.contains("identity constraints"), "{rendered}");
-    assert!(rendered.contains("member constraints"), "{rendered}");
-    for text in ["[a-z]+", "a.*", "1..=32", "3..=8"] {
-        assert!(rendered.contains(text), "{text}: {rendered}");
-    }
-    let integer = AttributeType::int_member(
-        carina_core::schema::IntIdentityLayer::new(
-            Some(TypeIdentity::new(Some("aws"), ["test"], "Count")),
-            Some((Some(1), Some(32))),
-        ),
-        carina_core::schema::IntMemberConstraints::new(Some((Some(3), Some(8)))),
-    );
-    let rendered = page(&integer, &mut Hooks::default()).unwrap();
-    for text in [
-        "identity constraints: range: 1..=32",
-        "member constraints: range: 3..=8",
-    ] {
-        assert!(rendered.contains(text), "{text}: {rendered}");
-    }
 }

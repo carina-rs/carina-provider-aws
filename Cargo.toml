@@ -21,10 +21,9 @@ version = "0.10.0"
 
 # Every crate in this workspace must build against the same carina revision;
 # pin it once here so the crates cannot drift apart.
-# Local #662 development pin; take #681's Cargo.toml/Cargo.lock on merge.
 [workspace.dependencies]
-carina-core = { git = "https://github.com/carina-rs/carina", rev = "748ae72259f02ee619d869f474ce36f552dc0485" }
-carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "748ae72259f02ee619d869f474ce36f552dc0485", features = ["aws"] }
-carina-plugin-host = { git = "https://github.com/carina-rs/carina", rev = "748ae72259f02ee619d869f474ce36f552dc0485" }
-carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "748ae72259f02ee619d869f474ce36f552dc0485" }
-carina-provider-resolver = { git = "https://github.com/carina-rs/carina", rev = "748ae72259f02ee619d869f474ce36f552dc0485" }
+carina-core = { git = "https://github.com/carina-rs/carina", rev = "a3412b6be7ea881eb2e4e16ca2a045f09c9f3616" }
+carina-plugin-sdk = { git = "https://github.com/carina-rs/carina", rev = "a3412b6be7ea881eb2e4e16ca2a045f09c9f3616", features = ["aws"] }
+carina-plugin-host = { git = "https://github.com/carina-rs/carina", rev = "a3412b6be7ea881eb2e4e16ca2a045f09c9f3616" }
+carina-provider-protocol = { git = "https://github.com/carina-rs/carina", rev = "a3412b6be7ea881eb2e4e16ca2a045f09c9f3616" }
+carina-provider-resolver = { git = "https://github.com/carina-rs/carina", rev = "a3412b6be7ea881eb2e4e16ca2a045f09c9f3616" }

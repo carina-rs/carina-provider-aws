@@ -757,13 +757,16 @@ mod tests {
 
     fn assert_refined_int_range(attr: &AttributeType, expected_range: (Option<i64>, Option<i64>)) {
         let RawShape::Int {
-            member_layer: carina_core::schema::IntMemberParts { range },
-            ..
+            identity_layer,
+            member_layer,
         } = attr.raw_shape()
         else {
             panic!("expected refined Int, got {:?}", attr.raw_shape());
         };
-        assert_eq!(range, Some(expected_range));
+        assert_eq!(
+            carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range),
+            Some(expected_range)
+        );
     }
 
     #[test]

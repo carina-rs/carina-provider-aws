@@ -198,10 +198,11 @@ fn directory_fixture_defers_creation_rules_until_plan() {
         registry,
     );
     assert!(report.preparation_errors().is_empty());
+    assert!(report.pending().is_empty());
     assert!(!report.findings().is_empty());
-    assert!(report.findings().iter().all(
-        |finding| finding.severity() == carina_core::input_rules::InputFindingSeverity::Warning
-    ));
+    assert!(report.findings().iter().all(|finding| {
+        finding.severity() == carina_core::input_rules::InputFindingSeverity::Warning
+    }));
     let Value::Concrete(ConcreteValue::String(name)) = &parsed.resources[0].attributes["bucket"]
     else {
         panic!("fixture must provide a literal bucket name");

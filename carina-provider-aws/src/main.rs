@@ -1568,7 +1568,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let expected_schema_count = carina_provider_aws::schemas::generated::configs().len();
         let cache = ProviderSchemaCache::from_provider(&provider)
-            .expect("every AWS resource and config schema must pass protocol 27 admission");
+            .expect("every AWS resource and config schema must pass admission");
 
         assert_eq!(cache.schemas().len(), expected_schema_count);
         let mut bindings = BTreeMap::new();
@@ -1775,7 +1775,6 @@ mod tests {
                     identity: Some(identity),
                     range: None,
                     validate: Some(_),
-                    ..
                 },
             ..
         } = logs.parts().attributes["retention_in_days"]

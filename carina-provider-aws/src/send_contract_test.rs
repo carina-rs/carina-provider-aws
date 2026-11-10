@@ -562,10 +562,11 @@ fn sample_value(
             None,
         ),
         Shape::Int {
-            identity_layer: i,
-            member_layer: m,
+            identity_layer,
+            member_layer,
         } => {
-            let range = carina_core::schema::intersect_bounds(i.range, m.range);
+            let range =
+                carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);
             let preferred = match path.last().map(String::as_str) {

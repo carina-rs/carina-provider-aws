@@ -410,7 +410,6 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
                 .identity
                 .map_or_else(|| "String".into(), |identity| hooks.scalar_name(identity)),
             refinement_layers(
-                identity_layer.identity.is_some(),
                 string_constraints(identity_layer.pattern, identity_layer.length),
                 string_constraints(member_layer.pattern, member_layer.length),
             ),
@@ -426,7 +425,6 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
                 .identity
                 .map_or_else(|| "Int".into(), |identity| hooks.scalar_name(identity)),
             refinement_layers(
-                identity_layer.identity.is_some(),
                 number_constraints(identity_layer.range),
                 number_constraints(member_layer.range),
             ),
@@ -540,18 +538,15 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     Ok(display)
 }
 
-fn refinement_layers(named: bool, identity: Vec<String>, member: Vec<String>) -> Vec<String> {
+fn refinement_layers(identity: Vec<String>, member: Vec<String>) -> Vec<String> {
+    if member.is_empty() {
+        return identity;
+    }
     let mut refinements = Vec::new();
     if !identity.is_empty() {
-        if named || !member.is_empty() {
-            refinements.push(format!("identity constraints: {}", identity.join(", ")))
-        } else {
-            refinements.extend(identity)
-        }
+        refinements.push(format!("identity constraints: {}", identity.join(", ")));
     }
-    if !member.is_empty() {
-        refinements.push(format!("member constraints: {}", member.join(", ")))
-    }
+    refinements.push(format!("member constraints: {}", member.join(", ")));
     refinements
 }
 
@@ -571,14 +566,12 @@ fn enum_base_refinements<R: PatternForm>(
                 member_layer.pattern.is_none() && member_layer.length.is_none(),
                 "enum base cannot contain member constraints"
             );
-            refinement_layers(
-                true,
-                string_constraints(identity_layer.pattern, identity_layer.length),
-                vec![],
-            )
+            string_constraints(identity_layer.pattern, identity_layer.length)
         }
         RawShape::Reference {
-            pattern, length, ..
+            identity: _,
+            pattern,
+            length,
         } => string_constraints(pattern, length),
         RawShape::Int {
             identity_layer,
@@ -588,7 +581,7 @@ fn enum_base_refinements<R: PatternForm>(
                 member_layer.range.is_none(),
                 "enum base cannot contain member constraints"
             );
-            refinement_layers(true, number_constraints(identity_layer.range), vec![])
+            number_constraints(identity_layer.range)
         }
         RawShape::Float {
             identity: _,

@@ -246,10 +246,69 @@ fn pattern_spec_code(pattern: &PatternSpec) -> String {
     )
 }
 
+fn input_literal_code(literal: &carina_core::schema::InputLiteral) -> String {
+    use carina_core::schema::InputLiteral;
+    match literal {
+        InputLiteral::Bool(value) => format!("carina_core::schema::InputLiteral::Bool({value})"),
+        InputLiteral::Int(value) => format!("carina_core::schema::InputLiteral::Int({value})"),
+        InputLiteral::Float(value) => format!(
+            "carina_core::schema::InputLiteral::Float(carina_core::FiniteF64::new({:?}).expect(\"finite input literal\"))",
+            value.get()
+        ),
+        InputLiteral::String(value) => {
+            format!("carina_core::schema::InputLiteral::String({value:?}.into())")
+        }
+        InputLiteral::Enum {
+            identity,
+            api_value,
+        } => format!(
+            "carina_core::schema::InputLiteral::Enum {{ identity: carina_core::schema::TypeIdentity::new({:?}, Vec::<String>::from([{}]), {:?}), api_value: {api_value:?}.into() }}",
+            identity.provider.as_deref(),
+            identity
+                .segments
+                .iter()
+                .map(|segment| format!("{segment:?}.into()"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            identity.kind,
+        ),
+    }
+}
+
+fn input_condition_code(condition: &carina_core::schema::InputCondition) -> String {
+    use carina_core::schema::InputCondition;
+    match condition {
+        InputCondition::Always => "carina_core::schema::InputCondition::Always".to_string(),
+        InputCondition::Present(path) => format!(
+            "carina_core::schema::InputCondition::Present(carina_core::schema::InputPath::new({:?}).expect(\"valid input path\"))",
+            path.as_str(),
+        ),
+        InputCondition::Equals { path, literal } => format!(
+            "carina_core::schema::InputCondition::Equals {{ path: carina_core::schema::InputPath::new({:?}).expect(\"valid input path\"), literal: {} }}",
+            path.as_str(),
+            input_literal_code(literal),
+        ),
+        InputCondition::Not(inner) => format!(
+            "carina_core::schema::InputCondition::Not(Box::new({}))",
+            input_condition_code(inner),
+        ),
+    }
+}
+
 /// Serialize core's portable declarations without introducing provider-specific
-/// predicates or changing their scope, target, codes, or pattern semantics.
+/// predicates or changing their scope, target, codes, conditions or pattern semantics.
 fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
-    use carina_core::schema::{CharSet, InputPredicate, InputRuleScope, InputRuleTarget};
+    use carina_core::schema::{
+        CharSet, InputCondition, InputPredicate, InputRuleParts, InputRuleScope, InputRuleTarget,
+    };
+
+    let InputRuleParts {
+        scope,
+        target,
+        code,
+        condition,
+        predicate,
+    } = rule.parts();
 
     let charset = |set: &CharSet| {
         format!(
@@ -263,40 +322,18 @@ fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
             value.as_str(),
         )
     };
-    let scope = match rule.scope() {
+    let scope = match scope {
         InputRuleScope::CreateOnly => "CreateOnly",
         InputRuleScope::EveryWrite => "EveryWrite",
     };
-    let target = match rule.target() {
-        InputRuleTarget::Value(_) => "Value",
-        InputRuleTarget::MapKeys(_) => "MapKeys",
+    let (target, path) = match target {
+        InputRuleTarget::Value(path) => ("Value", path),
+        InputRuleTarget::MapKeys(path) => ("MapKeys", path),
     };
-    let literal = |value: &carina_core::schema::InputLiteral| match value {
-        carina_core::schema::InputLiteral::Bool(v) => {
-            format!("carina_core::schema::InputLiteral::Bool({v})")
-        }
-        carina_core::schema::InputLiteral::Int(v) => {
-            format!("carina_core::schema::InputLiteral::Int({v})")
-        }
-        carina_core::schema::InputLiteral::Float(v) => format!(
-            "carina_core::schema::InputLiteral::Float(carina_core::FiniteF64::new({:?}).expect(\"finite input literal\"))",
-            v.get()
-        ),
-        carina_core::schema::InputLiteral::String(v) => {
-            format!("carina_core::schema::InputLiteral::String({v:?}.into())")
-        }
-        carina_core::schema::InputLiteral::Enum {
-            identity,
-            api_value,
-        } => format!(
-            "carina_core::schema::InputLiteral::Enum {{identity: {}, api_value: {api_value:?}.into()}}",
-            enum_identity_code(identity, None)
-        ),
-    };
-    let predicate = match rule.predicate() {
-        InputPredicate::Present => "Present".into(),
-        InputPredicate::Absent => "Absent".into(),
-        InputPredicate::Equals(value) => format!("Equals({})", literal(value)),
+    let predicate = match predicate {
+        InputPredicate::Present => "Present".to_string(),
+        InputPredicate::Absent => "Absent".to_string(),
+        InputPredicate::Equals(literal) => format!("Equals({})", input_literal_code(literal)),
         InputPredicate::Length { min, max } => format!("Length {{ min: {min:?}, max: {max:?} }}"),
         InputPredicate::AllowedChars(set) => format!("AllowedChars({})", charset(set)),
         InputPredicate::FirstChar(set) => format!("FirstChar({})", charset(set)),
@@ -322,16 +359,23 @@ fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
             format!("NotMatches({})", pattern_spec_code(pattern))
         }
     };
-    format!(
+    let mut generated = format!(
         "carina_core::schema::InputRule::new(\
          carina_core::schema::InputRuleScope::{scope}, \
          carina_core::schema::InputRuleTarget::{target}(\
          carina_core::schema::InputPath::new({:?}).expect(\"valid input path\")), \
          carina_core::schema::InputRuleCode::new({:?}).expect(\"valid input rule code\"), \
          carina_core::schema::InputPredicate::{predicate})",
-        rule.path().as_str(),
-        rule.code().as_str(),
-    )
+        path.as_str(),
+        code.as_str(),
+    );
+    if condition != &InputCondition::Always {
+        generated.push_str(&format!(
+            ".with_condition({})",
+            input_condition_code(condition)
+        ));
+    }
+    generated
 }
 
 /// Anonymous strings share their Rust literal encoding and schema metadata.
@@ -9795,6 +9839,46 @@ mod tests {
     }
 
     #[test]
+    fn resource_input_rules_preserve_nested_conditions() {
+        use carina_core::schema::{
+            InputCondition, InputLiteral, InputPath, InputPredicate, InputRule, InputRuleCode,
+            InputRuleScope,
+        };
+
+        let model = string_fixture_model(&[("Description", true)], &[("Description", true)]);
+        let mut resource = provider_fixture_resource("iam.Role", "", &["Description"], vec![]);
+        let rule = InputRule::value(
+            InputRuleScope::EveryWrite,
+            InputPath::new("description").unwrap(),
+            InputRuleCode::new("test.description.conditional_length").unwrap(),
+            InputPredicate::Length {
+                min: Some(1),
+                max: None,
+            },
+        )
+        .with_condition(InputCondition::Not(Box::new(InputCondition::Equals {
+            path: InputPath::new("description").unwrap(),
+            literal: InputLiteral::String("skip \"guard\"".into()),
+        })));
+        let expected_condition = concat!(
+            "carina_core::schema::InputCondition::Not(Box::new(",
+            "carina_core::schema::InputCondition::Equals { path: ",
+            r#"carina_core::schema::InputPath::new("description").expect("valid input path"), "#,
+            r#"literal: carina_core::schema::InputLiteral::String("skip \"guard\"".into()) }))"#,
+        );
+        let expected = format!(".with_condition({expected_condition})");
+        let emitted = input_rule_code(&rule);
+        assert!(emitted.ends_with(&expected), "{emitted}");
+
+        resource.input_rules.push(rule);
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert!(
+            generated.contains(&format!(".input_rule({emitted})")),
+            "{generated}"
+        );
+    }
+
+    #[test]
     fn map_length_tag_strings_preserve_literal_backslashes() {
         let model = carina_smithy::parse(r##"{
             "smithy":"2.0", "shapes": {
@@ -10328,8 +10412,16 @@ mod tests {
             validated_input_patterns: Vec::new(),
                 attribute_type: AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(i64::MAX))))),
             });
-            assert!(
-                matches!(value.attribute_type.raw_shape(), RawShape::Int { member_layer: carina_core::schema::IntMemberParts { range: Some((Some(1), Some(actual))) }, .. } if actual == maximum)
+            let RawShape::Int {
+                identity_layer,
+                member_layer,
+            } = value.attribute_type.raw_shape()
+            else {
+                panic!("bounded Int")
+            };
+            assert_eq!(
+                carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range),
+                Some((Some(1), Some(maximum)))
             );
         }
     }
@@ -10635,10 +10727,7 @@ mod tests {
                 .to_string()
         };
         let nat_type = vpc_id_type("ec2.NatGateway");
-        assert_eq!(
-            nat_type,
-            "`VpcId (identity constraints: pattern: /^vpc-[0-9a-f]{8,}$/ (Full))`"
-        );
+        assert_eq!(nat_type, "`VpcId (pattern: /^vpc-[0-9a-f]{8,}$/ (Full))`");
         assert_eq!(vpc_id_type("ec2.InternetGateway"), nat_type);
     }
 
@@ -10691,10 +10780,7 @@ mod tests {
         let mut page = PageBuilder::new();
         schema_display.write_to(&mut page);
         let schema_type = page.finish().unwrap();
-        assert!(
-            schema_type.starts_with("`Arn (identity constraints: pattern:"),
-            "{schema_type}"
-        );
+        assert!(schema_type.starts_with("`Arn (pattern:"), "{schema_type}");
         let markdown = generate_markdown_resource(
             &resource,
             &model,
@@ -11045,10 +11131,7 @@ mod tests {
             &markdown_resource_example(resource.name),
         )
         .unwrap();
-        assert!(
-            markdown.contains(r"`IamRoleName (identity constraints:"),
-            "{markdown}"
-        );
+        assert!(markdown.contains(r"`IamRoleName ("), "{markdown}");
         assert!(markdown.contains("len: 1..=512"), "{markdown}");
         assert!(
             markdown.contains("Smithy pattern is unanchored"),
@@ -11142,9 +11225,9 @@ mod tests {
         for expected in [
             "`String (member constraints: len: 1..=50)`",
             r"`account_name` | Create and update | `String (pattern: /^[ -;=?-~]+\z/ (Full))`",
-            r"`IamRoleName (identity constraints:",
-            "`OrganizationsAccountEmail (identity constraints: len: 6..=64, custom validator)`",
-            r"`AwsAccountId (identity constraints: pattern:",
+            r"`IamRoleName (",
+            "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
+            r"`AwsAccountId (pattern:",
             // #638: Organizations account ARN docs pin all eight supported partitions.
             "OrganizationsAccountArn (identity constraints: pattern:",
         ] {
@@ -11511,9 +11594,7 @@ mod tests {
     fn markdown_lifecycle_dates_use_module_independent_labels() {
         let markdown = lifecycle_markdown_fixture();
         assert_eq!(
-            markdown
-                .matches("| `date` | `S3LifecycleDate (identity constraints:")
-                .count(),
+            markdown.matches("| `date` | `S3LifecycleDate (").count(),
             2,
             "{markdown}"
         );
@@ -11623,7 +11704,7 @@ mod tests {
             .finish()
             .expect("declared enum aliases produce valid docs");
         assert!(
-            markdown.contains("| `zone` | `Route53HostedZoneId (identity constraints:"),
+            markdown.contains("| `zone` | `Route53HostedZoneId ("),
             "{markdown}"
         );
         assert!(
@@ -13543,10 +13624,7 @@ mod tests {
             markdown.contains("- [HostedZoneId](#zone-hostedzoneid)"),
             "{markdown}"
         );
-        assert!(
-            markdown.contains("- `Route53HostedZoneId (identity constraints:"),
-            "{markdown}"
-        );
+        assert!(markdown.contains("- `Route53HostedZoneId ("), "{markdown}");
         assert_eq!(structs.len(), 1);
         assert_eq!(
             structs
@@ -13622,10 +13700,7 @@ mod tests {
         );
         assert!(markdown.contains("- `Bool`\n"), "{markdown}");
         assert!(markdown.contains("- [HostedZoneId]"), "{markdown}");
-        assert!(
-            markdown.contains("- `Route53HostedZoneId (identity constraints:"),
-            "{markdown}"
-        );
+        assert!(markdown.contains("- `Route53HostedZoneId ("), "{markdown}");
     }
 
     #[test]
@@ -14031,7 +14106,7 @@ mod tests {
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
         assert!(
-            md.contains("- **Type:** List\\<`IamRoleArn (identity constraints:"),
+            md.contains("- **Type:** List\\<`IamRoleArn ("),
             "aggregated outputs must use MarkdownType's list renderer: {md}"
         );
         assert!(
@@ -14041,7 +14116,7 @@ mod tests {
             "path_prefix constraint: {md}"
         );
         assert!(
-            md.contains(r"- **Type:** List\<`IamRoleName (identity constraints:"),
+            md.contains(r"- **Type:** List\<`IamRoleName ("),
             "names element constraint: {md}"
         );
     }
@@ -14057,10 +14132,7 @@ mod tests {
             .expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
-        assert!(
-            md.contains("- **Type:** `IamRoleArn (identity constraints:"),
-            "{md}"
-        );
+        assert!(md.contains("- **Type:** `IamRoleArn ("), "{md}");
     }
 
     #[test]
