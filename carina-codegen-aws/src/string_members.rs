@@ -505,6 +505,7 @@ pub(super) fn derive(
         .map(|p| super::ValidatedInputConstraint::pattern(resource, path, p))
         .collect::<Result<Vec<_>>>()?;
     let mut value = string_refinement(pattern.as_ref(), length);
+    value.validated_input_constraints = validated_input_constraints;
     for rule in rules {
         value = decorate(value, rule).with_context(|| format!("{resource}.{path}"))?;
     }
@@ -514,7 +515,7 @@ pub(super) fn derive(
             None => correction.documentation().into(),
         });
     }
-    value.validated_input_constraints = validated_input_constraints;
+    validate_closed_patterns(&value).with_context(|| format!("{resource}.{path}"))?;
     Ok(value)
 }
 
@@ -546,24 +547,24 @@ pub(super) fn decorate(
                 carina_aws_types::try_with_member_identity(value.attribute_type, named.clone())
                     .map_err(anyhow::Error::msg)
                     .with_context(|| format!("identity {row:?}"))?;
-            value.type_code = if matches!(
-                named.as_attribute_type().raw_shape(),
-                RawShape::Enum {
-                    values: Some(_),
-                    ..
-                }
-            ) {
-                let RawShape::Enum {
-                    values: Some(values),
-                    ..
-                } = value.attribute_type.raw_shape()
-                else {
-                    unreachable!("closed identity")
-                };
-                // The source's constraints have been folded into this finite
-                // list. Runtime construction installs exactly the computed set.
+            if let TypeOverride::NamedValues { values, .. } = rule {
+                select_allowed_values(&mut value, values)?;
+            }
+            // Emit only after the final checked subset and presentation are
+            // known. Both codegen and runtime consume that same definition.
+            value.type_code = if let RawShape::Enum {
+                values: Some(values),
+                dsl_aliases,
+                ..
+            } = value.attribute_type.raw_shape()
+            {
+                let aliases = dsl_aliases
+                    .iter()
+                    .map(|(api, dsl)| (api.as_str(), dsl.as_str()))
+                    .collect::<Vec<_>>();
                 format!(
-                    "carina_aws_types::with_member_values(carina_aws_types::AwsType::{row:?}.attribute_type(), &{values:?})"
+                    "carina_aws_types::try_with_named_enum_values(carina_aws_types::AwsType::{row:?}.definition(), &{values:?}, &{aliases:?}).expect({:?})",
+                    format!("invalid generated enum subset for {}", row.identity())
                 )
             } else {
                 format!(
@@ -571,28 +572,8 @@ pub(super) fn decorate(
                     value.type_code
                 )
             };
-            if let TypeOverride::NamedValues { values, .. } = rule {
-                value = allowed_values(value, values)?;
-                if matches!(
-                    named.as_attribute_type().raw_shape(),
-                    RawShape::Enum {
-                        values: Some(_),
-                        ..
-                    }
-                ) {
-                    let RawShape::Enum {
-                        values: Some(values),
-                        ..
-                    } = value.attribute_type.raw_shape()
-                    else {
-                        unreachable!("closed identity")
-                    };
-                    value.type_code = format!(
-                        "carina_aws_types::with_member_values(carina_aws_types::AwsType::{row:?}.attribute_type(), &{values:?})"
-                    );
-                }
-            }
         }
+
         TypeOverride::CoreIdentity(core) => {
             anyhow::ensure!(
                 matches!(value.attribute_type.raw_shape(), RawShape::String { .. }),
@@ -644,7 +625,12 @@ pub(super) fn decorate(
                 RawShape::String { .. } => None,
                 _ => unreachable!(),
             };
-            let selected = validate_allowed_values(&value.attribute_type, source, values)?;
+            let selected = validate_allowed_values(
+                &value.attribute_type,
+                source,
+                values,
+                &value.validated_input_constraints,
+            )?;
             let selected = selected.iter().map(String::as_str).collect::<Vec<_>>();
             let aliases = match value.attribute_type.raw_shape() {
                 RawShape::Enum { dsl_aliases, .. } => dsl_aliases
@@ -661,15 +647,16 @@ pub(super) fn decorate(
                 .iter()
                 .map(|(api, dsl)| (api.as_str(), dsl.as_str()))
                 .collect::<Vec<_>>();
-            value.attribute_type = carina_aws_types::with_member_enum_values(
+            value.attribute_type = carina_aws_types::try_with_member_enum_values(
                 value.attribute_type,
                 identity,
                 &selected,
                 &aliases,
-            );
+            )?;
             value.type_code = format!(
-                "carina_aws_types::with_member_enum_values({}, carina_core::schema::enum_identity({name:?}, Some({namespace:?})), &{selected:?}, &{aliases:?})",
-                value.type_code
+                "carina_aws_types::try_with_member_enum_values({}, carina_core::schema::enum_identity({name:?}, Some({namespace:?})), &{selected:?}, &{aliases:?}).expect({:?})",
+                value.type_code,
+                format!("invalid generated local enum {}.{name}", namespace)
             );
         }
         TypeOverride::IntRange { min, max } => {
@@ -704,35 +691,79 @@ pub(super) fn decorate(
     Ok(value)
 }
 
-fn allowed_values(mut value: ValueTypeOverride, allowed: &[&str]) -> Result<ValueTypeOverride> {
+fn select_allowed_values(value: &mut ValueTypeOverride, allowed: &[&str]) -> Result<()> {
     let RawShape::Enum { values, .. } = value.attribute_type.raw_shape() else {
         anyhow::bail!("allowed-value refinement requires a named string enum")
     };
-    let selected = validate_allowed_values(&value.attribute_type, values, allowed)?;
-    value.type_code = format!(
-        "carina_aws_types::with_member_values({}, &[{}])",
-        value.type_code,
-        selected
-            .iter()
-            .map(|v| format!("{v:?}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    value.attribute_type = carina_aws_types::with_member_values(
-        value.attribute_type,
+    let selected = validate_allowed_values(
+        &value.attribute_type,
+        values,
+        allowed,
+        &value.validated_input_constraints,
+    )?;
+    value.attribute_type = carina_aws_types::try_with_member_values(
+        value.attribute_type.clone(),
         &selected.iter().map(String::as_str).collect::<Vec<_>>(),
-    );
-    Ok(value)
+    )?;
+    Ok(())
+}
+
+/// Additional patterns are portable slot rules, but finite types must satisfy
+/// them before publication just as they must satisfy the Smithy type policy.
+pub(super) fn validate_added_patterns(
+    value: &str,
+    constraints: &[super::ValidatedInputConstraint],
+) -> Result<()> {
+    for constraint in constraints {
+        if let super::SlotConstraint::Pattern(pattern) = &constraint.constraint {
+            anyhow::ensure!(
+                pattern.is_match(value),
+                "enum/override value {value:?} is rejected by added pattern {:?}",
+                pattern.as_ref().as_str()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_closed_patterns(value: &ValueTypeOverride) -> Result<()> {
+    match value.attribute_type.raw_shape() {
+        RawShape::Enum {
+            values: Some(values),
+            ..
+        } => {
+            for candidate in values {
+                validate_added_patterns(candidate, &value.validated_input_constraints)?;
+            }
+        }
+        RawShape::Union(members) => {
+            for member in members {
+                if let RawShape::Enum {
+                    values: Some(values),
+                    ..
+                } = member.raw_shape()
+                {
+                    for candidate in values {
+                        validate_added_patterns(candidate, &value.validated_input_constraints)?;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub(super) fn validate_allowed_values(
     base: &AttributeType,
     source: Option<&[String]>,
     allowed: &[&str],
+    constraints: &[super::ValidatedInputConstraint],
 ) -> Result<Vec<String>> {
     anyhow::ensure!(!allowed.is_empty(), "empty allowed-value intersection");
     let validator = carina_aws_types::MemberStringValidator::new(base)?;
     for value in allowed {
+        validate_added_patterns(value, constraints)?;
         anyhow::ensure!(
             source.is_none_or(|values| values.iter().any(|old| old == value)),
             "override value {value:?} is absent from the Smithy/declared value set"

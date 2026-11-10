@@ -26,7 +26,7 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::required(
                     "status",
-                    carina_aws_types::with_member_enum_values(
+                    carina_aws_types::try_with_member_enum_values(
                         AttributeType::string(),
                         carina_core::schema::enum_identity(
                             "VersioningStatus",
@@ -34,6 +34,9 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
                         ),
                         &["Enabled", "Suspended"],
                         &[("Enabled", "enabled"), ("Suspended", "suspended")],
+                    )
+                    .expect(
+                        "invalid generated local enum aws.s3.BucketVersioning.VersioningStatus",
                     ),
                 )
                 .with_description("Versioning state of the bucket: Enabled or Suspended.")

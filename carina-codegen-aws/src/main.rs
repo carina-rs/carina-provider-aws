@@ -3234,15 +3234,13 @@ fn member_reference_value(
     else {
         anyhow::bail!("{resource}.{path}: reference decoration requires a String carrier");
     };
-    if i.identity.is_some() {
-        value.attribute_type =
-            carina_aws_types::try_with_member_reference(value.attribute_type, reference)
-                .with_context(|| format!("{resource}.{path}"))?;
-        value.type_code = format!(
-            "carina_aws_types::with_member_reference({}, {code})",
-            value.type_code
-        );
-        return Ok(value);
+    if let Some(identity) = i.identity {
+        return Err(
+            carina_aws_types::MemberIdentityError::ReferenceStringIdentity(Box::new(
+                identity.clone(),
+            )),
+        )
+        .with_context(|| format!("{resource}.{path}"));
     }
     for pattern in [i.pattern, m.pattern].into_iter().flatten() {
         declarations.add_input_constraint(ValidatedInputConstraint::pattern(
@@ -3373,9 +3371,6 @@ fn enum_member_value(
         .cloned()
         .collect::<Vec<_>>();
     let mut base = string_members::derive(model, member, resource, path, &tightenings)?;
-    for pattern in std::mem::take(&mut base.validated_input_constraints) {
-        declarations.add_input_constraint(pattern);
-    }
     let mut identity_override = enum_identity_override(resource, parent, field);
     if let Some(
         TypeOverride::Identity(row)
@@ -3396,6 +3391,7 @@ fn enum_member_value(
                 &base.attribute_type,
                 Some(&values),
                 allowed,
+                &base.validated_input_constraints,
             )
             .with_context(|| format!("{resource}.{path}"))?
         }
@@ -3408,6 +3404,7 @@ fn enum_member_value(
                 &base.attribute_type,
                 Some(&values),
                 allowed,
+                &base.validated_input_constraints,
             )
             .with_context(|| format!("{resource}.{path}"))?;
             type_name = (*name).into();
@@ -3420,6 +3417,8 @@ fn enum_member_value(
     // erase it merely because a decoration disagrees with its source model.
     let source = carina_aws_types::MemberStringValidator::new(&base.attribute_type)?;
     for value in &values {
+        string_members::validate_added_patterns(value, &base.validated_input_constraints)
+            .with_context(|| format!("{resource}.{path}"))?;
         anyhow::ensure!(
             source.accepts(value),
             "{resource}.{path}: enum value {value:?} violates the derived Smithy constraints"
@@ -3519,6 +3518,9 @@ fn enum_member_value(
     } else {
         code
     };
+    for constraint in std::mem::take(&mut base.validated_input_constraints) {
+        declarations.add_input_constraint(constraint);
+    }
     let value = ValueTypeOverride {
         type_code: code,
         attribute_type,
@@ -15464,7 +15466,7 @@ mod tests {
         );
         assert!(
             generated
-                .contains("carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.attribute_type()"),
+                .contains("carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.definition()"),
             "{generated}"
         );
         let markdown = generate_markdown_resource(

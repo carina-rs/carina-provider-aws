@@ -5,6 +5,16 @@ use carina_core::schema::{
 
 /// A catalog constructor defines an identity, never an attribute slot.
 /// There is deliberately no conversion from an arbitrary AttributeType.
+/// Providers can construct their own catalog rows with the public factories.
+/// Within one provider, core aggregate admission rejects conflicting scalar
+/// identity layers; definitions from different provider owners are conjoined.
+/// See [`Self::reference`] for the pinned core's Reference agreement limitation.
+///
+/// ```compile_fail,E0624
+/// use carina_aws_types::{AwsType, IdentityDefinition};
+/// IdentityDefinition::try_enum(AwsType::DnsRecordType.identity(), None, None,
+///     Some(vec!["INVALID".into()]), vec![], None, None);
+/// ```
 #[derive(Clone)]
 pub struct IdentityDefinition(AttributeType);
 
@@ -47,6 +57,9 @@ type Length = Option<(Option<u64>, Option<u64>)>;
 type Range = Option<(Option<i64>, Option<i64>)>;
 
 impl IdentityDefinition {
+    /// Define a reusable String identity, without slot-local member constraints.
+    /// Core aggregate admission rejects a second differing definition of the
+    /// same String identity within a provider. Different owners are conjoined.
     pub fn string(
         identity: TypeIdentity,
         pattern: Option<PatternSpec>,
@@ -62,6 +75,9 @@ impl IdentityDefinition {
         })
     }
 
+    /// Define a reusable Int identity, without slot-local member constraints.
+    /// Core aggregate admission rejects a second differing definition of the
+    /// same Int identity within a provider. Different owners are conjoined.
     pub fn int(identity: TypeIdentity, range: Range, semantic: Option<CustomValidator>) -> Self {
         Self(match semantic {
             Some(check) => AttributeType::refined_int_with_validator(identity, range, check),
@@ -69,6 +85,10 @@ impl IdentityDefinition {
         })
     }
 
+    /// Define an Enum whose finite values satisfy its complete identity policy.
+    /// A provider must use consistent identity definitions; core aggregate
+    /// admission rejects conflicting scalar identity layers within that provider.
+    /// Definitions from different provider owners are intentionally conjoined.
     pub fn enum_(
         identity: TypeIdentity,
         pattern: Option<PatternSpec>,
@@ -84,7 +104,7 @@ impl IdentityDefinition {
 
     /// Enum bases are identity definitions, not slots. Check finite values
     /// against the complete identity policy before publishing their exact set.
-    pub fn try_enum(
+    pub(crate) fn try_enum(
         identity: TypeIdentity,
         pattern: Option<PatternSpec>,
         length: Length,
@@ -137,6 +157,11 @@ impl IdentityDefinition {
         )))
     }
 
+    /// Define the grammar and length shared by one Reference identity.
+    /// A provider must use one consistent definition per identity. Core aggregate
+    /// admission rejects conflicting scalar identity layers, but Carina a3412b6
+    /// does not yet check Reference pattern/length agreement across declarations.
+    /// Definitions from different provider owners are intentionally conjoined.
     pub fn reference(identity: TypeIdentity, pattern: Option<PatternSpec>, length: Length) -> Self {
         Self(AttributeType::reference(identity, pattern, length))
     }

@@ -107,7 +107,8 @@ fn decorated_data_source_reference_uses_member_seam() {
         .expect("a declared identity cannot be silently replaced by the reference identity");
     let message = format!("{error:#}");
     assert!(
-        message.contains("logs.LogGroup.kms_key_id") && message.contains("cannot replace identity"),
+        message.contains("logs.LogGroup.kms_key_id")
+            && message.contains("reference slot cannot carry a String identity"),
         "{message}"
     );
 }

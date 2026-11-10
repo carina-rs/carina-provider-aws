@@ -335,8 +335,7 @@ fn an_enum_cannot_take_a_string_identity() {
 #[test]
 fn int_enum_constructors_share_the_catalog_callback() {
     let row = AwsType::LogsLogGroupRetentionInDays;
-    let base =
-        carina_aws_types::validated_int_enum(row.identity(), row.allowed_int_values().unwrap());
+    let base = carina_aws_types::logs_log_group_retention_in_days();
     try_with_member_identity(base, row.definition()).unwrap();
 }
 
@@ -366,12 +365,49 @@ fn narrowing_an_enum_preserves_an_explicitly_empty_alias_set() {
         None,
         None,
     );
-    let narrowed = carina_aws_types::with_member_values(base, &["API-VALUE"]);
+    let narrowed = carina_aws_types::try_with_member_values(base, &["API-VALUE"]).unwrap();
     let carina_core::schema::RawShape::Enum { dsl_aliases, .. } = narrowed.raw_shape() else {
         panic!("Enum")
     };
     assert!(
         dsl_aliases.is_empty(),
         "narrowing must not synthesize presentation aliases"
+    );
+}
+
+#[test]
+fn local_enum_builders_cannot_relabel_identified_carriers() {
+    for ty in [
+        AwsType::IamRoleName.attribute_type(),
+        AwsType::DnsRecordType.attribute_type(),
+    ] {
+        assert!(matches!(
+            carina_aws_types::try_with_member_enum_values(
+                ty,
+                TypeIdentity::bare("Other"),
+                &["A"],
+                &[]
+            ),
+            Err(carina_aws_types::MemberIdentityError::IdentityConflict { .. })
+        ));
+    }
+}
+
+#[test]
+fn enum_subsets_cannot_install_values_outside_the_carrier() {
+    assert!(
+        carina_aws_types::try_with_member_values(
+            AwsType::DnsRecordType.attribute_type(),
+            &["INVALID"]
+        )
+        .is_err()
+    );
+    assert!(
+        carina_aws_types::try_with_named_enum_values(
+            AwsType::DnsRecordType.definition(),
+            &["INVALID"],
+            &[]
+        )
+        .is_err()
     );
 }

@@ -351,7 +351,7 @@ fn finite_values_encode_the_checked_policy_without_member_bases() {
         None,
     )
     .into_attribute_type();
-    let narrowed = carina_aws_types::with_member_values(definition, &["A"]);
+    let narrowed = carina_aws_types::try_with_member_values(definition, &["A"]).unwrap();
     let RawShape::Enum { base, .. } = narrowed.raw_shape() else {
         panic!("Enum")
     };

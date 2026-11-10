@@ -13,6 +13,29 @@
 //! targets use [`AwsCredentialsSource`] and [`load_sdk_config`]. Service handles
 //! retain the provider session's diagnostics for typed retry warnings.
 
+//! Unchecked enum relabeling and value installation are not public APIs.
+//!
+//! ```compile_fail,E0425
+//! carina_aws_types::with_member_enum_identity(
+//!     carina_aws_types::AwsType::DnsRecordType.attribute_type(),
+//!     carina_core::schema::TypeIdentity::bare("Other"));
+//! ```
+//! ```compile_fail,E0425
+//! carina_aws_types::with_member_values(
+//!     carina_aws_types::AwsType::DnsRecordType.attribute_type(), &["INVALID"]);
+//! ```
+//! ```compile_fail,E0425
+//! let row = carina_aws_types::AwsType::LogsLogGroupRetentionInDays;
+//! carina_aws_types::validated_int_enum(row.identity(), row.allowed_int_values().unwrap());
+//! ```
+
+#[cfg(test)]
+extern crate self as carina_aws_types;
+#[cfg(test)]
+mod identity_layers_tests;
+#[cfg(test)]
+mod member_identity_tests;
+
 #[cfg(feature = "sts")]
 mod assume_role;
 mod catalog;

@@ -9,7 +9,7 @@ use crate::IdentityDefinition;
 use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{
-    AttributeType, DslTransform, PatternMatch, PatternSpec, TypeIdentity, legacy_validator,
+    DslTransform, PatternMatch, PatternSpec, TypeIdentity, legacy_validator,
 };
 
 use crate::{
@@ -126,35 +126,24 @@ fn validated_int_enum_definition(
     identity: TypeIdentity,
     valid_values: &'static [i64],
 ) -> IdentityDefinition {
-    type Key = (TypeIdentity, &'static [i64]);
-    static DEFINITIONS: std::sync::LazyLock<
-        std::sync::Mutex<std::collections::HashMap<Key, IdentityDefinition>>,
-    > = std::sync::LazyLock::new(Default::default);
-    DEFINITIONS
-        .lock()
-        .expect("integer enum definitions")
-        .entry((identity.clone(), valid_values))
-        .or_insert_with(|| {
-            IdentityDefinition::int(
-                identity,
-                None,
-                Some(legacy_validator(move |value| {
-                    if let Value::Concrete(ConcreteValue::Int(value)) = value {
-                        if valid_values.contains(value) {
-                            Ok(())
-                        } else {
-                            Err(format!(
-                                "Value {value} is not valid; allowed values are: {valid_values:?}"
-                            )
-                            .into())
-                        }
-                    } else {
-                        Err("Expected integer".into())
-                    }
-                })),
-            )
-        })
-        .clone()
+    IdentityDefinition::int(
+        identity,
+        None,
+        Some(legacy_validator(move |value| {
+            if let Value::Concrete(ConcreteValue::Int(value)) = value {
+                if valid_values.contains(value) {
+                    Ok(())
+                } else {
+                    Err(
+                        format!("Value {value} is not valid; allowed values are: {valid_values:?}")
+                            .into(),
+                    )
+                }
+            } else {
+                Err("Expected integer".into())
+            }
+        })),
+    )
 }
 
 fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> IdentityDefinition {
@@ -467,11 +456,6 @@ fn aws_identity(segments: &[&str], kind: &str) -> TypeIdentity {
     } else {
         crate::common::provider_bare_type(segments, kind)
     }
-}
-
-/// Construct a standalone integer enumeration through its owned definition.
-pub fn validated_int_enum(identity: TypeIdentity, values: &'static [i64]) -> AttributeType {
-    validated_int_enum_definition(identity, values).into_attribute_type()
 }
 
 fn enum_definition(values: &[&str], identity: TypeIdentity) -> IdentityDefinition {
@@ -1467,7 +1451,7 @@ None),
 mod tests {
     use std::collections::{BTreeSet, HashSet};
 
-    use carina_core::schema::{CustomValidator, RawShape};
+    use carina_core::schema::{AttributeType, CustomValidator, RawShape};
 
     use super::*;
 

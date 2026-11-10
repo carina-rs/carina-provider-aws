@@ -1,5 +1,33 @@
 use super::*;
 
+#[test]
+fn identified_reference_slots_have_a_typed_classification_error() {
+    let value = ValueTypeOverride {
+        type_code: "carina_aws_types::kms_key_id()".into(),
+        attribute_type: AwsType::KmsKeyId.attribute_type(),
+        documentation: None,
+        validated_input_constraints: vec![],
+    };
+    let error = member_reference_value(
+        value,
+        "test.Ref",
+        "key",
+        &TypeDeclarations::default(),
+        AwsType::KmsKeyReference.definition(),
+        "unused",
+    )
+    .err()
+    .expect("an identified String cannot become a reference slot");
+    assert!(
+        format!("{error:#}").contains("reference slot cannot carry a String identity"),
+        "{error:#}"
+    );
+    assert!(matches!(
+        error.downcast_ref::<carina_aws_types::MemberIdentityError>(),
+        Some(carina_aws_types::MemberIdentityError::ReferenceStringIdentity(_))
+    ));
+}
+
 fn text(source: &str) -> (SmithyModel, carina_smithy::ShapeRef) {
     let model = carina_smithy::parse(
         &serde_json::json!({"smithy":"2.0","shapes":{

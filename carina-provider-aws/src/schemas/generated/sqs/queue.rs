@@ -88,14 +88,14 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("deduplication_scope", carina_aws_types::with_member_values(carina_aws_types::AwsType::SqsQueueDeduplicationScope.attribute_type(), &["messageGroup", "queue"]))
+            AttributeSchema::optional("deduplication_scope", carina_aws_types::try_with_named_enum_values(carina_aws_types::AwsType::SqsQueueDeduplicationScope.definition(), &["messageGroup", "queue"], &[("messageGroup", "message_group"), ("queue", "queue")]).expect("invalid generated enum subset for aws.sqs.Queue.DeduplicationScope"))
                 .create_only()
                 .with_description("FIFO only, create-only: scope of message deduplication. Valid values: `messageGroup`, `queue`.")
                 .with_provider_name("DeduplicationScope")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("fifo_throughput_limit", carina_aws_types::with_member_values(carina_aws_types::AwsType::SqsQueueFifoThroughputLimit.attribute_type(), &["perQueue", "perMessageGroupId"]))
+            AttributeSchema::optional("fifo_throughput_limit", carina_aws_types::try_with_named_enum_values(carina_aws_types::AwsType::SqsQueueFifoThroughputLimit.definition(), &["perQueue", "perMessageGroupId"], &[("perQueue", "per_queue"), ("perMessageGroupId", "per_message_group_id")]).expect("invalid generated enum subset for aws.sqs.Queue.FifoThroughputLimit"))
                 .create_only()
                 .with_description("FIFO only, create-only: per-queue or per-message-group throughput limit. Valid values: `perQueue`, `perMessageGroupId`.")
                 .with_provider_name("FifoThroughputLimit")

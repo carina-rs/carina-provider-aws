@@ -1,5 +1,123 @@
 use super::*;
 
+#[test]
+fn closed_model_values_check_every_added_pattern() {
+    let model = carina_smithy::parse(
+        &serde_json::json!({"smithy":"2.0","shapes":{
+            "test#Mode":{"type":"enum","members":{
+                "A":{"target":"smithy.api#Unit","traits":{"smithy.api#enumValue":"A"}},
+                "B":{"target":"smithy.api#Unit","traits":{"smithy.api#enumValue":"B B"}}
+            }}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let member = carina_smithy::ShapeRef {
+        target: "test#Mode".into(),
+        traits: Default::default(),
+    };
+    for rule in [
+        TypeOverride::StringPattern(PatternSpec::new("^A$", PatternMatch::Full)),
+        TypeOverride::RefinedString {
+            pattern: PatternSpec::new("^A$", PatternMatch::Full),
+            min_length: 1,
+            max_length: 10,
+        },
+        TypeOverride::StringProfile(StringProfile::DnsName),
+    ] {
+        let mut declarations = TypeDeclarations::default();
+        declarations.members.insert("Mode", rule);
+        let error = enum_member_value(
+            &model,
+            "test.Patterns",
+            &member,
+            "Mode",
+            "mode",
+            "aws.test",
+            &declarations,
+            &HashMap::new(),
+            None,
+        )
+        .err()
+        .expect("B B must not bypass an added pattern");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("test.Patterns.mode") && message.contains("B B"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn closed_string_values_check_added_patterns() {
+    let model = carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).unwrap();
+    let member = carina_smithy::ShapeRef {
+        target: "smithy.api#String".into(),
+        traits: Default::default(),
+    };
+    let error = string_members::derive(
+        &model,
+        &member,
+        "test.Patterns",
+        "mode",
+        &[
+            TypeOverride::StringPattern(PatternSpec::new("^A$", PatternMatch::Full)),
+            TypeOverride::LocalEnum {
+                namespace: "aws.test",
+                name: "Mode",
+                values: &["A", "B"],
+            },
+        ],
+    )
+    .err()
+    .expect("a closed String value must satisfy the added pattern");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("test.Patterns.mode") && message.contains('B'),
+        "{message}"
+    );
+}
+
+#[test]
+fn named_string_values_check_all_added_patterns() {
+    let model = carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).unwrap();
+    let member = carina_smithy::ShapeRef {
+        target: "smithy.api#String".into(),
+        traits: Default::default(),
+    };
+    for identity in [AwsType::SqsQueueDeduplicationScope, AwsType::Region] {
+        let (allowed, rejected): (&'static [&'static str], &str) = if identity == AwsType::Region {
+            (&["us-east-1", "us-west-2"], "us-west-2")
+        } else {
+            (&["messageGroup", "queue"], "queue")
+        };
+        let error = string_members::derive(
+            &model,
+            &member,
+            "test.Values",
+            "mode",
+            &[
+                TypeOverride::StringPattern(PatternSpec::new(".*", PatternMatch::Full)),
+                TypeOverride::StringPattern(PatternSpec::new(
+                    "^(?:messageGroup|us-east-1)$",
+                    PatternMatch::Full,
+                )),
+                TypeOverride::NamedValues {
+                    identity,
+                    values: allowed,
+                },
+            ],
+        )
+        .err()
+        .expect("finite overrides must satisfy every added pattern");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("test.Values.mode") && message.contains(rejected),
+            "{message}"
+        );
+    }
+}
+
 fn text(source: &str) -> (SmithyModel, carina_smithy::ShapeRef) {
     let model = carina_smithy::parse(
         &serde_json::json!({"smithy":"2.0","shapes":{
@@ -81,13 +199,13 @@ fn empty_closed_identity_intersection_is_a_codegen_error() {
 }
 
 #[test]
-fn local_enum_on_an_enum_compiles_and_evaluates() {
+fn local_enum_cannot_relabel_an_identified_enum() {
     let base=ValueTypeOverride {
         type_code:r#"AttributeType::enum_(carina_core::schema::enum_identity("Old", Some("aws.test")),Some(vec!["A".into(),"B".into()]),vec![],None,None)"#.into(),
         documentation: None, validated_input_constraints: Vec::new(),
         attribute_type:AttributeType::enum_(carina_core::schema::enum_identity("Old",Some("aws.test")),Some(vec!["A".into(),"B".into()]),vec![],None,None),
     };
-    let result = string_members::decorate(
+    let error = string_members::decorate(
         base,
         &TypeOverride::LocalEnum {
             namespace: "aws.test",
@@ -95,11 +213,33 @@ fn local_enum_on_an_enum_compiles_and_evaluates() {
             values: &["A"],
         },
     )
+    .err()
+    .expect("a local enum cannot replace Old");
+    assert!(matches!(
+        error.downcast_ref::<carina_aws_types::MemberIdentityError>(),
+        Some(carina_aws_types::MemberIdentityError::IdentityConflict { .. })
+    ));
+}
+
+#[test]
+fn anonymous_local_enum_emission_compiles_and_evaluates() {
+    let (model, member) = text("^A+$");
+    let value = string_members::derive(
+        &model,
+        &member,
+        "test.Enum",
+        "mode",
+        &[TypeOverride::LocalEnum {
+            namespace: "aws.test",
+            name: "Letters",
+            values: &["A"],
+        }],
+    )
     .unwrap();
-    let RawShape::Enum { dsl_aliases, .. } = result.attribute_type.raw_shape() else {
+    let RawShape::Enum { dsl_aliases, .. } = value.attribute_type.raw_shape() else {
         panic!("Enum")
     };
-    evaluate(&result.type_code, dsl_aliases);
+    evaluate(&value.type_code, dsl_aliases);
 }
 
 #[test]
@@ -432,7 +572,10 @@ fn closed_named_values_emit_one_final_list() {
     )
     .unwrap();
     assert_eq!(
-        value.type_code.matches("with_member_values(").count(),
+        value
+            .type_code
+            .matches("try_with_named_enum_values(")
+            .count(),
         1,
         "{}",
         value.type_code

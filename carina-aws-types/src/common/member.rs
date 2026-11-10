@@ -10,6 +10,7 @@ pub enum MemberIdentityError {
         requested: Box<TypeIdentity>,
     },
     ConflictingDefinition(Box<TypeIdentity>),
+    ReferenceStringIdentity(Box<TypeIdentity>),
     OpenEnumConstraints,
     Invalid(String),
 }
@@ -22,6 +23,9 @@ impl std::fmt::Display for MemberIdentityError {
             } => write!(f, "cannot replace identity {existing} with {requested}"),
             Self::ConflictingDefinition(id) => {
                 write!(f, "conflicting identity definition for {id}")
+            }
+            Self::ReferenceStringIdentity(id) => {
+                write!(f, "reference slot cannot carry a String identity: {id}")
             }
             Self::OpenEnumConstraints => f.write_str(
                 "open Enum bases cannot enforce identity or member pattern/length constraints",
@@ -268,12 +272,12 @@ pub fn try_with_member_identity(
             RawShape::Enum {
                 base: scalar,
                 values,
-                dsl_aliases,
                 ..
             },
             RawShape::Enum {
                 identity,
                 values: named_values,
+                dsl_aliases,
                 validate,
                 to_dsl,
                 base: named_base,
@@ -439,110 +443,85 @@ pub fn with_named_enum_values(
     values: &[&str],
     aliases: &[(&str, &str)],
 ) -> AttributeType {
-    try_with_named_enum_values(named, values, aliases)
-        .expect("codegen validated the named enum subset")
+    let message = format!(
+        "invalid named enum subset for {}",
+        match named.as_attribute_type().raw_shape() {
+            RawShape::Enum { identity, .. } => identity.to_string(),
+            _ => "non-enum definition".into(),
+        }
+    );
+    try_with_named_enum_values(named, values, aliases).expect(&message)
 }
 
-/// Rebind an identity definition with no declaration-local restrictions.
-pub fn with_member_enum_identity(
+/// Build a finite local enum from an anonymous String slot. An identified
+/// carrier must keep its catalog definition and use the named subset API.
+pub fn try_with_member_enum_values(
     ty: AttributeType,
-    identity: carina_core::schema::TypeIdentity,
-) -> AttributeType {
-    enum_presentation(ty, identity, false)
-}
-
-/// Build a closed enum in one step after codegen validated each selected value
-/// against the source slot. No member layer is ever stored inside its base.
-pub fn with_member_enum_values(
-    ty: AttributeType,
-    identity: carina_core::schema::TypeIdentity,
+    identity: TypeIdentity,
     values: &[&str],
     aliases: &[(&str, &str)],
-) -> AttributeType {
-    let ty = with_member_values(enum_presentation(ty, identity, true), values);
-    let RawShape::Enum {
-        identity,
-        base,
-        values,
-        validate,
-        to_dsl,
-        ..
-    } = ty.raw_shape()
-    else {
-        unreachable!("Enum")
+) -> Result<AttributeType, MemberIdentityError> {
+    let existing = match ty.raw_shape() {
+        RawShape::String { identity_layer, .. } => identity_layer.identity,
+        RawShape::Enum { identity, .. } | RawShape::Reference { identity, .. } => Some(identity),
+        _ => return Err("local enum requires an anonymous String carrier".into()),
     };
-    assert!(
-        aliases
-            .iter()
-            .all(|(api, _)| values.is_none_or(|values| values.iter().any(|v| v == api))),
-        "alias target is outside the checked set"
-    );
-    AttributeType::enum_with_base(
-        identity.clone(),
-        base.clone(),
-        values.map(<[String]>::to_vec),
+    if let Some(existing) = existing {
+        return Err(MemberIdentityError::IdentityConflict {
+            existing: Box::new(existing.clone()),
+            requested: Box::new(identity),
+        });
+    }
+    if values.is_empty() {
+        return Err("empty allowed-value intersection".into());
+    }
+    let policy = MemberStringValidator::new(&ty)?;
+    for value in values {
+        if !policy.accepts(value) {
+            return Err(
+                format!("enum value {value:?} violates the source String constraints").into(),
+            );
+        }
+    }
+    for (canonical, _) in aliases {
+        if !values.contains(canonical) {
+            return Err(
+                format!("alias target {canonical:?} is absent from the selected set").into(),
+            );
+        }
+    }
+    // The complete finite set has satisfied the anonymous slot policy. No
+    // callback from an old identity can be donated to the new local enum.
+    Ok(AttributeType::enum_with_base(
+        identity,
+        AttributeType::string(),
+        Some(values.iter().map(|value| (*value).into()).collect()),
         aliases
             .iter()
             .map(|(api, dsl)| ((*api).into(), (*dsl).into()))
             .collect(),
-        validate.cloned(),
-        to_dsl.cloned(),
-    )
+        None,
+        None,
+    ))
 }
 
-fn enum_presentation(
+/// Checked convenience constructor for a finite local enum.
+pub fn with_member_enum_values(
     ty: AttributeType,
-    identity: carina_core::schema::TypeIdentity,
-    finite: bool,
+    identity: TypeIdentity,
+    values: &[&str],
+    aliases: &[(&str, &str)],
 ) -> AttributeType {
-    let (base, values, aliases, semantic, to_dsl) = match ty.raw_shape() {
-        RawShape::String { identity_layer, .. } => (
-            ty.clone(),
-            None,
-            vec![],
-            identity_layer.validate.cloned(),
-            identity_layer.to_dsl.cloned(),
-        ),
-        RawShape::Enum {
-            base,
-            values,
-            dsl_aliases,
-            validate,
-            to_dsl,
-            ..
-        } => (
-            base.clone(),
-            values.map(|v| v.to_vec()),
-            dsl_aliases.to_vec(),
-            validate.cloned(),
-            to_dsl.cloned(),
-        ),
-        _ => panic!("local enum requires a String or Enum carrier"),
-    };
-    let RawShape::String {
-        identity_layer,
-        member_layer,
-    } = base.raw_shape()
-    else {
-        panic!("String enum base")
-    };
-    assert!(
-        finite
-            || values.is_some()
-            || (identity_layer.pattern.is_none()
-                && identity_layer.length.is_none()
-                && member_layer.pattern.is_none()
-                && member_layer.length.is_none()),
-        "open enum cannot retain structural constraints"
-    );
-    // Finite sets were checked before publication; open bases are unconstrained.
-    let definition = AttributeType::string();
-    AttributeType::enum_with_base(identity, definition, values, aliases, semantic, to_dsl)
+    let message = format!("invalid local enum values for {identity}");
+    try_with_member_enum_values(ty, identity, values, aliases).expect(&message)
 }
 
-/// Install the exact finite list already validated by codegen. This performs
-/// no regex compilation, intersection, or value filtering at schema construction.
-pub fn with_member_values(ty: AttributeType, allowed: &[&str]) -> AttributeType {
+/// Select a finite subset while preserving the carrier's identity and aliases.
+/// Every selected value must satisfy its full existing definition.
+pub fn try_with_member_values(
+    ty: AttributeType,
+    allowed: &[&str],
+) -> Result<AttributeType, MemberIdentityError> {
     let RawShape::Enum {
         identity,
         dsl_aliases,
@@ -551,25 +530,34 @@ pub fn with_member_values(ty: AttributeType, allowed: &[&str]) -> AttributeType 
         ..
     } = ty.raw_shape()
     else {
-        panic!("allowed values require an enum")
+        return Err("allowed values require an enum".into());
     };
+    if allowed.is_empty() {
+        return Err("empty allowed-value intersection".into());
+    }
+    let policy = MemberStringValidator::new(&ty)?;
+    for value in allowed {
+        if !policy.accepts(value) {
+            return Err(format!(
+                "enum value {value:?} is absent from or rejected by identity {identity}"
+            )
+            .into());
+        }
+    }
     let values: Vec<String> = allowed.iter().map(|v| (*v).into()).collect();
-    assert!(!values.is_empty(), "empty allowed-value intersection");
     let aliases = dsl_aliases
         .iter()
         .filter(|(v, _)| values.contains(v))
         .cloned()
         .collect();
-    // Protocol 27 closed enums store the exact finite intersection. Codegen
-    // checked every value; no member layer may survive inside their base.
-    AttributeType::enum_with_base(
+    Ok(AttributeType::enum_with_base(
         identity.clone(),
         AttributeType::string(),
         Some(values),
         aliases,
         validate.cloned(),
         to_dsl.cloned(),
-    )
+    ))
 }
 
 /// A String policy whose two patterns are compiled once before a value loop.
