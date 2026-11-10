@@ -199,6 +199,29 @@ async fn route53_dns_names_enforce_label_and_wildcard_rules() {
 }
 
 #[tokio::test]
+async fn route53_record_name_delimiter_is_rejected_before_normalization() {
+    let error = normalize(dns_record("a|b.example.com", false))
+        .await
+        .expect_err("record names must not contain a raw identifier delimiter");
+    assert!(
+        error.contains("route53.RecordSet attribute name:"),
+        "{error}"
+    );
+    assert!(
+        error.contains(r"must not contain '|'; write it as \174"),
+        "{error}"
+    );
+    assert!(!error.contains("a|b.example.com"), "{error}");
+
+    normalize(dns_record(r"a\174b.example.com", false))
+        .await
+        .expect("escaped delimiters are valid in record names");
+    normalize(dns_record("a|b.example.com", true))
+        .await
+        .expect("alias DNS names are not part of the record identifier");
+}
+
+#[tokio::test]
 async fn route53_aws_probe_dns_wire_length_matches_253_characters_without_root_dot() {
     // Each label is at most 63 bytes. Four label-length octets plus the final
     // zero root octet take the 250 label-data bytes up to 255 wire bytes.
