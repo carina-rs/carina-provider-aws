@@ -279,8 +279,14 @@ fn scalar_compositors_name_declared_identities_and_keep_builtin_names() {
         AttributeType::refined_float(Some(identity), None),
     ] {
         let identity = match ty.raw_shape() {
-            RawShape::String { identity, .. }
-            | RawShape::Int { identity, .. }
+            RawShape::String {
+                identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+                ..
+            }
+            | RawShape::Int {
+                identity_layer: carina_core::schema::IntIdentityParts { identity, .. },
+                ..
+            }
             | RawShape::Float { identity, .. } => identity.unwrap(),
             _ => unreachable!("declared scalar fixture"),
         };

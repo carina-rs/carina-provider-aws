@@ -24,10 +24,20 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::required("status", carina_aws_types::s3_versioning_status())
-                    .with_description("Versioning state of the bucket: Enabled or Suspended.")
-                    .with_provider_name("Status")
-                    .build(),
+                AttributeSchema::required(
+                    "status",
+                    carina_aws_types::with_member_enum_values(
+                        AttributeType::string(),
+                        carina_core::schema::enum_identity(
+                            "VersioningStatus",
+                            Some("aws.s3.BucketVersioning"),
+                        ),
+                        &["Enabled", "Suspended"],
+                    ),
+                )
+                .with_description("Versioning state of the bucket: Enabled or Suspended.")
+                .with_provider_name("Status")
+                .build(),
             ),
     }
 }

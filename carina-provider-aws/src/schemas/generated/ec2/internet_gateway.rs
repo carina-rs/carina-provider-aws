@@ -19,14 +19,14 @@ pub fn ec2_internet_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes an internet gateway.")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::optional("vpc_id", super::vpc_id())
+            AttributeSchema::optional("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
                 .create_only()
                 .with_description("The ID of the VPC to attach the internet gateway to. The provider attaches the IGW after creation and detaches before deletion.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("internet_gateway_id", super::internet_gateway_id())
+            AttributeSchema::provider_populated("internet_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::InternetGatewayId.attribute_type()))
                 .with_description("The ID of the internet gateway. (read-only)")
                 .with_provider_name("InternetGatewayId")
                 .build(),

@@ -318,18 +318,14 @@ mod tests {
                                 schema.resource_type(),
                                 path
                             );
-                            let expected_pattern = if arn_only {
-                                carina_aws_types::kms_key_arn_pattern()
-                            } else {
-                                carina_aws_types::kms_key_reference_pattern()
-                            };
-                            assert_eq!(
-                                pattern.map(carina_core::schema::PatternSpec::as_str),
-                                Some(expected_pattern),
-                                "{}.{} must use the pattern for arn_only={arn_only}",
-                                schema.resource_type(),
-                                path
-                            );
+                            if arn_only {
+                                assert!(schema.parts().input_rules.iter().any(|rule| {
+                                    rule.path().segments().collect::<Vec<_>>().join(".") == path
+                                        && matches!(rule.parts().predicate,
+                                            carina_core::schema::InputPredicate::Matches(pattern)
+                                                if pattern.as_str() == carina_aws_types::kms_key_arn_pattern())
+                                }), "{}.{} needs its ARN-only input rule", schema.resource_type(), path);
+                            }
                             coverage
                                 .references
                                 .insert((schema.resource_type().to_string(), path.to_string()));
@@ -355,7 +351,10 @@ mod tests {
                 Shape::Reference {
                     identity, pattern, ..
                 } => check(pattern, Some(identity)),
-                Shape::String { pattern, .. } => check(pattern, None),
+                Shape::String {
+                    identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+                    ..
+                } => check(pattern, None),
                 Shape::UnloadedSchemaType(unloaded) => panic!(
                     "KMS coverage requires a loaded schema type for {}",
                     unloaded.identity(),
@@ -737,7 +736,11 @@ mod tests {
         expected_pattern: Option<&str>,
     ) {
         let RawShape::String {
-            identity, pattern, ..
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity, pattern, ..
+                },
+            ..
         } = attr.raw_shape()
         else {
             panic!("expected refined String, got {:?}", attr.raw_shape());
@@ -753,7 +756,11 @@ mod tests {
     }
 
     fn assert_refined_int_range(attr: &AttributeType, expected_range: (Option<i64>, Option<i64>)) {
-        let RawShape::Int { range, .. } = attr.raw_shape() else {
+        let RawShape::Int {
+            member_layer: carina_core::schema::IntMemberParts { range },
+            ..
+        } = attr.raw_shape()
+        else {
             panic!("expected refined Int, got {:?}", attr.raw_shape());
         };
         assert_eq!(range, Some(expected_range));

@@ -10,10 +10,6 @@ use carina_provider_protocol::types::ValidatorType;
 
 const VALID_BUCKET_NAMESPACE: &[&str] = &["account-regional", "global"];
 
-pub fn arn() -> AttributeType {
-    super::s3_bucket_arn()
-}
-
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
 pub fn s3_bucket_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -32,13 +28,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
         )
         // Read contract: CreateBucket accepts the namespace selector but HeadBucket does not return it
         .attribute(
-            AttributeSchema::optional("bucket_namespace", AttributeType::enum_(
-    carina_core::schema::enum_identity("BucketNamespace", Some("aws.s3.Bucket")),
-    Some(vec!["account-regional".to_string(), "global".to_string()]),
-    vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("bucket_namespace", AttributeType::enum_(carina_core::schema::enum_identity("BucketNamespace", Some("aws.s3.Bucket")), Some(vec!["account-regional".to_string(), "global".to_string()]), vec![("account-regional".to_string(), "account_regional".to_string()), ("global".to_string(), "global".to_string())], None, None))
                 .create_only()
                 .write_only()
                 .with_description("Specifies the namespace where you want to create your general purpose bucket. When you create a general purpose bucket, you can choose to create a buc...")
@@ -46,7 +36,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("arn", self::arn())
+            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.attribute_type()))
                 .with_description("ARN of the bucket. (read-only)")
                 .with_provider_name("Arn")
                 .build(),
@@ -58,25 +48,25 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("bucket_domain_name", carina_aws_types::route53_dns_name())
+            AttributeSchema::provider_populated("bucket_domain_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024))))))
                 .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`). (read-only)")
                 .with_provider_name("BucketDomainName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("bucket_regional_domain_name", carina_aws_types::route53_dns_name())
+            AttributeSchema::provider_populated("bucket_regional_domain_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024))))))
                 .with_description("Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`). (read-only)")
                 .with_provider_name("BucketRegionalDomainName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("hosted_zone_id", super::route53_hosted_zone_id())
+            AttributeSchema::provider_populated("hosted_zone_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Route53HostedZoneId.attribute_type()))
                 .with_description("Route 53 Hosted Zone ID for the bucket's region. (read-only)")
                 .with_provider_name("HostedZoneId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", AttributeType::map_with_key(AttributeType::refined_string(None, None, Some((Some(1), None)), None), AttributeType::string()))
+            AttributeSchema::optional("tags", AttributeType::map_with_key(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), None)))), AttributeType::string()))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),

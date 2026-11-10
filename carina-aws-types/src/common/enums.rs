@@ -57,7 +57,7 @@ pub fn dsl_enum_value(value: &str) -> String {
 /// `("Subnet", "subnet")` / `("STANDARD_IA", "standard_ia")` accept
 /// the DSL spelling cleanly without falling back to the legacy lax
 /// canonical-fallback.
-fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
+pub(crate) fn dsl_aliases_for(values: &[&str]) -> Vec<(String, String)> {
     values
         .iter()
         .map(|v| (v.to_string(), dsl_enum_value(v)))

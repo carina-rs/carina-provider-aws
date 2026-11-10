@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use carina_core::protocol_convert::{protocol_to_resource_schema, resource_schema_to_protocol};
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{EffectiveType, RawShape, ValidatedResourceSchema};
@@ -48,7 +51,7 @@ fn strings(resource: &str, path: &str, valid: &[&str], invalid: &[&str]) {
     for (values, expected) in [(valid, true), (invalid, false)] {
         for value in values {
             assert_eq!(
-                ty.validate(&string(value)).is_ok(),
+                ty.validate(&string(value)).is_ok() && input_patterns::accept(&schema, path, value),
                 expected,
                 "{resource}.{path} = {value:?}"
             );
@@ -111,7 +114,10 @@ fn ec2_flow_log_group_accepts_existing_aws_groups_and_checks_cloudwatch_name_bou
     let schema = schema("FlowLog");
     assert!(matches!(
         field(&schema, "log_group_name").as_type().raw_shape(),
-        RawShape::String { identity: None, .. }
+        RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { identity: None, .. },
+            ..
+        }
     ));
 }
 
@@ -284,9 +290,10 @@ fn ec2_vpc_and_subnet_ipv4_netmasks_are_anonymous_16_through_28() {
             assert!(matches!(
                 ty.as_type().raw_shape(),
                 RawShape::Int {
-                    identity: None,
-                    range: Some((Some(16), Some(28))),
-                    ..
+                    identity_layer: carina_core::schema::IntIdentityParts { identity: None, .. },
+                    member_layer: carina_core::schema::IntMemberParts {
+                        range: Some((Some(16), Some(28)))
+                    }
                 }
             ));
             for value in [0, 15, 16, 24, 28, 29, 32] {
@@ -510,11 +517,19 @@ fn ec2_new_named_validators_survive_protocol_21_without_changing_carriers() {
             let ty = field(&schema, path);
             let actual = match ty.as_type().raw_shape() {
                 RawShape::String {
-                    identity: Some(identity),
+                    identity_layer:
+                        carina_core::schema::StringIdentityParts {
+                            identity: Some(identity),
+                            ..
+                        },
                     ..
                 }
                 | RawShape::Int {
-                    identity: Some(identity),
+                    identity_layer:
+                        carina_core::schema::IntIdentityParts {
+                            identity: Some(identity),
+                            ..
+                        },
                     ..
                 } => identity,
                 other => panic!("{resource}.{path}: wrong carrier {other:?}"),

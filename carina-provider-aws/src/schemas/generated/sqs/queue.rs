@@ -19,7 +19,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         .with_description("")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::required("queue_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(80))), None))
+            AttributeSchema::required("queue_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(80))))))
                 .create_only()
                 .identity()
                 .with_description("The name of the new queue. The following limits apply to this name: A queue name can have up to 80 characters. Valid values: alphanumeric characters, ...")
@@ -33,31 +33,31 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("visibility_timeout", AttributeType::refined_int(None, Some((Some(0), Some(43200)))))
+            AttributeSchema::optional("visibility_timeout", carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(43200)))
                 .with_description("The visibility timeout for the queue, in seconds. Defaults to 30. Range 0–43,200.")
                 .with_provider_name("VisibilityTimeout")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("message_retention_period", AttributeType::refined_int(None, Some((Some(60), Some(1209600)))))
+            AttributeSchema::optional("message_retention_period", carina_aws_types::with_int_range(AttributeType::int(), Some(60), Some(1209600)))
                 .with_description("The length of time, in seconds, for which Amazon SQS retains a message. Defaults to 345,600 (4 days). Range 60–1,209,600 (1 minute–14 days).")
                 .with_provider_name("MessageRetentionPeriod")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("delay_seconds", AttributeType::refined_int(None, Some((Some(0), Some(900)))))
+            AttributeSchema::optional("delay_seconds", carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(900)))
                 .with_description("The length of time, in seconds, for which the delivery of all messages in the queue is delayed. Defaults to 0. Range 0–900 (15 minutes).")
                 .with_provider_name("DelaySeconds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("maximum_message_size", AttributeType::refined_int(None, Some((Some(1024), Some(1048576)))))
+            AttributeSchema::optional("maximum_message_size", carina_aws_types::with_int_range(AttributeType::int(), Some(1024), Some(1048576)))
                 .with_description("The limit of how many bytes a message can contain before Amazon SQS rejects it. Defaults to 1,048,576 (1 MiB). Range 1,024–1,048,576 (1 KiB–1 MiB)...")
                 .with_provider_name("MaximumMessageSize")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("receive_message_wait_time_seconds", AttributeType::refined_int(None, Some((Some(0), Some(20)))))
+            AttributeSchema::optional("receive_message_wait_time_seconds", carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(20)))
                 .with_description("The duration, in seconds, for which a ReceiveMessage call waits for a message to arrive (long polling). Defaults to 0. Range 0–20.")
                 .with_provider_name("ReceiveMessageWaitTimeSeconds")
                 .build(),
@@ -88,27 +88,27 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("deduplication_scope", carina_aws_types::sqs_queue_deduplication_scope())
+            AttributeSchema::optional("deduplication_scope", carina_aws_types::with_member_values(carina_aws_types::AwsType::SqsQueueDeduplicationScope.attribute_type(), &["messageGroup", "queue"]))
                 .create_only()
                 .with_description("FIFO only, create-only: scope of message deduplication. Valid values: `messageGroup`, `queue`.")
                 .with_provider_name("DeduplicationScope")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("fifo_throughput_limit", carina_aws_types::sqs_queue_fifo_throughput_limit())
+            AttributeSchema::optional("fifo_throughput_limit", carina_aws_types::with_member_values(carina_aws_types::AwsType::SqsQueueFifoThroughputLimit.attribute_type(), &["perQueue", "perMessageGroupId"]))
                 .create_only()
                 .with_description("FIFO only, create-only: per-queue or per-message-group throughput limit. Valid values: `perQueue`, `perMessageGroupId`.")
                 .with_provider_name("FifoThroughputLimit")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_master_key_id", carina_aws_types::kms_key_reference())
+            AttributeSchema::optional("kms_master_key_id", carina_aws_types::with_member_reference(AttributeType::string(), carina_aws_types::kms_key_reference()))
                 .with_description("The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.")
                 .with_provider_name("KmsMasterKeyId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_data_key_reuse_period_seconds", AttributeType::refined_int(None, Some((Some(60), Some(86400)))))
+            AttributeSchema::optional("kms_data_key_reuse_period_seconds", carina_aws_types::with_int_range(AttributeType::int(), Some(60), Some(86400)))
                 .with_description("Length of time, in seconds, that SQS can reuse a data key before invoking KMS again. Defaults to 300 (5 minutes). Range 60–86,400.")
                 .with_provider_name("KmsDataKeyReusePeriodSeconds")
                 .build(),
@@ -120,7 +120,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("queue_arn", carina_aws_types::sqs_queue_arn())
+            AttributeSchema::provider_populated("queue_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SqsQueueArn.attribute_type()))
                 .with_description("The Amazon Resource Name (ARN) of the queue. (read-only)")
                 .with_provider_name("QueueArn")
                 .build(),
@@ -161,6 +161,8 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .with_provider_name("Tags")
                 .build(),
         )
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::EveryWrite, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("kms_master_key_id").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^((arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+))|(alias/[a-zA-Z0-9:/_-]+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|(mrk-[0-9a-fA-F]{32}))$", carina_core::schema::PatternMatch::Full))))
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("queue_name").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z", carina_core::schema::PatternMatch::Full))))
         .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }

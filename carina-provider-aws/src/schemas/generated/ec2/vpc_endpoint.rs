@@ -40,21 +40,21 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("resource_configuration_arn", super::arn())
+            AttributeSchema::optional("resource_configuration_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
                 .create_only()
                 .with_description("(Resource and Tunnel endpoints only) The Amazon Resource Name (ARN) of a resource configuration associated with the VPC endpoint. The type of resource...")
                 .with_provider_name("ResourceConfigurationArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("route_table_ids", AttributeType::list(super::route_table_id()))
+            AttributeSchema::optional("route_table_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::RouteTableId.attribute_type())))
                 .create_only()
                 .with_description("(Gateway endpoint) The route table IDs.")
                 .with_provider_name("RouteTableIds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("security_group_ids", AttributeType::list(super::security_group_id()))
+            AttributeSchema::optional("security_group_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.attribute_type())))
                 .create_only()
                 .with_description("(Interface, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the security groups to associate with the endpoint network interfaces. If ...")
                 .with_provider_name("SecurityGroupIds")
@@ -68,48 +68,42 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("service_network_arn", super::arn())
+            AttributeSchema::optional("service_network_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of a service network that will be associated with the VPC endpoint of type service-network.")
                 .with_provider_name("ServiceNetworkArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("service_region", super::aws_region())
+            AttributeSchema::optional("service_region", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Region.attribute_type()))
                 .create_only()
                 .with_description("The Region where the service is hosted. The default is the current Region.")
                 .with_provider_name("ServiceRegion")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("subnet_ids", AttributeType::list(super::subnet_id()))
+            AttributeSchema::optional("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.attribute_type())))
                 .create_only()
                 .with_description("(Interface, Gateway Load Balancer endpoints, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the subnets in which to create endpoint n...")
                 .with_provider_name("SubnetIds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("vpc_endpoint_type", AttributeType::enum_(
-    carina_core::schema::enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint")),
-    Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string(), "Tunnel".to_string()]),
-    vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string()), ("Tunnel".to_string(), "tunnel".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("vpc_endpoint_type", AttributeType::enum_(carina_core::schema::enum_identity("VpcEndpointType", Some("aws.ec2.VpcEndpoint")), Some(vec!["Gateway".to_string(), "GatewayLoadBalancer".to_string(), "Interface".to_string(), "Resource".to_string(), "ServiceNetwork".to_string(), "Tunnel".to_string()]), vec![("Gateway".to_string(), "gateway".to_string()), ("GatewayLoadBalancer".to_string(), "gateway_load_balancer".to_string()), ("Interface".to_string(), "interface".to_string()), ("Resource".to_string(), "resource".to_string()), ("ServiceNetwork".to_string(), "service_network".to_string()), ("Tunnel".to_string(), "tunnel".to_string())], None, None))
                 .create_only()
                 .with_description("The type of endpoint. For more information about the types of VPC endpoints, see VPC endpoints in the Amazon Web Services PrivateLink User Guide. Defa...")
                 .with_provider_name("VpcEndpointType")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", super::vpc_id())
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
                 .create_only()
                 .with_description("The ID of the VPC.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpc_endpoint_id", super::vpc_endpoint_id())
+            AttributeSchema::provider_populated("vpc_endpoint_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcEndpointId.attribute_type()))
                 .with_description("The ID of the endpoint. (read-only)")
                 .with_provider_name("VpcEndpointId")
                 .build(),

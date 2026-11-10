@@ -6,6 +6,7 @@
 //! Usage:
 //!   smithy-codegen --model-dir <path> --output-dir <path> [--resource <name>]
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -33,7 +34,22 @@ use carina_docgen::{
     map_display, render_attribute_type, render_field_groups, scalar_display,
 };
 
+mod string_members;
 mod tag_types;
+use carina_codegen_aws::overrides::{
+    CoreIdentity, DataSourceType, Representation, StringProfile, TypeOverride,
+};
+#[cfg(test)]
+mod member_constraints_tests;
+#[cfg(test)]
+mod round5_tests;
+#[cfg(test)]
+mod round6_tests;
+#[cfg(test)]
+mod round7_tests;
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;
 use tag_types::{TagMapType, resource_tag_type};
 
 const PLAIN_STRING_TYPE_CODE: &str = "AttributeType::string()";
@@ -125,37 +141,71 @@ impl TryFrom<Args> for ResolvedArgs {
     }
 }
 
-/// Resource-scoped value refinements and shared type identities.
-#[derive(Debug, Clone, PartialEq)]
-enum TypeOverride {
-    /// Anonymous Int range; preserves the numeric carrier and wire packing.
-    IntRange { min: i64, max: i64 },
-    /// Anonymous String refinement; does not introduce an identifier identity.
-    RefinedString {
-        pattern: PatternSpec,
-        min_length: u64,
-        max_length: u64,
-    },
-    /// Anonymous String carrier with documented character bounds only.
-    StringBounds { min: u64, max: u64 },
-    /// Anonymous whole-string pattern with no documented numeric length cap.
-    StringPattern(PatternSpec),
-    /// Share an anonymous String constructor and derive documentation from it.
-    AnonymousStringConstructor(&'static str),
-    /// An established core scalar, including its existing validation identity.
-    CoreType(&'static str),
-    /// Refine a list without replacing its recursively resolved element type.
-    ListLength { min: u64, max: u64 },
-    /// Use the identity, validation, and allowed-value metadata of a shared row.
-    SharedType(AwsType),
-    /// Override only the enum identity, retaining Smithy values and DSL aliases.
-    EnumIdentity(AwsType),
+#[derive(Default)]
+struct TypeDeclarations<'a> {
+    members: HashMap<&'a str, TypeOverride>,
+    authoritative: HashMap<&'a str, TypeOverride>,
+    enum_aliases: HashMap<&'a str, Vec<(&'a str, &'a str)>>,
+    to_dsl_overrides: HashMap<&'a str, &'a str>,
+    representations: HashMap<&'a str, Representation>,
+    // Derived input constraints, collected by the same seam as member types.
+    input_patterns: RefCell<BTreeMap<String, Vec<PatternSpec>>>,
+}
+impl<'a> TypeDeclarations<'a> {
+    fn from_resource(resource: &'a ResourceDef) -> Self {
+        let mut enum_aliases: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
+        for (field, alias, canonical) in &resource.enum_aliases {
+            enum_aliases
+                .entry(field)
+                .or_default()
+                .push((canonical, alias));
+        }
+        Self {
+            members: resource
+                .type_overrides
+                .iter()
+                .map(|(key, value)| (*key, value.clone()))
+                .collect(),
+            authoritative: HashMap::new(),
+            enum_aliases,
+            to_dsl_overrides: resource.to_dsl_overrides.iter().copied().collect(),
+            representations: resource.representations.iter().copied().collect(),
+            input_patterns: RefCell::default(),
+        }
+    }
+    fn get(&self, name: &str) -> Option<&TypeOverride> {
+        self.members.get(name)
+    }
+    fn add_input_pattern(&self, resource: &str, path: &str, pattern: PatternSpec) -> Result<()> {
+        carina_core::schema::InputPath::new(path.to_owned()).with_context(|| {
+            format!(
+                "{resource}.{path}: pattern tightening requires an addressable InputRule target"
+            )
+        })?;
+        carina_core::schema::CompiledPattern::try_new(&pattern)
+            .with_context(|| format!("{resource}.{path}: invalid InputRule pattern"))?;
+        let mut patterns = self.input_patterns.borrow_mut();
+        let patterns = patterns.entry(path.into()).or_default();
+        if !patterns.contains(&pattern) {
+            patterns.push(pattern);
+        }
+        Ok(())
+    }
 }
 
 struct ValueTypeOverride {
     type_code: String,
     documentation: Option<String>,
     attribute_type: AttributeType,
+}
+impl ValueTypeOverride {
+    fn from_constructor(code: &str) -> Result<Self> {
+        Ok(Self {
+            type_code: code.into(),
+            attribute_type: attribute_type_from_code(code)?,
+            documentation: None,
+        })
+    }
 }
 
 /// Read the Smithy length trait for strings and collections through one path.
@@ -207,7 +257,32 @@ fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
         InputRuleTarget::Value(_) => "Value",
         InputRuleTarget::MapKeys(_) => "MapKeys",
     };
+    let literal = |value: &carina_core::schema::InputLiteral| match value {
+        carina_core::schema::InputLiteral::Bool(v) => {
+            format!("carina_core::schema::InputLiteral::Bool({v})")
+        }
+        carina_core::schema::InputLiteral::Int(v) => {
+            format!("carina_core::schema::InputLiteral::Int({v})")
+        }
+        carina_core::schema::InputLiteral::Float(v) => format!(
+            "carina_core::schema::InputLiteral::Float(carina_core::FiniteF64::new({:?}).expect(\"finite input literal\"))",
+            v.get()
+        ),
+        carina_core::schema::InputLiteral::String(v) => {
+            format!("carina_core::schema::InputLiteral::String({v:?}.into())")
+        }
+        carina_core::schema::InputLiteral::Enum {
+            identity,
+            api_value,
+        } => format!(
+            "carina_core::schema::InputLiteral::Enum {{identity: {}, api_value: {api_value:?}.into()}}",
+            enum_identity_code(identity, None)
+        ),
+    };
     let predicate = match rule.predicate() {
+        InputPredicate::Present => "Present".into(),
+        InputPredicate::Absent => "Absent".into(),
+        InputPredicate::Equals(value) => format!("Equals({})", literal(value)),
         InputPredicate::Length { min, max } => format!("Length {{ min: {min:?}, max: {max:?} }}"),
         InputPredicate::AllowedChars(set) => format!("AllowedChars({})", charset(set)),
         InputPredicate::FirstChar(set) => format!("FirstChar({})", charset(set)),
@@ -254,12 +329,17 @@ fn string_refinement(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Valu
     let type_code = if pattern.is_none() && length.is_none() {
         PLAIN_STRING_TYPE_CODE.to_string()
     } else {
-        format!("AttributeType::refined_string(None, {pattern_code}, {length:?}, None)")
+        format!(
+            "AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new({pattern_code}, {length:?}))"
+        )
     };
     ValueTypeOverride {
         type_code,
         documentation: None,
-        attribute_type: AttributeType::refined_string(None, pattern.cloned(), length, None),
+        attribute_type: AttributeType::string_member(
+            carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+            carina_core::schema::StringMemberConstraints::new(pattern.cloned(), length),
+        ),
     }
 }
 
@@ -276,115 +356,92 @@ fn map_type_code(key: &str, value: &str, length: Bounds<u64>) -> String {
 
 /// Rust and documentation use the same exact resource/path lookup. Enum
 /// identities retain their separate Smithy-shape lookup in enum_identity_override.
+#[cfg(test)]
 fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
-    let (type_code, attribute_type, documentation) = match resource_type_overrides()
-        .get(&(resource, property_path))?
-    {
-        TypeOverride::IntRange { min, max } => (
-            format!("AttributeType::refined_int(None, Some((Some({min}), Some({max}))))"),
-            AttributeType::refined_int(None, Some((Some(*min), Some(*max)))),
-            None,
-        ),
-        TypeOverride::StringBounds { min, max } => {
-            return Some(string_refinement(None, Some((Some(*min), Some(*max)))));
-        }
-        TypeOverride::RefinedString {
-            pattern,
-            min_length,
-            max_length,
-        } => {
-            return Some(string_refinement(
-                Some(pattern),
-                Some((Some(*min_length), Some(*max_length))),
-            ));
-        }
-        TypeOverride::StringPattern(pattern) => {
-            return Some(string_refinement(Some(pattern), None));
-        }
-        TypeOverride::AnonymousStringConstructor(constructor)
-        | TypeOverride::CoreType(constructor) => (
-            constructor.to_string(),
-            attribute_type_from_code(constructor).expect("registered type"),
-            None,
-        ),
-        TypeOverride::ListLength { .. } | TypeOverride::EnumIdentity(_) => return None,
-        TypeOverride::SharedType(row) => {
-            // Supplemental AWS validation explanations are documentation metadata,
-            // separate from the shared renderer's scalar and constraint wording.
-            let mut notes = Vec::new();
-            if let Some(values) = row.allowed_int_values() {
-                notes.push(format!(
-                    "allowed: {}",
-                    values
-                        .iter()
-                        .map(i64::to_string)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-            let ec2_rule = match row {
-                AwsType::Ec2AmazonSideAsn => Some("64512..=65534 or 4200000000..=4294967294"),
-                AwsType::Ec2VpnGatewayAmazonSideAsn => Some(
-                    "64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs: 7224, 9059, 10124, 17493",
-                ),
-                AwsType::Ec2VpcCidrBlock => {
-                    Some("IPv4 /16..=/28; excludes 0/8, 127/8, 169.254/16, 224/4")
-                }
-                AwsType::Ec2SubnetIpv4CidrBlock => Some("IPv4 /16..=/28"),
-                AwsType::Ec2SubnetIpv6CidrBlock => Some("IPv6 prefixes: 44, 48, 52, 56, 60, 64"),
-                AwsType::Ec2TransitGatewayCidrBlock => {
-                    Some("IPv4 /0..=/24 or IPv6 /0..=/64; excludes overlap with 169.254/16")
-                }
-                AwsType::Ec2SecurityGroupName => Some("must not start with sg-"),
-                _ => None,
-            };
-            if let Some(rule) = ec2_rule {
-                notes.push(rule.to_string());
-            }
-            if matches!(
-                row,
-                AwsType::AcmCertificateDomainName | AwsType::AcmCertificateSubjectAlternativeName
-            ) {
-                notes.push(carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE.to_string());
-            }
-            (
-                row.constructor_path().to_string(),
-                row.attribute_type(),
-                (!notes.is_empty()).then(|| notes.join("; ")),
-            )
-        }
+    let rule = resource_type_overrides().get(&(resource, property_path))?;
+    if matches!(
+        rule,
+        TypeOverride::ListLength { .. } | TypeOverride::EnumIdentity(_)
+    ) {
+        return None;
+    }
+    let integer = matches!(rule, TypeOverride::IntRange { .. })
+        || matches!(rule,TypeOverride::Identity(row) if matches!(row.attribute_type().raw_shape(),RawShape::Int {..}));
+    let value = if integer {
+        string_members::decorate(
+            ValueTypeOverride {
+                type_code: "AttributeType::int()".into(),
+                attribute_type: AttributeType::int(),
+                documentation: None,
+            },
+            rule,
+        )
+    } else {
+        string_members::derive(
+            &SmithyModel {
+                smithy: "2.0".into(),
+                metadata: Default::default(),
+                shapes: BTreeMap::new(),
+            },
+            &carina_smithy::ShapeRef {
+                target: "smithy.api#String".into(),
+                traits: Default::default(),
+            },
+            resource,
+            property_path,
+            std::slice::from_ref(rule),
+        )
     };
-    Some(ValueTypeOverride {
-        type_code,
-        documentation,
-        attribute_type,
-    })
+    value.ok()
 }
 
 /// Select synthetic extra types once for schemas and documentation, retaining
 /// both the Rust constructor and its complete attribute type and validation note.
 fn synthetic_extra_attribute_type(
-    resource: &str,
+    res: &ResourceDef,
+    model: &SmithyModel,
     field_name: &str,
-    type_overrides: &HashMap<&str, &str>,
+    type_overrides: &TypeDeclarations<'_>,
 ) -> Result<ValueTypeOverride> {
-    let snake_name = field_name.to_snake_case();
-    let type_code = if let Some(code) = reference_type_code(resource, &snake_name) {
-        code.to_string()
-    } else if let Some(override_type) = resource_value_override(resource, &snake_name) {
-        return Ok(override_type);
-    } else if let Some(&override_type) = type_overrides.get(field_name) {
-        override_type.to_string()
-    } else if let Some(inferred) = infer_string_type(field_name) {
-        inferred
-    } else {
-        PLAIN_STRING_TYPE_CODE.to_string()
+    let representation = type_overrides
+        .representations
+        .get(field_name)
+        .copied()
+        .unwrap_or(Representation::String);
+    let resource = res.name;
+    let fallback = carina_smithy::ShapeRef {
+        target: "smithy.api#String".into(),
+        traits: Default::default(),
     };
-    Ok(ValueTypeOverride {
-        attribute_type: attribute_type_from_code(&type_code)?,
-        type_code,
+    let operation = format!("{}#{}", res.service_namespace, res.create_op);
+    let member = model
+        .operation_input(&operation)
+        .and_then(|input| input.members.get(field_name))
+        .unwrap_or(&fallback);
+    if representation == Representation::String {
+        return member_string_value(
+            model,
+            resource,
+            member,
+            field_name,
+            &field_name.to_snake_case(),
+            type_overrides,
+            &HashMap::new(),
+            None,
+        );
+    }
+    let mut value = ValueTypeOverride {
+        type_code: representation.code().into(),
+        attribute_type: attribute_type_from_code(representation.code())?,
         documentation: None,
-    })
+    };
+    if let Some(rule) = resource_type_overrides()
+        .get(&(resource, field_name.to_snake_case().as_str()))
+        .or_else(|| type_overrides.get(field_name))
+    {
+        value = string_members::decorate(value, rule)?;
+    }
+    Ok(value)
 }
 
 impl ValueTypeOverride {
@@ -413,45 +470,52 @@ fn string_list_value_override(
     resource: &str,
     property_path: &str,
     constructor: &str,
-) -> Option<ValueTypeOverride> {
+) -> Result<Option<ValueTypeOverride>> {
     let ordered = match constructor {
         "AttributeType::list(AttributeType::string())" => true,
         "AttributeType::unordered_list(AttributeType::string())" => false,
-        _ => return None,
+        _ => return Ok(None),
     };
-    let element = resource_value_override(resource, &format!("{property_path}[]"))?;
-    // The ordered Route 53 override flattens ResourceRecord{Value}; retain the
-    // source list's min=1 instead of silently dropping it during flattening.
-    // Leave the existing unordered-list contracts (ACM SANs) unchanged.
-    if ordered {
-        let length = if let Some(Shape::List(list)) = model.get_shape(target) {
-            length_from_traits(&list.traits)
-        } else {
-            None
+    let Some(Shape::List(list)) = model.get_shape(target) else {
+        return Ok(None);
+    };
+    let member = if ordered {
+        let Some(Shape::Structure(record)) = model.get_shape(&list.member.target) else {
+            anyhow::bail!("{resource}.{property_path}: record projection requires a structure")
         };
-        return Some(ValueTypeOverride {
-            type_code: format!(
-                "AttributeType::refined_list({}, true, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
-                element.type_code
-            ),
-            documentation: element.documentation,
-            attribute_type: AttributeType::refined_list(
-                element.attribute_type,
-                true,
-                length,
-                carina_core::schema::ListElements::AllowDuplicates,
-            ),
-        });
-    }
-    Some(ValueTypeOverride {
-        type_code: format!("AttributeType::unordered_list({})", element.type_code),
+        record.members.get("Value").with_context(|| {
+            format!("{resource}.{property_path}: record projection has no Value member")
+        })?
+    } else {
+        &list.member
+    };
+    let element = member_string_value(
+        model,
+        resource,
+        member,
+        "Value",
+        &format!("{property_path}[]"),
+        &TypeDeclarations::default(),
+        &HashMap::new(),
+        None,
+    )?;
+    let length = length_from_traits(&list.traits);
+    Ok(Some(ValueTypeOverride {
+        type_code: format!(
+            "AttributeType::refined_list({}, {ordered}, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
+            element.type_code
+        ),
+        attribute_type: AttributeType::refined_list(
+            element.attribute_type,
+            ordered,
+            length,
+            ListElements::AllowDuplicates,
+        ),
         documentation: element.documentation,
-        attribute_type: AttributeType::unordered_list(element.attribute_type),
-    })
+    }))
 }
-
 /// Information about a detected enum type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct EnumInfo {
     /// Type name in PascalCase (e.g., "InstanceTenancy")
     type_name: String,
@@ -584,8 +648,26 @@ fn arn_emit_choice(service: &str, resource: &str) -> ArnEmitChoice {
     }
 }
 
-fn resource_identity_parts(name: &str) -> Option<(&str, &str)> {
-    name.split_once('.')
+fn emit_member_arn_helper(type_code: &str) -> String {
+    format!("pub fn arn() -> AttributeType {{\n    {type_code}\n}}\n\n")
+}
+
+#[derive(Clone, Copy)]
+enum SchemaView {
+    Resource,
+    DataSource,
+}
+
+// Compatibility exports with repository callers (provider integration tests).
+// This list selects exports only; each body uses its own derived member type.
+fn exports_arn_helper(resource: &str, view: SchemaView) -> bool {
+    matches!(
+        (resource, view),
+        (
+            "iam.Role" | "organizations.Account" | "organizations.Organization",
+            SchemaView::Resource
+        ) | ("s3.Bucket" | "sts.CallerIdentity", SchemaView::DataSource)
+    )
 }
 
 fn shared_arn_constructor(service: &str, resource: &str) -> Option<&'static str> {
@@ -638,24 +720,12 @@ fn emit_arn_helper(service: &str, resource: &str, choice: ArnEmitChoice) -> Stri
     )
 }
 
-/// Build the `dsl_aliases: ...` Rust source code for a `StringEnum`'s
-/// alias table, following naming-conventions design D7.
-///
-/// Per #247 / D3 / D7, every enum value gets a snake_case DSL spelling and
-/// the canonical AWS spelling is preserved for the underlying SDK call.
-/// This helper emits a `Vec<(String, String)>` literal mapping each
-/// canonical (API) value to its DSL spelling, layered with any explicit
-/// aliases configured via `ResourceDef::enum_aliases`.
-///
-/// Data form (rather than a `fn` closure) is required so the alias map
-/// survives the WASM-component boundary — see carina#2832 / aws#247.
-///
-/// Returns Rust source that evaluates to `vec![("api","dsl"), ...]` or
-/// `vec![]` when no value needs translation.
-fn build_dsl_aliases_code(
+/// Build one alias table for both schema code and Markdown. Explicit
+/// ResourceDef aliases take precedence over the default DSL spelling.
+fn build_dsl_aliases(
     values: &[String],
     explicit_aliases: Option<&Vec<(&str, &str)>>,
-) -> String {
+) -> Vec<(String, String)> {
     // Collect (canonical, dsl_form) pairs. Explicit aliases take precedence
     // over the auto-derived `dsl_enum_value` form.
     let mut pairs: Vec<(String, String)> = Vec::new();
@@ -679,20 +749,13 @@ fn build_dsl_aliases_code(
         }
     }
 
-    if pairs.is_empty() {
-        return "vec![]".to_string();
-    }
-
-    let entries: Vec<String> = pairs
-        .iter()
-        .map(|(canonical, dsl)| format!("(\"{}\".to_string(), \"{}\".to_string())", canonical, dsl))
-        .collect();
-    format!("vec![{}]", entries.join(", "))
+    pairs
 }
 
 /// Information about an attribute to generate
 #[derive(Debug, Clone)]
 struct AttrInfo {
+    attribute_type: AttributeType,
     /// Snake_case attribute name (e.g., "cidr_block")
     snake_name: String,
     /// Smithy provider name (usually PascalCase, but sometimes lowerCamelCase)
@@ -751,85 +814,24 @@ enum SendFieldType {
     Value,
 }
 
-fn send_field_type(
-    model: &SmithyModel,
-    target: &str,
-    type_code: &str,
-    enum_info: Option<&EnumInfo>,
-) -> SendFieldType {
-    if type_code == "AttributeType::list(AttributeType::string())"
-        || type_code == "AttributeType::unordered_list(AttributeType::string())"
-        || type_code.starts_with("AttributeType::refined_list(AttributeType::refined_string(")
-        || (matches!(model.get_shape(target), Some(Shape::List(list))
-            if matches!(model.shape_kind(&list.member.target), Some(ShapeKind::String))))
-    {
-        return SendFieldType::StringList;
-    }
-    // Classify containers before looking for scalar helper names: generated
-    // list/struct expressions can themselves contain an enum helper (for
-    // example AvailabilityZoneAddresses contains availability_zone()).
-    if type_code.contains("AttributeType::list(")
-        || type_code.contains("AttributeType::unordered_list(")
-        || type_code.contains("AttributeType::map(")
-        || type_code.contains("AttributeType::struct_(")
-        || type_code.contains("AttributeType::struct_with_field_groups(")
-        || type_code.contains("AttributeType::union(")
-        || type_code.contains("iam_policy_document()")
-        || type_code.contains("sqs_redrive_policy()")
-        || type_code.contains("sqs_redrive_allow_policy()")
-        || type_code.contains("bucket_encryption_rules()")
-        || type_code.contains("bucket_replication_rules()")
-        || type_code.contains("bucket_lifecycle_rules()")
-        || type_code.contains("bucket_object_lock_rule()")
-        || type_code.contains("s3_index_document()")
-        || type_code.contains("s3_error_document()")
-        || type_code.contains("s3_redirect_all_requests_to()")
-        || type_code.contains("bucket_cors_rules()")
-        || type_code.contains("bucket_topic_configurations()")
-        || type_code.contains("bucket_queue_configurations()")
-        || type_code.contains("bucket_lambda_function_configurations()")
-        || type_code.contains("bucket_event_bridge_configuration()")
-        || type_code.contains("bucket_target_object_key_format()")
-    {
-        return SendFieldType::Value;
-    }
-    if enum_info.is_some()
-        || attribute_type_from_code(type_code)
-            .is_ok_and(|attr_type| matches!(attr_type.raw_shape(), RawShape::Enum { .. }))
-        || type_code.contains("AttributeType::enum_(")
-        || type_code.contains("aws_region()")
-        || type_code.contains("availability_zone()")
-        || type_code.contains("s3_object_lock_enabled()")
-    {
-        return SendFieldType::Enum;
-    }
-    if type_code == "AttributeType::bool()" {
-        return SendFieldType::Bool;
-    }
-    if type_code == "AttributeType::int()" || type_code.starts_with("AttributeType::refined_int(") {
-        return SendFieldType::Int;
-    }
-    if type_code == "AttributeType::float()" {
-        return SendFieldType::Float;
-    }
-    match model.shape_kind(target) {
-        Some(ShapeKind::String | ShapeKind::Timestamp) => SendFieldType::String,
-        Some(ShapeKind::Boolean) => SendFieldType::Bool,
-        Some(ShapeKind::Integer | ShapeKind::Long | ShapeKind::IntEnum) => SendFieldType::Int,
-        Some(ShapeKind::Float | ShapeKind::Double) => SendFieldType::Float,
-        Some(
-            ShapeKind::Service
-            | ShapeKind::Operation
-            | ShapeKind::Structure
-            | ShapeKind::Union
-            | ShapeKind::Enum
-            | ShapeKind::List
-            | ShapeKind::Map
-            | ShapeKind::Blob
-            | ShapeKind::Resource
-            | ShapeKind::Unit,
-        )
-        | None => SendFieldType::Value,
+fn send_field_type(value: &ValueTypeOverride) -> SendFieldType {
+    match value.attribute_type.raw_shape() {
+        RawShape::Enum { .. } => SendFieldType::Enum,
+        RawShape::String { .. } | RawShape::Reference { .. } | RawShape::Duration => {
+            SendFieldType::String
+        }
+        RawShape::Int { .. } => SendFieldType::Int,
+        RawShape::Bool => SendFieldType::Bool,
+        RawShape::Float { .. } => SendFieldType::Float,
+        RawShape::List { element_type, .. }
+            if matches!(
+                element_type.raw_shape(),
+                RawShape::String { .. } | RawShape::Reference { .. }
+            ) =>
+        {
+            SendFieldType::StringList
+        }
+        _ => SendFieldType::Value,
     }
 }
 
@@ -859,19 +861,6 @@ fn emit_replacement_builder(
     match replacement {
         ReplacementClass::UniqueName(provider_name) => {
             let provider_name_snake = provider_name.to_snake_case();
-            let string_override = match resource_type_overrides()
-                .get(&(resource_type_name, provider_name_snake.as_str()))
-            {
-                Some(
-                    TypeOverride::RefinedString { .. }
-                    | TypeOverride::StringPattern(_)
-                    | TypeOverride::AnonymousStringConstructor(_),
-                ) => true,
-                Some(TypeOverride::SharedType(row)) => {
-                    matches!(row.attribute_type().raw_shape(), RawShape::String { .. })
-                }
-                _ => false,
-            };
             let attr = attrs
                 .iter()
                 .find(|attr| attr.provider_name.to_snake_case() == provider_name_snake);
@@ -885,7 +874,10 @@ fn emit_replacement_builder(
                     Some(attr) if attr.is_read_only => Err("read-only"),
                     Some(attr)
                         if !attr.is_plain_string
-                            || (attr.type_code != PLAIN_STRING_TYPE_CODE && !string_override) =>
+                            || !matches!(
+                                attr.attribute_type.raw_shape(),
+                                RawShape::String { .. }
+                            ) =>
                     {
                         Err("not a plain string")
                     }
@@ -1034,7 +1026,11 @@ fn escape_rust_keyword(name: &str) -> String {
 }
 
 fn main() -> Result<()> {
-    run(ResolvedArgs::try_from(Args::parse())?)
+    let result = run(ResolvedArgs::try_from(Args::parse())?);
+    if let Err(error) = string_members::write_issues() {
+        eprintln!("Additionally failed to write codegen reports: {error:#}");
+    }
+    result
 }
 
 fn run(args: ResolvedArgs) -> Result<()> {
@@ -1367,6 +1363,85 @@ struct CollectedResourceAttributes {
     attrs: Vec<AttrInfo>,
     all_enums: BTreeMap<String, EnumInfo>,
     description: Option<Description>,
+    input_patterns: BTreeMap<String, Vec<PatternSpec>>,
+    input_rules: Vec<carina_core::schema::InputRule>,
+}
+
+/// InputPath permits only a writable attribute followed by fixed struct fields.
+/// Collection positions fail earlier, at string derivation, with the full path.
+fn bind_input_patterns(
+    resource: &str,
+    attrs: &[AttrInfo],
+    patterns: &BTreeMap<String, Vec<PatternSpec>>,
+) -> Result<Vec<carina_core::schema::InputRule>> {
+    use carina_core::schema::{
+        InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope,
+    };
+    let mut rules = Vec::new();
+    for (path, patterns) in patterns {
+        let input_path = InputPath::new(path.clone()).with_context(|| {
+            format!(
+                "{resource}.{path}: pattern tightening requires an addressable InputRule target"
+            )
+        })?;
+        let mut segments = input_path.segments();
+        let root = segments.next().expect("nonempty input path");
+        let attr = attrs
+            .iter()
+            .find(|attr| attr.snake_name == root)
+            .with_context(|| {
+                format!("{resource}.{path}: InputRule target is absent from the schema")
+            })?;
+        anyhow::ensure!(
+            !attr.is_read_only,
+            "{resource}.{path}: pattern tightening cannot attach an InputRule to a provider-populated attribute"
+        );
+        let mut create_only = attr.is_create_only;
+        let mut target = &attr.attribute_type;
+        for segment in segments {
+            let RawShape::Struct { fields, .. } = target.raw_shape() else {
+                anyhow::bail!(
+                    "{resource}.{path}: InputRule cannot traverse {segment:?} through a non-struct type"
+                );
+            };
+            let field = fields
+                .iter()
+                .find(|f| f.name() == segment)
+                .with_context(|| {
+                    format!(
+                        "{resource}.{path}: InputRule segment {segment:?} is absent from the schema"
+                    )
+                })?;
+            let parts = field.parts();
+            anyhow::ensure!(
+                !parts.declared_input_mode.is_provider_populated(),
+                "{resource}.{path}: pattern tightening cannot attach an InputRule through provider-populated segment {segment:?}"
+            );
+            create_only |= parts.create_only;
+            target = parts.field_type;
+        }
+        anyhow::ensure!(
+            matches!(
+                target.raw_shape(),
+                RawShape::String { .. } | RawShape::Enum { .. } | RawShape::Reference { .. }
+            ),
+            "{resource}.{path}: pattern tightening requires a String InputRule target"
+        );
+        let scope = if create_only {
+            InputRuleScope::CreateOnly
+        } else {
+            InputRuleScope::EveryWrite
+        };
+        for (index, pattern) in patterns.iter().enumerate() {
+            rules.push(InputRule::value(
+                scope,
+                input_path.clone(),
+                InputRuleCode::new(format!("aws.additional_pattern.pattern_{index}"))?,
+                InputPredicate::Matches(pattern.clone()),
+            ));
+        }
+    }
+    Ok(rules)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1508,7 +1583,7 @@ fn collect_resource_attributes_unvalidated(
     let exclude: HashSet<&str> = res.exclude_fields.iter().copied().collect();
 
     // Build type override map
-    let type_overrides: HashMap<&str, &str> = res.type_overrides.iter().copied().collect();
+    let type_overrides = TypeDeclarations::from_resource(res);
 
     // Build create-only override set
     let create_only_overrides: HashSet<&str> = res.create_only_overrides.iter().copied().collect();
@@ -1565,23 +1640,13 @@ fn collect_resource_attributes_unvalidated(
     // Build per-(parent_struct, member) type override map (aws#302).
     // Distinguishes struct fields by parent struct shape so the same
     // member name can resolve to different types in different contexts.
-    let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
+    let struct_field_type_overrides: HashMap<(&str, &str), TypeOverride> = res
         .struct_field_type_overrides
         .iter()
-        .map(|(p, m, t)| ((*p, *m), *t))
+        .map(|(p, m, t)| ((*p, *m), t.clone()))
         .collect();
 
     // Build enum alias map: attr_snake_name -> [(canonical, alias)]
-    let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
-    for (attr, alias, canonical) in &res.enum_aliases {
-        enum_alias_map
-            .entry(attr)
-            .or_default()
-            .push((canonical, alias));
-    }
-
-    // Build to_dsl override map
-    let to_dsl_overrides: HashMap<&str, &str> = res.to_dsl_overrides.iter().copied().collect();
 
     // Data sources have no create_op — skip create input resolution
     let is_data_source = res.create_op.is_empty();
@@ -1642,7 +1707,6 @@ fn collect_resource_attributes_unvalidated(
 
     // Collectors for enums and ranged ints (populated during type resolution)
     let mut all_enums: BTreeMap<String, EnumInfo> = BTreeMap::new();
-    let mut all_ranged_ints: BTreeMap<String, IntRange> = BTreeMap::new();
 
     // Collect writable fields: from schema_structure if set, otherwise from create input
     let mut writable_fields: BTreeMap<String, &carina_smithy::ShapeRef> = BTreeMap::new();
@@ -1829,7 +1893,7 @@ fn collect_resource_attributes_unvalidated(
         };
 
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let (type_code, enum_info) = resolve_type(
+        let (value, enum_info) = resolve_member_value(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
@@ -1838,22 +1902,22 @@ fn collect_resource_attributes_unvalidated(
                 resolving_shapes: Vec::new(),
                 property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
-                enum_alias_map: &enum_alias_map,
-                to_dsl_overrides: &to_dsl_overrides,
+
                 all_enums: &mut all_enums,
-                all_ranged_ints: &mut all_ranged_ints,
+
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
                 nested_write_only_struct_fields: &nested_write_only_struct_fields,
                 nested_write_only_emissions: &mut nested_write_only_emissions,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
-            &member_ref.target,
+            member_ref,
             name,
         )?;
 
         let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
-        let send_type = send_field_type(model, &member_ref.target, &type_code, enum_info.as_ref());
+        let type_code = value.type_code.clone();
+        let send_type = send_field_type(&value);
         let sdk_i32 = send_type == SendFieldType::Int
             && matches!(
                 model.shape_kind(&member_ref.target),
@@ -1868,6 +1932,7 @@ fn collect_resource_attributes_unvalidated(
         let is_deferred_populate = deferred_populate_overrides.contains(name.as_str());
 
         attrs.push(AttrInfo {
+            attribute_type: value.attribute_type,
             snake_name,
             provider_name: name.clone(),
             type_code,
@@ -1910,20 +1975,21 @@ fn collect_resource_attributes_unvalidated(
         }
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
-        let type_code =
-            synthetic_extra_attribute_type(res.name, extra.name, &type_overrides)?.type_code;
+        let value = synthetic_extra_attribute_type(res, model, extra.name, &type_overrides)?;
+        let type_code = value.type_code.clone();
         let is_read_only = read_only_overrides.contains(extra.name);
         let is_create_only = !is_read_only
             && (!updatable_fields.contains(extra.name)
                 || create_only_overrides.contains(extra.name));
         let is_required = required_overrides.contains(extra.name);
-        let send_type = send_field_type(model, "smithy.api#String", &type_code, None);
+        let send_type = send_field_type(&value);
         let sdk_i32_paths = if send_type == SendFieldType::Value {
             nested_sdk_i32_paths(model, "smithy.api#String", &type_code)
         } else {
             Vec::new()
         };
         attrs.push(AttrInfo {
+            attribute_type: value.attribute_type,
             snake_name,
             provider_name: extra.name.to_string(),
             type_code,
@@ -1958,7 +2024,7 @@ fn collect_resource_attributes_unvalidated(
             SmithyModel::documentation(&member_ref.traits).map(Description::from_smithy_html);
 
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let (type_code, enum_info) = resolve_type(
+        let (value, enum_info) = resolve_member_value(
             &mut TypeResolutionContext {
                 model,
                 resource_name: res.name,
@@ -1967,22 +2033,22 @@ fn collect_resource_attributes_unvalidated(
                 resolving_shapes: Vec::new(),
                 property_path: snake_name.clone(),
                 type_overrides: &type_overrides,
-                enum_alias_map: &enum_alias_map,
-                to_dsl_overrides: &to_dsl_overrides,
+
                 all_enums: &mut all_enums,
-                all_ranged_ints: &mut all_ranged_ints,
+
                 current_root_attr: Some(name.as_str()),
                 deferred_populate_struct_fields: &deferred_populate_struct_fields,
                 nested_write_only_struct_fields: &nested_write_only_struct_fields,
                 nested_write_only_emissions: &mut nested_write_only_emissions,
                 struct_field_type_overrides: &struct_field_type_overrides,
             },
-            &member_ref.target,
+            member_ref,
             name,
         )?;
 
         let is_plain_string = is_plain_smithy_string(model, &member_ref.target);
-        let send_type = send_field_type(model, &member_ref.target, &type_code, enum_info.as_ref());
+        let type_code = value.type_code.clone();
+        let send_type = send_field_type(&value);
         let sdk_i32 = send_type == SendFieldType::Int
             && matches!(
                 model.shape_kind(&member_ref.target),
@@ -1994,6 +2060,7 @@ fn collect_resource_attributes_unvalidated(
             Vec::new()
         };
         attrs.push(AttrInfo {
+            attribute_type: value.attribute_type,
             snake_name,
             provider_name: name.clone(),
             type_code,
@@ -2026,14 +2093,19 @@ fn collect_resource_attributes_unvalidated(
         );
     }
 
-    // Also register top-level attribute enums (enum_info is set but may not have
-    // been registered if the attribute was detected via known_enum_overrides in
-    // resolve_type before the collector existed)
+    // Verify the top-level enum metadata collected by the shared derivation.
     for attr in &attrs {
         if let Some(ref ei) = attr.enum_info {
-            all_enums
-                .entry(attr.provider_name.clone())
-                .or_insert_with(|| ei.clone());
+            if let Some(existing) = all_enums.get(&attr.snake_name) {
+                anyhow::ensure!(
+                    existing == ei,
+                    "{}.{}: conflicting enum declarations",
+                    res.name,
+                    attr.snake_name
+                );
+            } else {
+                all_enums.insert(attr.snake_name.clone(), ei.clone());
+            }
         }
     }
 
@@ -2067,6 +2139,8 @@ fn collect_resource_attributes_unvalidated(
         attrs,
         all_enums,
         description,
+        input_patterns: type_overrides.input_patterns.into_inner(),
+        input_rules: res.input_rules.clone(),
     })
 }
 
@@ -2077,11 +2151,17 @@ fn collect_resource_attributes_with_read_dispositions(
 ) -> Result<CollectedResourceAttributes> {
     let mut collected = collect_resource_attributes_unvalidated(res, model, dispositions)?;
     apply_read_contract(res, model, &mut collected.attrs, dispositions)?;
-    collected.all_enums.retain(|provider_name, _| {
-        collected
-            .attrs
-            .iter()
-            .any(|attr| attr.provider_name == *provider_name)
+    collected.input_rules.extend(bind_input_patterns(
+        res.name,
+        &collected.attrs,
+        &collected.input_patterns,
+    )?);
+    collected.all_enums.retain(|path, _| {
+        let root = path
+            .split(['.', '[', '{'])
+            .next()
+            .expect("nonempty member path");
+        collected.attrs.iter().any(|attr| attr.snake_name == root)
     });
     Ok(collected)
 }
@@ -2416,6 +2496,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         mut attrs,
         all_enums,
         description,
+        input_rules,
+        ..
     } = collect_resource_attributes(res, model)?;
     // Schema generation is one of the two production send-contract seams;
     // provider generation independently enforces the same contract while
@@ -2434,20 +2516,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         .map_err(anyhow::Error::msg)?;
     let ns = res.service_namespace;
     let is_data_source = res.create_op.is_empty();
-    let namespace = format!("aws.{}", res.name);
     let tags_type_code = res
         .has_tags
         .then(|| resource_tag_type(res, model).map(|tags| tags.code()))
         .transpose()?;
-    let mut enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
-    for (attr, alias, canonical) in &res.enum_aliases {
-        enum_alias_map
-            .entry(attr)
-            .or_default()
-            .push((canonical, alias));
-    }
-    let to_dsl_overrides: HashMap<&str, &str> = res.to_dsl_overrides.iter().copied().collect();
-
     // Determine needed imports
     let code_str = attrs
         .iter()
@@ -2489,11 +2561,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     if needs_types {
         schema_imports.push("types");
     }
-    let arn_identity = resource_identity_parts(res.name)
-        .filter(|_| attrs.iter().any(|a| a.snake_name == "arn"))
-        .map(|(service, resource)| (service, resource, arn_emit_choice(service, resource)));
-    let arn_helper =
-        arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
+    let arn_helper = attrs
+        .iter()
+        .find(|a| a.snake_name == "arn" && exports_arn_helper(res.name, SchemaView::Resource))
+        .map(|a| emit_member_arn_helper(&a.type_code));
     let has_arn_helper = arn_helper.is_some();
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
@@ -2522,8 +2593,8 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     // The constant lists only canonical AWS wire values. DSL spellings live
     // in schema `dsl_aliases`; mixing aliases into this list makes the host
     // treat them as already API-canonical.
-    for (prop_name, enum_info) in &all_enums {
-        let const_name = format!("VALID_{}", prop_name.to_snake_case().to_uppercase());
+    for (index, (path, enum_info)) in all_enums.iter().enumerate() {
+        let const_name = enum_constant_name(path, index);
         let values_str = enum_info
             .values
             .iter()
@@ -2607,49 +2678,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
                 reason.replace('\n', " ")
             ));
         }
-        let type_code = if let Some(ref ei) = attr.enum_info {
-            // Use shared schema enum type for constrained strings.
-            //
-            // Per naming-conventions design D7, every enum value gets a
-            // snake_case DSL alias. `build_dsl_aliases_code` derives the
-            // per-value mapping from `dsl_enum_value()` and layers in
-            // explicit aliases from `ResourceDef::enum_aliases`. Explicit
-            // `to_dsl_overrides` wins over both.
-            let dsl_aliases_code =
-                if let Some(override_code) = to_dsl_overrides.get(attr.snake_name.as_str()) {
-                    override_code.to_string()
-                } else {
-                    let snake = attr.provider_name.to_snake_case();
-                    let explicit = enum_alias_map.get(snake.as_str());
-                    build_dsl_aliases_code(&ei.values, explicit)
-                };
-            let values_str = ei
-                .values
-                .iter()
-                .map(|v| format!("\"{}\".to_string()", v))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let identity_code = enum_identity_code(ei, &namespace);
-            format!(
-                "AttributeType::enum_(\n\
-                 \x20   {},\n\
-                 \x20   Some(vec![{}]),\n\
-                 \x20   {},\n\
-                 \x20   None,\n\
-                 \x20   None,\n\
-                 )",
-                identity_code, values_str, dsl_aliases_code
-            )
-        } else {
-            attr.type_code.clone()
-        };
-
-        let type_code = if has_arn_helper && attr.snake_name == "arn" {
-            "self::arn()".to_string()
-        } else {
-            type_code
-        };
-
+        let type_code = &attr.type_code;
         let constructor = mode_constructor(attr.is_required, attr.is_read_only);
         let mut attr_code = format!(
             "\x20       .attribute(\n\
@@ -2720,7 +2749,7 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
         ));
     }
 
-    for rule in &res.input_rules {
+    for rule in &input_rules {
         code.push_str(&format!("        .input_rule({})\n", input_rule_code(rule)));
     }
 
@@ -2744,10 +2773,10 @@ fn generate_resource(res: &ResourceDef, model: &SmithyModel) -> Result<String> {
     } else {
         let entries: Vec<String> = all_enums
             .keys()
-            .map(|prop_name| {
-                let attr_name = prop_name.to_snake_case();
-                let const_name = format!("VALID_{}", attr_name.to_uppercase());
-                format!("        (\"{}\", {}),", attr_name, const_name)
+            .enumerate()
+            .map(|(index, path)| {
+                let const_name = enum_constant_name(path, index);
+                format!("        ({path:?}, {const_name}),")
             })
             .collect();
         code.push_str(&format!(
@@ -2779,11 +2808,10 @@ struct TypeResolutionContext<'a> {
     resolving_shapes: Vec<String>,
     /// Full property path, including array markers, independent of Smithy type names.
     property_path: String,
-    type_overrides: &'a HashMap<&'a str, &'a str>,
-    enum_alias_map: &'a HashMap<&'a str, Vec<(&'a str, &'a str)>>,
-    to_dsl_overrides: &'a HashMap<&'a str, &'a str>,
+    type_overrides: &'a TypeDeclarations<'a>,
+
     all_enums: &'a mut BTreeMap<String, EnumInfo>,
-    all_ranged_ints: &'a mut BTreeMap<String, IntRange>,
+
     /// Top-level attribute being resolved — set by callers in the
     /// writable / read-only loops, used by `generate_struct_type` to
     /// decide whether a nested StructField needs `.deferred_populate()`.
@@ -2809,7 +2837,7 @@ struct TypeResolutionContext<'a> {
     /// top-level attribute). Lets a member like `HostedZoneId` resolve
     /// to one type inside `AliasTarget` and another at the top level.
     /// Carries `ResourceDef.struct_field_type_overrides` (aws#302).
-    struct_field_type_overrides: &'a HashMap<(&'a str, &'a str), &'a str>,
+    struct_field_type_overrides: &'a HashMap<(&'a str, &'a str), TypeOverride>,
 }
 
 fn enum_namespace(ctx: &TypeResolutionContext<'_>) -> String {
@@ -2839,19 +2867,18 @@ fn enum_identity_override(
     }
 }
 
-fn enum_identity_code(enum_info: &EnumInfo, default_namespace: &str) -> String {
-    if let Some(aws_type) = enum_info.identity_override {
+fn enum_identity_code(identity: &TypeIdentity, row: Option<AwsType>) -> String {
+    if let Some(aws_type) = row.filter(|r| r.identity() == *identity) {
         return format!(
             "carina_aws_types::AwsType::{}.identity()",
             aws_type.rust_variant_name()
         );
     }
 
-    let (namespace, type_name) =
-        effective_enum_identity(None, default_namespace, &enum_info.type_name);
     format!(
-        "carina_core::schema::enum_identity(\"{}\", Some(\"{}\"))",
-        type_name, namespace
+        "carina_core::schema::enum_identity({:?}, {:?})",
+        identity.kind,
+        identity.dotted_prefix().as_deref()
     )
 }
 
@@ -3036,347 +3063,634 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         .with_context(|| format!("No AttributeType constructor registered for {code}"))
 }
 
-fn enum_type_code(ctx: &TypeResolutionContext<'_>, field_name: &str, info: &EnumInfo) -> String {
-    let namespace = enum_namespace(ctx);
-    let snake_name = field_name.to_snake_case();
-    let dsl_aliases_code = if let Some(code) = ctx.to_dsl_overrides.get(snake_name.as_str()) {
-        code.to_string()
+fn enum_constant_name(path: &str, index: usize) -> String {
+    if path.contains(['.', '[', '{']) {
+        format!("NESTED_ENUM_{index}")
     } else {
-        build_dsl_aliases_code(&info.values, ctx.enum_alias_map.get(snake_name.as_str()))
-    };
-    let values = info
-        .values
-        .iter()
-        .map(|value| format!("\"{value}\".to_string()"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let identity = enum_identity_code(info, &namespace);
-    format!(
-        "AttributeType::enum_(\n\
-         \x20   {},\n\
-         \x20   Some(vec![{}]),\n\
-         \x20   {},\n\
-         \x20   None,\n\
-         \x20   None,\n\
-         )",
-        identity, values, dsl_aliases_code
-    )
+        format!("VALID_{}", path.to_uppercase())
+    }
 }
 
-/// Resolve Smithy schema code and enum metadata.
-/// Also populates collectors for enums and ranged ints discovered during resolution.
+fn register_member_enum(ctx: &mut TypeResolutionContext<'_>, info: &EnumInfo) -> Result<()> {
+    if let Some(existing) = ctx.all_enums.get(&ctx.property_path) {
+        anyhow::ensure!(
+            existing == info,
+            "{}.{}: conflicting enum declarations",
+            ctx.resource_name,
+            ctx.property_path
+        );
+    } else {
+        ctx.all_enums
+            .insert(ctx.property_path.clone(), info.clone());
+    }
+    Ok(())
+}
+
+fn identity_validation_note(row: AwsType) -> Option<String> {
+    if let Some(values) = row.allowed_int_values() {
+        return Some(format!(
+            "allowed: {}",
+            values
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    match row {
+        AwsType::Ec2AmazonSideAsn=>Some("64512..=65534 or 4200000000..=4294967294".into()),
+        AwsType::Ec2VpnGatewayAmazonSideAsn=>Some("64512..=65534 or 4200000000..=4294967294; legacy Amazon ASNs: 7224, 9059, 10124, 17493".into()),
+        AwsType::Ec2VpcCidrBlock=>Some("IPv4 /16..=/28; excludes 0/8, 127/8, 169.254/16, 224/4".into()),
+        AwsType::Ec2SubnetIpv4CidrBlock=>Some("IPv4 /16..=/28".into()),
+        AwsType::Ec2SubnetIpv6CidrBlock=>Some("IPv6 prefixes: 44, 48, 52, 56, 60, 64".into()),
+        AwsType::Ec2TransitGatewayCidrBlock=>Some("IPv4 /0..=/24 or IPv6 /0..=/64; excludes overlap with 169.254/16".into()),
+        AwsType::Ec2SecurityGroupName=>Some("1..255 ASCII characters; must not start with sg-".into()),
+        AwsType::AcmCertificateDomainName=>Some(format!("Request domain limit: 64 octets; {}",carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE)),
+        AwsType::AcmCertificateSubjectAlternativeName=>Some(carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE.into()),
+        _=>None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn member_string_value(
+    model: &SmithyModel,
+    resource: &str,
+    member: &carina_smithy::ShapeRef,
+    field: &str,
+    path: &str,
+    declarations: &TypeDeclarations<'_>,
+    struct_rules: &HashMap<(&str, &str), TypeOverride>,
+    parent: Option<&str>,
+) -> Result<ValueTypeOverride> {
+    let rule = declarations
+        .authoritative
+        .get(field)
+        .cloned()
+        .or_else(|| {
+            resource_type_overrides()
+                .get(&(resource, path))
+                .cloned()
+                .or_else(|| parent.and_then(|parent| struct_rules.get(&(parent, field)).cloned()))
+                .or_else(|| declarations.get(field).cloned())
+        })
+        .or_else(|| infer_string_type(field));
+    let rules = rule.into_iter().collect::<Vec<_>>();
+    let mut value = string_members::derive(model, member, resource, path, &rules)?;
+    for pattern in string_members::input_patterns(&rules) {
+        declarations.add_input_pattern(resource, path, pattern)?;
+    }
+    if let Some(code) = reference_type_code(resource, path) {
+        let reference = attribute_type_from_code(code)?;
+        if let RawShape::Reference {
+            pattern: Some(extra),
+            ..
+        } = reference.raw_shape()
+        {
+            declarations.add_input_pattern(resource, path, extra.clone())?;
+        }
+        if let (
+            RawShape::String {
+                member_layer: carina_core::schema::StringMemberParts { length: source, .. },
+                ..
+            },
+            RawShape::Reference { length: extra, .. },
+        ) = (value.attribute_type.raw_shape(), reference.raw_shape())
+        {
+            string_members::intersect(source, extra)
+                .with_context(|| format!("{resource}.{path}"))?;
+        }
+        value.attribute_type =
+            carina_aws_types::with_member_reference(value.attribute_type, reference);
+        value.type_code = format!(
+            "carina_aws_types::with_member_reference({}, {code})",
+            value.type_code
+        );
+    }
+    Ok(value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn enum_member_value(
+    model: &SmithyModel,
+    resource: &str,
+    member: &carina_smithy::ShapeRef,
+    field: &str,
+    path: &str,
+    namespace: &str,
+    declarations: &TypeDeclarations<'_>,
+    struct_rules: &HashMap<(&str, &str), TypeOverride>,
+    parent: Option<&str>,
+) -> Result<Option<(ValueTypeOverride, EnumInfo)>> {
+    let modeled = model
+        .enum_values(&member.target)
+        .map(|v| v.into_iter().map(|(_, v)| v).collect::<Vec<_>>());
+    let known = known_enum_overrides()
+        .get(field)
+        .map(|v| v.iter().map(|v| (*v).to_string()).collect::<Vec<_>>());
+    let Some(mut values) = modeled.or(known) else {
+        return Ok(None);
+    };
+    let mut type_name = if model.shape_kind(&member.target) == Some(ShapeKind::Enum) {
+        pascalize_enum_type_name(SmithyModel::shape_name(&member.target), field)
+    } else {
+        field.to_string()
+    };
+    let rule = declarations.authoritative.get(field).cloned().or_else(|| {
+        resource_type_overrides()
+            .get(&(resource, path))
+            .cloned()
+            .or_else(|| parent.and_then(|p| struct_rules.get(&(p, field)).cloned()))
+            .or_else(|| declarations.get(field).cloned())
+    });
+    let tightenings = rule
+        .iter()
+        .filter(|rule| {
+            matches!(
+                rule,
+                TypeOverride::StringBounds { .. }
+                    | TypeOverride::RefinedString { .. }
+                    | TypeOverride::StringPattern(_)
+                    | TypeOverride::StringProfile(_)
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let base = string_members::derive(model, member, resource, path, &tightenings)?;
+    for pattern in string_members::input_patterns(&tightenings) {
+        declarations.add_input_pattern(resource, path, pattern)?;
+    }
+    let mut identity_override = enum_identity_override(resource, parent, field);
+    if let Some(
+        TypeOverride::Identity(row)
+        | TypeOverride::EnumIdentity(row)
+        | TypeOverride::NamedValues { identity: row, .. },
+    ) = &rule
+    {
+        identity_override = Some(*row);
+    }
+    let mut identity = identity_override
+        .map(|r| r.identity())
+        .unwrap_or_else(|| carina_core::schema::enum_identity(&type_name, Some(namespace)));
+    match &rule {
+        Some(TypeOverride::NamedValues {
+            values: allowed, ..
+        }) => {
+            values = string_members::validate_allowed_values(
+                &base.attribute_type,
+                Some(&values),
+                allowed,
+            )
+            .with_context(|| format!("{resource}.{path}"))?
+        }
+        Some(TypeOverride::LocalEnum {
+            namespace,
+            name,
+            values: allowed,
+        }) => {
+            values = string_members::validate_allowed_values(
+                &base.attribute_type,
+                Some(&values),
+                allowed,
+            )
+            .with_context(|| format!("{resource}.{path}"))?;
+            type_name = (*name).into();
+            identity = carina_core::schema::enum_identity(name, Some(namespace));
+            identity_override = None;
+        }
+        _ => {}
+    }
+    if let Some(row) = identity_override
+        && let RawShape::Enum {
+            values: Some(named_values),
+            ..
+        } = row.attribute_type().raw_shape()
+    {
+        if let Some(TypeOverride::NamedValues {
+            values: allowed, ..
+        }) = &rule
+        {
+            for value in *allowed {
+                anyhow::ensure!(
+                    named_values.iter().any(|named| named == value),
+                    "{resource}.{path}: override value {value:?} is absent from the named identity's value set"
+                );
+            }
+        }
+        values.retain(|value| named_values.contains(value));
+    }
+    // A finite closed enum can express the exact intersection without a
+    // constrained base (which protocol v24 cannot transport).
+    values.retain(|value| carina_aws_types::member_string_accepts(&base.attribute_type, value));
+    anyhow::ensure!(
+        !values.is_empty(),
+        "{resource}.{path}: empty enum intersection"
+    );
+    let snake = field.to_snake_case();
+    anyhow::ensure!(
+        !declarations.to_dsl_overrides.contains_key(snake.as_str()),
+        "{resource}.{path}: executable enum alias overrides are unsupported; use enum_aliases data"
+    );
+    let named = identity_override.map(|row| row.attribute_type());
+    let mut alias_definitions = declarations
+        .enum_aliases
+        .get(snake.as_str())
+        .cloned()
+        .unwrap_or_default();
+    if let Some(RawShape::Enum { dsl_aliases, .. }) = named.as_ref().map(AttributeType::raw_shape) {
+        alias_definitions.extend(
+            dsl_aliases
+                .iter()
+                .filter(|(api, _)| values.contains(api))
+                .map(|(api, dsl)| (api.as_str(), dsl.as_str())),
+        );
+    }
+    let aliases = build_dsl_aliases(&values, Some(&alias_definitions));
+    let mut attribute_type = AttributeType::enum_(identity, Some(values), aliases, None, None);
+    if let Some(named) = &named {
+        attribute_type = carina_aws_types::try_with_member_identity(attribute_type, named.clone())
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("{resource}.{path}"))?;
+    }
+    let RawShape::Enum {
+        identity: actual_identity,
+        values: Some(values),
+        dsl_aliases,
+        ..
+    } = attribute_type.raw_shape()
+    else {
+        unreachable!("finite enum")
+    };
+    let info = EnumInfo {
+        type_name,
+        values: values.to_vec(),
+        identity_override,
+    };
+    let identity_code = enum_identity_code(actual_identity, identity_override);
+    let values_code = values
+        .iter()
+        .map(|v| format!("{v:?}.to_string()"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let aliases_code = dsl_aliases
+        .iter()
+        .map(|(api, dsl)| format!("({api:?}.to_string(), {dsl:?}.to_string())"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let code = format!(
+        "AttributeType::enum_({identity_code}, Some(vec![{values_code}]), vec![{aliases_code}], None, None)"
+    );
+    let code = if let Some(row) = identity_override {
+        format!(
+            "carina_aws_types::with_member_identity({code}, carina_aws_types::AwsType::{row:?}.attribute_type())"
+        )
+    } else {
+        code
+    };
+    let value = ValueTypeOverride {
+        type_code: code,
+        attribute_type,
+        documentation: None,
+    };
+    Ok(Some((value, info)))
+}
+
+#[cfg(test)]
 fn resolve_type(
     ctx: &mut TypeResolutionContext<'_>,
     target: &str,
     field_name: &str,
 ) -> Result<(String, Option<EnumInfo>)> {
-    if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
-        return Ok((code.to_string(), None));
-    }
-    if let Some(override_type) = resource_value_override(ctx.resource_name, &ctx.property_path) {
-        return Ok((
-            bound_int_override(ctx.model, target, field_name, override_type).type_code,
-            None,
-        ));
-    }
-    // Check type overrides first
-    if let Some(&override_type) = ctx.type_overrides.get(field_name) {
-        if let Some(list) = string_list_value_override(
-            ctx.model,
-            target,
-            ctx.resource_name,
-            &ctx.property_path,
-            override_type,
-        ) {
-            return Ok((list.type_code, None));
-        }
-        return Ok((
-            bounded_int_constructor_code(ctx.model, target, field_name, override_type)?,
-            None,
-        ));
-    }
+    resolve_member(
+        ctx,
+        &carina_smithy::ShapeRef {
+            target: target.into(),
+            traits: Default::default(),
+        },
+        field_name,
+    )
+}
 
-    // Check known enum overrides
-    if let Some(values) = known_enum_overrides().get(field_name) {
-        let type_name = field_name.to_string();
-        let enum_info = EnumInfo {
-            type_name,
-            values: values.iter().map(|s| s.to_string()).collect(),
-            identity_override: enum_identity_override(
-                ctx.resource_name,
-                ctx.struct_path.last().map(String::as_str),
-                field_name,
-            ),
-        };
-        ctx.all_enums
-            .entry(field_name.to_string())
-            .or_insert_with(|| enum_info.clone());
-        return Ok(("/* enum */".to_string(), Some(enum_info)));
-    }
+#[cfg(test)]
+fn resolve_member(
+    ctx: &mut TypeResolutionContext<'_>,
+    member: &carina_smithy::ShapeRef,
+    field: &str,
+) -> Result<(String, Option<EnumInfo>)> {
+    let (value, info) = resolve_member_value(ctx, member, field)?;
+    Ok((value.type_code, info))
+}
 
-    if let Some(start) = ctx
-        .resolving_shapes
-        .iter()
-        .position(|shape| shape == target)
+fn resolve_member_value(
+    ctx: &mut TypeResolutionContext<'_>,
+    member: &carina_smithy::ShapeRef,
+    field_name: &str,
+) -> Result<(ValueTypeOverride, Option<EnumInfo>)> {
+    let target = member.target.as_str();
+    let kind = ctx.model.shape_kind(target);
+    // Representation declarations may not swallow a pattern tightening. A
+    // portable Matches rule needs a declared String carrier and fixed path.
+    let explicit_rule = resource_type_overrides()
+        .get(&(ctx.resource_name, ctx.property_path.as_str()))
+        .or_else(|| {
+            ctx.struct_path.last().and_then(|parent| {
+                ctx.struct_field_type_overrides
+                    .get(&(parent.as_str(), field_name))
+            })
+        })
+        .or_else(|| ctx.type_overrides.get(field_name));
+    if explicit_rule
+        .is_some_and(|rule| !string_members::input_patterns(std::slice::from_ref(rule)).is_empty())
     {
-        let cycle = ctx.resolving_shapes[start..]
-            .iter()
-            .map(String::as_str)
-            .chain(std::iter::once(target))
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        anyhow::bail!("Recursive Smithy shape cycle: {cycle}");
+        let representation = ctx.type_overrides.representations.get(field_name);
+        anyhow::ensure!(
+            representation.is_none_or(|repr| *repr == Representation::String)
+                && (matches!(kind, Some(ShapeKind::String | ShapeKind::Enum))
+                    || target == "smithy.api#String"),
+            "{}.{}: pattern tightening requires a String InputRule target; it cannot be applied to this representation",
+            ctx.resource_name,
+            ctx.property_path
+        );
     }
-    ctx.resolving_shapes.push(target.to_string());
-    let result = resolve_type_shape(ctx, target, field_name);
+    if let Some(representation) = ctx.type_overrides.representations.get(field_name).copied() {
+        if matches!(
+            representation,
+            Representation::UnorderedStrings | Representation::RecordValues
+        ) {
+            if kind == Some(ShapeKind::List) {
+                if let Some(value) = string_list_value_override(
+                    ctx.model,
+                    target,
+                    ctx.resource_name,
+                    &ctx.property_path,
+                    representation.code(),
+                )? {
+                    return Ok((value, None));
+                }
+                if representation == Representation::UnorderedStrings
+                    && let Some(Shape::List(list)) = ctx.model.get_shape(target)
+                {
+                    let previous = ctx.property_path.clone();
+                    ctx.property_path.push_str("[]");
+                    let (element, _) = resolve_member_value(ctx, &list.member, field_name)?;
+                    ctx.property_path = previous;
+                    let length =
+                        length_from_traits(&string_members::effective_traits(ctx.model, member));
+                    return Ok((
+                        ValueTypeOverride {
+                            type_code: format!(
+                                "AttributeType::refined_list({}, false, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
+                                element.type_code
+                            ),
+                            attribute_type: AttributeType::refined_list(
+                                element.attribute_type,
+                                false,
+                                length,
+                                ListElements::AllowDuplicates,
+                            ),
+                            documentation: None,
+                        },
+                        None,
+                    ));
+                }
+            }
+        } else if representation != Representation::String {
+            return Ok((
+                ValueTypeOverride::from_constructor(representation.code())?,
+                None,
+            ));
+        }
+    }
+    if let Some((value, info)) = enum_member_value(
+        ctx.model,
+        ctx.resource_name,
+        member,
+        field_name,
+        &ctx.property_path,
+        &enum_namespace(ctx),
+        ctx.type_overrides,
+        ctx.struct_field_type_overrides,
+        ctx.struct_path.last().map(String::as_str),
+    )? {
+        register_member_enum(ctx, &info)?;
+        return Ok((value, Some(info)));
+    }
+    if kind == Some(ShapeKind::String) || target == "smithy.api#String" {
+        let value = member_string_value(
+            ctx.model,
+            ctx.resource_name,
+            member,
+            field_name,
+            &ctx.property_path,
+            ctx.type_overrides,
+            ctx.struct_field_type_overrides,
+            ctx.struct_path.last().map(String::as_str),
+        )?;
+        return Ok((value, None));
+    }
+    if matches!(kind, Some(ShapeKind::Integer | ShapeKind::Long)) {
+        let bounds = get_int_range(ctx.model, target, field_name);
+        let range = bounds.map(|b| (b.min, b.max));
+        let mut value = ValueTypeOverride {
+            type_code: if range.is_some() {
+                format!(
+                    "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new({range:?}))"
+                )
+            } else {
+                "AttributeType::int()".into()
+            },
+            attribute_type: AttributeType::int_member(
+                carina_core::schema::IntIdentityLayer::new(None, None),
+                carina_core::schema::IntMemberConstraints::new(range),
+            ),
+            documentation: None,
+        };
+        if let Some(rule) = resource_type_overrides()
+            .get(&(ctx.resource_name, ctx.property_path.as_str()))
+            .or_else(|| {
+                ctx.struct_path.last().and_then(|parent| {
+                    ctx.struct_field_type_overrides
+                        .get(&(parent.as_str(), field_name))
+                })
+            })
+            .or_else(|| ctx.type_overrides.get(field_name))
+        {
+            value = string_members::decorate(value, rule)
+                .with_context(|| format!("{}.{}", ctx.resource_name, ctx.property_path))?;
+        }
+        return Ok((value, None));
+    }
+    if ctx.resolving_shapes.iter().any(|shape| shape == target) {
+        anyhow::bail!(
+            "Recursive Smithy shape cycle: {} -> {target}",
+            ctx.resolving_shapes.join(" -> ")
+        );
+    }
+    ctx.resolving_shapes.push(target.into());
+    let result = resolve_type_shape(ctx, member, field_name);
     ctx.resolving_shapes.pop();
     result
 }
 
-/// Expand a model shape after overrides, through the shared recursion guard.
+/// Intersect collection bounds after deriving the member's effective traits.
+fn list_bounds(
+    model: &SmithyModel,
+    member: &carina_smithy::ShapeRef,
+    resource: &str,
+    path: &str,
+) -> Result<Bounds<u64>> {
+    let derived = length_from_traits(&string_members::effective_traits(model, member));
+    let extra = match resource_type_overrides().get(&(resource, path)) {
+        Some(TypeOverride::ListLength { min, max }) => Some((Some(*min), Some(*max))),
+        _ => None,
+    };
+    string_members::intersect(derived, extra).with_context(|| format!("{resource}.{path}"))
+}
+
 fn resolve_type_shape(
     ctx: &mut TypeResolutionContext<'_>,
-    target: &str,
-    field_name: &str,
-) -> Result<(String, Option<EnumInfo>)> {
-    let kind = ctx.model.shape_kind(target);
-
-    Ok(match kind {
-        Some(ShapeKind::String) => {
-            // Check name-based type inference (handles CIDR, IP, AZ, ARN, resource IDs, etc.)
-            if let Some(inferred) = infer_string_type(field_name) {
-                return Ok((inferred, None));
-            }
-
-            (PLAIN_STRING_TYPE_CODE.to_string(), None)
+    member: &carina_smithy::ShapeRef,
+    field: &str,
+) -> Result<(ValueTypeOverride, Option<EnumInfo>)> {
+    let target = member.target.as_str();
+    let value = match ctx.model.shape_kind(target) {
+        Some(ShapeKind::Boolean) => ValueTypeOverride::from_constructor("AttributeType::bool()")?,
+        Some(ShapeKind::Float | ShapeKind::Double) => {
+            ValueTypeOverride::from_constructor("AttributeType::float()")?
         }
-        Some(ShapeKind::Boolean) => ("AttributeType::bool()".to_string(), None),
-        Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
-            // Check for range traits on the target shape
-            let range = get_int_range(ctx.model, target, field_name);
-            if let Some(r) = range {
-                ctx.all_ranged_ints
-                    .entry(field_name.to_string())
-                    .or_insert(r);
-                let range_expr = match (r.min, r.max) {
-                    (Some(min), Some(max)) => {
-                        format!("Some((Some({}), Some({})))", min, max)
-                    }
-                    (Some(min), None) => format!("Some((Some({}), None))", min),
-                    (None, Some(max)) => format!("Some((None, Some({})))", max),
-                    (None, None) => "None".to_string(),
-                };
-                (
-                    format!(
-                        "AttributeType::refined_int(\n\
-                         \x20               None,\n\
-                         \x20               {},\n\
-                         \x20           )",
-                        range_expr
-                    ),
-                    None,
-                )
-            } else {
-                ("AttributeType::int()".to_string(), None)
-            }
-        }
-        Some(ShapeKind::Float) | Some(ShapeKind::Double) => {
-            ("AttributeType::float()".to_string(), None)
-        }
-        Some(ShapeKind::Enum) => {
-            // Get enum values from Smithy model
-            if let Some(values) = ctx.model.enum_values(target) {
-                // Prefer the Smithy shape name (PascalCase, e.g. "LogGroupClass")
-                // over the field name (which can be camelCase, e.g. "logGroupClass")
-                // so the generated DSL identifier reads naturally.
-                let type_name =
-                    pascalize_enum_type_name(SmithyModel::shape_name(target), field_name);
-                let string_values: Vec<String> = values.into_iter().map(|(_, v)| v).collect();
-                let enum_info = EnumInfo {
-                    type_name,
-                    values: string_values,
-                    identity_override: enum_identity_override(
-                        ctx.resource_name,
-                        ctx.struct_path.last().map(String::as_str),
-                        field_name,
-                    ),
-                };
-                ctx.all_enums
-                    .entry(field_name.to_string())
-                    .or_insert_with(|| enum_info.clone());
-                return Ok(("/* enum */".to_string(), Some(enum_info)));
-            }
-            (PLAIN_STRING_TYPE_CODE.to_string(), None)
-        }
-        Some(ShapeKind::IntEnum) => ("AttributeType::int()".to_string(), None),
+        Some(ShapeKind::IntEnum) => ValueTypeOverride::from_constructor("AttributeType::int()")?,
         Some(ShapeKind::List) => {
-            // Get list member type
-            if let Some(carina_smithy::Shape::List(list_shape)) = ctx.model.get_shape(target) {
-                let previous_path = ctx.property_path.clone();
-                ctx.property_path =
-                    kms_references::property_path(&previous_path, PathSegment::ListElement);
-                let (item_type, enum_info) =
-                    resolve_type(ctx, &list_shape.member.target, field_name)?;
-                ctx.property_path = previous_path;
-                let item_type = enum_info
-                    .as_ref()
-                    .map(|info| enum_type_code(ctx, field_name, info))
-                    .unwrap_or(item_type);
-                let code = match resource_type_overrides()
-                    .get(&(ctx.resource_name, ctx.property_path.as_str()))
-                {
-                    Some(TypeOverride::ListLength { min, max }) => format!(
-                        "AttributeType::refined_list({item_type}, true, Some((Some({min}), Some({max}))), carina_core::schema::ListElements::AllowDuplicates)"
-                    ),
-                    _ => format!("AttributeType::list({item_type})"),
-                };
-                (code, None)
-            } else {
-                (
-                    format!("AttributeType::list({PLAIN_STRING_TYPE_CODE})"),
-                    None,
-                )
+            let Some(Shape::List(list)) = ctx.model.get_shape(target) else {
+                unreachable!("list")
+            };
+            let previous = ctx.property_path.clone();
+            ctx.property_path = kms_references::property_path(&previous, PathSegment::ListElement);
+            let (element, _) = resolve_member_value(ctx, &list.member, field)?;
+            ctx.property_path = previous;
+            let length = list_bounds(ctx.model, member, ctx.resource_name, &ctx.property_path)?;
+            ValueTypeOverride {
+                type_code: if length.is_none() {
+                    format!("AttributeType::list({})", element.type_code)
+                } else {
+                    format!(
+                        "AttributeType::refined_list({}, true, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
+                        element.type_code
+                    )
+                },
+                attribute_type: AttributeType::refined_list(
+                    element.attribute_type,
+                    true,
+                    length,
+                    ListElements::AllowDuplicates,
+                ),
+                documentation: None,
             }
         }
         Some(ShapeKind::Map) => {
-            if let Some(Shape::Map(map_shape)) = ctx.model.get_shape(target) {
-                let previous_path = ctx.property_path.clone();
-                ctx.property_path =
-                    kms_references::property_path(&previous_path, PathSegment::MapValue);
-                let (value_type, enum_info) =
-                    resolve_type(ctx, &map_shape.value.target, field_name)?;
-                ctx.property_path = previous_path;
-                let value_type = enum_info
-                    .as_ref()
-                    .map(|info| enum_type_code(ctx, field_name, info))
-                    .unwrap_or(value_type);
-                let code = map_type_code(
-                    PLAIN_STRING_TYPE_CODE,
-                    &value_type,
-                    length_from_traits(&map_shape.traits),
-                );
-                (code, None)
-            } else {
-                (
-                    format!("AttributeType::map({PLAIN_STRING_TYPE_CODE})"),
-                    None,
-                )
+            let Some(Shape::Map(map)) = ctx.model.get_shape(target) else {
+                unreachable!("map")
+            };
+            let previous = ctx.property_path.clone();
+            ctx.property_path = kms_references::property_path(&previous, PathSegment::MapValue);
+            let (value, _) = resolve_member_value(ctx, &map.value, field)?;
+            ctx.property_path = format!("{previous}{{key}}");
+            let (key, _) = resolve_member_value(ctx, &map.key, "Key")?;
+            ctx.property_path = previous;
+            let length = length_from_traits(&string_members::effective_traits(ctx.model, member));
+            ValueTypeOverride {
+                type_code: map_type_code(&key.type_code, &value.type_code, length),
+                attribute_type: AttributeType::refined_map(
+                    key.attribute_type,
+                    value.attribute_type,
+                    length,
+                ),
+                documentation: None,
             }
         }
         Some(ShapeKind::Structure) => {
-            // Check if it's a TagList-like structure
-            let shape_name = SmithyModel::shape_name(target);
-            if (shape_name == "TagList" || shape_name == "Tag")
-                && let Some(tags) = TagMapType::from_shape(ctx.model, target)?
-            {
-                return Ok((tags.code(), None));
-            }
-
-            // Unwrap EC2 AttributeBooleanValue wrapper → plain Bool
-            if shape_name == "AttributeBooleanValue" {
-                return Ok(("AttributeType::bool()".to_string(), None));
-            }
-
-            // Generate struct type for nested structures
-            if let Some(structure) = ctx.model.get_structure(target) {
-                let struct_code = generate_struct_type(
-                    ctx,
+            let name = SmithyModel::shape_name(target);
+            if (name == "TagList" || name == "Tag")
+                && let Some(tags) = TagMapType::from_shape(
+                    ctx.model,
                     target,
-                    StructRepresentation::from_structure(structure),
-                )?;
-                return Ok((struct_code, None));
+                    ctx.resource_name,
+                    &ctx.property_path,
+                )?
+            {
+                ValueTypeOverride {
+                    type_code: tags.code(),
+                    attribute_type: tags.attribute_type(),
+                    documentation: None,
+                }
+            } else if name == "AttributeBooleanValue" {
+                ValueTypeOverride::from_constructor("AttributeType::bool()")?
+            } else {
+                let structure = ctx
+                    .model
+                    .get_structure(target)
+                    .with_context(|| format!("Cannot find structure {target}"))?;
+                generate_struct_value(ctx, target, StructRepresentation::from_structure(structure))?
             }
-            (PLAIN_STRING_TYPE_CODE.to_string(), None)
         }
         Some(ShapeKind::Union) => {
             let Some(Shape::Union(union)) = ctx.model.get_shape(target) else {
-                anyhow::bail!("Cannot find Smithy union {target}");
+                unreachable!("union")
             };
-            let representation = union_struct_representation(target, &union.members)?;
-            (generate_struct_type(ctx, target, representation)?, None)
+            generate_struct_value(
+                ctx,
+                target,
+                union_struct_representation(target, &union.members)?,
+            )?
         }
-        Some(
-            ShapeKind::Blob
-            | ShapeKind::Timestamp
-            | ShapeKind::Service
-            | ShapeKind::Operation
-            | ShapeKind::Resource
-            | ShapeKind::Unit,
-        )
-        | None => {
-            // Fallback: try name-based heuristics
-            if let Some(inferred) = infer_string_type(field_name) {
-                (inferred, None)
-            } else {
-                (PLAIN_STRING_TYPE_CODE.to_string(), None)
-            }
-        }
-    })
+        Some(ShapeKind::Enum) => anyhow::bail!(
+            "{}.{}: enum has no values",
+            ctx.resource_name,
+            ctx.property_path
+        ),
+        _ => member_string_value(
+            ctx.model,
+            ctx.resource_name,
+            member,
+            field,
+            &ctx.property_path,
+            ctx.type_overrides,
+            ctx.struct_field_type_overrides,
+            ctx.struct_path.last().map(String::as_str),
+        )?,
+    };
+    Ok((value, None))
 }
 
 /// Generate Rust code for an AttributeType::Struct.
-fn generate_struct_type(
+fn generate_struct_value(
     ctx: &mut TypeResolutionContext<'_>,
     struct_shape_id: &str,
     structure: StructRepresentation<'_>,
-) -> Result<String> {
+) -> Result<ValueTypeOverride> {
     let struct_name = SmithyModel::shape_name(struct_shape_id);
     ctx.struct_path.push(struct_name.to_string());
     let mut fields: Vec<String> = Vec::new();
+    let mut attributes = Vec::new();
     for (field_name, member_ref) in structure.members {
         let snake_name = field_name.to_snake_case();
         let is_required = structure.required_fields.contains(field_name.as_str());
 
-        // Check `(parent_struct, member)` type override first — distinguishes
-        // a member name shared across structs (e.g. `HostedZoneId` in
-        // `AliasTarget` vs `RecordSet`). Falls through to the default
-        // resolve_type path when no per-parent override is registered.
-        let override_type = ctx
-            .struct_field_type_overrides
-            .get(&(struct_name, field_name.as_str()))
-            .copied();
-
         let previous_path = ctx.property_path.clone();
         ctx.property_path =
             kms_references::property_path(&previous_path, PathSegment::Field(&snake_name));
-        let (field_type, enum_info) =
-            if let Some(code) = reference_type_code(ctx.resource_name, &ctx.property_path) {
-                (code.to_string(), None)
-            } else if let Some(override_type) =
-                resource_value_override(ctx.resource_name, &ctx.property_path)
-            {
-                (
-                    bound_int_override(ctx.model, &member_ref.target, field_name, override_type)
-                        .type_code,
-                    None,
-                )
-            } else if let Some(t) = override_type {
-                (
-                    bounded_int_constructor_code(ctx.model, &member_ref.target, field_name, t)?,
-                    None,
-                )
-            } else {
-                resolve_type(ctx, &member_ref.target, field_name)?
-            };
-
+        let (field_value, _) = resolve_member_value(ctx, member_ref, field_name)?;
         ctx.property_path = previous_path;
 
-        // If enum detected, use shared schema enum type.
-        let field_type = enum_info
-            .as_ref()
-            .map(|info| enum_type_code(ctx, field_name, info))
-            .unwrap_or(field_type);
-
+        let field_type = &field_value.type_code;
         let constructor = mode_constructor(is_required, false);
         let mut field_code = format!(
             "StructField::{}(\"{}\", {})",
             constructor, snake_name, field_type
         );
-        if let Some(root_attr) = ctx.current_root_attr
-            && ctx
-                .deferred_populate_struct_fields
+        let deferred_populate = ctx.current_root_attr.is_some_and(|root_attr| {
+            ctx.deferred_populate_struct_fields
                 .contains(&(root_attr, field_name.as_str()))
-        {
+        });
+        if deferred_populate {
             field_code.push_str(".deferred_populate()");
         }
         let nested_write_only_key = StructMemberKey {
@@ -3389,7 +3703,7 @@ fn generate_struct_type(
         {
             field_code.push_str(".write_only()");
             *ctx.nested_write_only_emissions
-                .entry(nested_write_only_key)
+                .entry(nested_write_only_key.clone())
                 .or_default() += 1;
         }
         if let Some(desc) = SmithyModel::documentation(&member_ref.traits) {
@@ -3400,6 +3714,38 @@ fn generate_struct_type(
         }
         field_code.push_str(&format!(".with_provider_name(\"{}\")", field_name));
         field_code.push_str(".build()");
+        let write_only = ctx
+            .nested_write_only_struct_fields
+            .contains(&nested_write_only_key);
+        let description = SmithyModel::documentation(&member_ref.traits)
+            .map(|s| Description::from_smithy_html(s).markdown().into_owned());
+        macro_rules! finish {
+            ($builder:expr) => {{
+                let mut builder = $builder.with_provider_name(field_name);
+                if deferred_populate {
+                    builder = builder.deferred_populate();
+                }
+                if write_only {
+                    builder = builder.write_only();
+                }
+                if let Some(description) = &description {
+                    builder = builder.with_description(description);
+                }
+                builder.build()
+            }};
+        }
+        let attribute = if is_required {
+            finish!(carina_core::schema::StructField::required(
+                &snake_name,
+                field_value.attribute_type.clone()
+            ))
+        } else {
+            finish!(carina_core::schema::StructField::optional(
+                &snake_name,
+                field_value.attribute_type.clone()
+            ))
+        };
+        attributes.push(attribute);
         fields.push(field_code);
     }
 
@@ -3423,7 +3769,7 @@ fn generate_struct_type(
     } else {
         "struct_with_field_groups"
     };
-    Ok(format!(
+    let type_code = format!(
         "AttributeType::{}(\n\
          \x20                   \"{}\".to_string(),\n\
          \x20                   vec![\n\
@@ -3431,7 +3777,16 @@ fn generate_struct_type(
          \x20                   ],\n\
          {}\x20               )",
         constructor, struct_name, fields_str, groups
-    ))
+    );
+    Ok(ValueTypeOverride {
+        type_code,
+        attribute_type: AttributeType::struct_with_field_groups(
+            struct_name,
+            attributes,
+            field_groups.to_vec(),
+        ),
+        documentation: None,
+    })
 }
 
 /// Intersect wire width, Smithy traits, and documented field bounds.
@@ -3468,6 +3823,7 @@ fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<
 }
 
 /// Overrides can refine or name an integer, but cannot widen its wire carrier.
+#[cfg(test)]
 fn bound_int_override(
     model: &SmithyModel,
     target: &str,
@@ -3484,11 +3840,14 @@ fn bound_int_override(
         return value;
     };
     let RawShape::Int {
-        identity, range, ..
+        identity_layer,
+        member_layer,
     } = value.attribute_type.raw_shape()
     else {
         return value;
     };
+    let identity = identity_layer.identity;
+    let range = carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
     // A closed Int set already enforces the carrier when every member fits.
     // Preserve its constructor, callback and allowed-value documentation.
     if let Some(identity) = identity
@@ -3506,10 +3865,10 @@ fn bound_int_override(
     let bounded =
         carina_aws_types::with_int_range(value.attribute_type.clone(), bounds.min, bounds.max);
     if let RawShape::Int {
-        range: bounded_range,
-        ..
+        identity_layer,
+        member_layer,
     } = bounded.raw_shape()
-        && range == bounded_range
+        && range == carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range)
     {
         return value;
     }
@@ -3520,31 +3879,6 @@ fn bound_int_override(
     );
     value.attribute_type = bounded;
     value
-}
-
-fn bounded_int_constructor_code(
-    model: &SmithyModel,
-    target: &str,
-    field_name: &str,
-    code: &str,
-) -> Result<String> {
-    if !matches!(
-        model.shape_kind(target),
-        Some(ShapeKind::Integer | ShapeKind::Long)
-    ) {
-        return Ok(code.to_string());
-    }
-    Ok(bound_int_override(
-        model,
-        target,
-        field_name,
-        ValueTypeOverride {
-            type_code: code.to_string(),
-            documentation: None,
-            attribute_type: attribute_type_from_code(code)?,
-        },
-    )
-    .type_code)
 }
 
 /// Generate per-service mod.rs files that declare resource modules.
@@ -4423,10 +4757,10 @@ fn generate_provider_code(
             // type (e.g. Bool, Json) but the generated builder body assumes
             // `Value::String`. The provider-side write must be hand-written
             // in services/<service>/<resource>.rs.
-            if update_fields
-                .iter()
-                .any(|f| res.type_overrides.iter().any(|(k, _)| *k == *f))
-            {
+            if update_fields.iter().any(|f| {
+                res.type_overrides.iter().any(|(k, _)| *k == *f)
+                    || res.representations.iter().any(|(k, _)| *k == *f)
+            }) {
                 continue;
             }
             let sdk_method = update_op.operation.to_snake_case();
@@ -5121,8 +5455,12 @@ fn nested_sdk_i32_paths(model: &SmithyModel, target: &str, constructor: &str) ->
     fn authored(ty: &AttributeType, path: &mut Vec<String>, paths: &mut Vec<Vec<String>>) {
         match ty.raw_shape() {
             RawShape::Int {
-                identity, range, ..
+                identity_layer,
+                member_layer,
             } => {
+                let identity = identity_layer.identity;
+                let range =
+                    carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
                 let bounded = range.is_some_and(|(min, max)| {
                     min.is_some_and(|min| min >= i64::from(i32::MIN))
                         && max.is_some_and(|max| max <= i64::from(i32::MAX))
@@ -6071,7 +6409,6 @@ fn client_field_name(service_namespace: &str) -> String {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum MarkdownEnumSource {
     Smithy { target: String, type_name: String },
-    KnownOverride(String),
     AttributeType(String),
 }
 
@@ -6139,7 +6476,6 @@ type MarkdownType = TypeDisplay<MarkdownTarget>;
 
 #[derive(Debug)]
 struct MarkdownEnum {
-    prop_name: String,
     info: EnumInfo,
     dsl_aliases: Vec<(String, String)>,
 }
@@ -6430,24 +6766,16 @@ fn generate_markdown_resource(
             exclude.insert(field);
         }
     }
-    let type_overrides: HashMap<&str, &str> = res.type_overrides.iter().copied().collect();
-    let struct_field_type_overrides: HashMap<(&str, &str), &str> = res
+    let type_overrides = TypeDeclarations::from_resource(res);
+    let struct_field_type_overrides: HashMap<(&str, &str), TypeOverride> = res
         .struct_field_type_overrides
         .iter()
-        .map(|(p, m, t)| ((*p, *m), *t))
+        .map(|(p, m, t)| ((*p, *m), t.clone()))
         .collect();
     let required_overrides: HashSet<&str> = res.required_overrides.iter().copied().collect();
     let read_only_overrides: HashSet<&str> = res.read_only_overrides.iter().copied().collect();
     let extra_read_only: HashSet<&str> = res.extra_read_only.iter().copied().collect();
     let read_shape_overrides: HashSet<&str> = res.read_shape_overrides.iter().copied().collect();
-    let enum_alias_map: HashMap<&str, Vec<(&str, &str)>> = {
-        let mut m: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
-        for (attr, alias, canonical) in &res.enum_aliases {
-            m.entry(attr).or_default().push((canonical, alias));
-        }
-        m
-    };
-
     // Resolve create input (skip for data sources)
     let create_input = if !is_data_source {
         let create_op_id = format!("{}#{}", ns, res.create_op);
@@ -6609,10 +6937,10 @@ fn generate_markdown_resource(
             SmithyModel::documentation(&member_ref.traits).map(Description::from_smithy_html)
         };
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let attr_type = discover_markdown_type(
+        let attr_type = discover_markdown_member(
             model,
             res.name,
-            &member_ref.target,
+            member_ref,
             name,
             &HeadingPath::root(&snake_name),
             &snake_name,
@@ -6644,7 +6972,7 @@ fn generate_markdown_resource(
         }
         let snake_name = extra.name.to_snake_case();
         carina_codegen_aws::kms_references::validate_synthetic_type(model, res, extra)?;
-        let attr_type = synthetic_extra_attribute_type(res.name, extra.name, &type_overrides)?
+        let attr_type = synthetic_extra_attribute_type(res, model, extra.name, &type_overrides)?
             .markdown(
                 &HeadingPath::root(&snake_name),
                 &namespace,
@@ -6670,45 +6998,21 @@ fn generate_markdown_resource(
         let description =
             SmithyModel::documentation(&member_ref.traits).map(Description::from_smithy_html);
         validate_smithy_type(model, res.name, &snake_name, name, member_ref)?;
-        let attr_type = if let Some(override_type) = resource_value_override(res.name, &snake_name)
-        {
-            override_type.markdown(
-                &HeadingPath::root(&snake_name),
-                &namespace,
-                &mut all_enums,
-                &mut struct_defs,
-            )?
-        } else if let Some(constructor) = (name == "Arn")
-            .then(|| {
-                resource_identity_parts(res.name)
-                    .and_then(|(service, resource)| shared_arn_constructor(service, resource))
-            })
-            .flatten()
-        {
-            discover_markdown_override(
-                &format!("super::{constructor}()"),
-                &HeadingPath::root(&snake_name),
-                &namespace,
-                &mut all_enums,
-                &mut struct_defs,
-            )?
-        } else {
-            discover_markdown_type(
-                model,
-                res.name,
-                &member_ref.target,
-                name,
-                &HeadingPath::root(&snake_name),
-                &snake_name,
-                &namespace,
-                &type_overrides,
-                &struct_field_type_overrides,
-                None,
-                &mut all_enums,
-                &mut struct_defs,
-                &mut discovering_structs,
-            )?
-        };
+        let attr_type = discover_markdown_member(
+            model,
+            res.name,
+            member_ref,
+            name,
+            &HeadingPath::root(&snake_name),
+            &snake_name,
+            &namespace,
+            &type_overrides,
+            &struct_field_type_overrides,
+            None,
+            &mut all_enums,
+            &mut struct_defs,
+            &mut discovering_structs,
+        )?;
 
         read_only_attrs.push(MarkdownAttrInfo {
             snake_name,
@@ -6842,7 +7146,41 @@ fn generate_markdown_resource(
         ));
     }
 
-    write_markdown_type_definitions(&mut page, &all_enums, &struct_defs, &enum_alias_map)?;
+    write_markdown_type_definitions(&mut page, &all_enums, &struct_defs)?;
+
+    // Use the Rust path's mutability classification and rule binding too.
+    // Avoid a second traversal for pages without pattern tightenings (including
+    // docs-only recursive shape fixtures).
+    if !type_overrides.input_patterns.borrow().is_empty() {
+        use carina_core::schema::{InputPredicate, InputRuleScope};
+        let collected = collect_resource_attributes(res, model)?;
+        page.heading(Heading::plain(2, "Additional Input Constraints"))?;
+        let rows = collected.input_rules.iter().filter_map(|rule| {
+            let InputPredicate::Matches(pattern) = rule.predicate() else {
+                return None;
+            };
+            let scope = match rule.scope() {
+                InputRuleScope::CreateOnly => "Create only",
+                InputRuleScope::EveryWrite => "Create and update",
+            };
+            Some([
+                TableCell::code(rule.path().as_str()),
+                TableCell::text(scope),
+                scalar_display(
+                    ScalarDoc::String {
+                        pattern: Some(pattern),
+                        length: None,
+                        validate: false,
+                        to_dsl: None,
+                    },
+                    None,
+                )
+                .table_cell(),
+            ])
+        });
+        page.table(["Attribute", "Applies on", "Additional constraint"], rows)?;
+        page.push_str("\n");
+    }
 
     // Attribute Reference (read-only)
     if !read_only_attrs.is_empty() {
@@ -6865,7 +7203,6 @@ fn write_markdown_type_definitions(
     page: &mut PageBuilder<MarkdownTarget>,
     all_enums: &BTreeMap<MarkdownEnumKey, MarkdownEnum>,
     struct_defs: &BTreeMap<MarkdownStructKey, MarkdownStruct>,
-    enum_alias_map: &HashMap<&str, Vec<(&str, &str)>>,
 ) -> Result<()> {
     let union_heading_paths = markdown_union_heading_paths(all_enums, struct_defs)?;
     let enum_heading_texts = markdown_enum_heading_texts(all_enums);
@@ -6884,15 +7221,7 @@ fn write_markdown_type_definitions(
                 .get(key)
                 .expect("every enum heading must refer to a discovered enum");
             let enum_info = &enum_doc.info;
-            let attr_name = enum_doc.prop_name.to_snake_case();
-            let prop_aliases = enum_alias_map.get(attr_name.as_str());
-
             let dsl_for = |value: &str| -> String {
-                if let Some(alias_list) = prop_aliases
-                    && let Some((_, alias)) = alias_list.iter().find(|(c, _)| *c == value)
-                {
-                    return alias.to_string();
-                }
                 if let Some(entry) = enum_doc.dsl_aliases.iter().find(|entry| entry.0 == value) {
                     return entry.1.clone();
                 }
@@ -7006,7 +7335,6 @@ fn markdown_enum_heading_texts(
                 MarkdownEnumSource::Smithy { target, type_name } => {
                     format!("{target} {type_name}")
                 }
-                MarkdownEnumSource::KnownOverride(field) => format!("known override {field}"),
                 MarkdownEnumSource::AttributeType(identity) => identity.clone(),
             };
             (key.clone(), base, identity)
@@ -7149,15 +7477,207 @@ fn claim_unique_heading(
     unreachable!("an integer suffix always yields a fresh heading")
 }
 
-/// Generate Rust schema code for a data source.
-///
-/// `dual_registered` should be true when the same DSL name (e.g. `s3.Bucket`)
-/// is also registered as a Managed resource. In that case the file name and
-/// config function are suffixed with `_data_source` to avoid colliding with
-/// the Managed file (`s3/bucket.rs` + `s3_bucket_config`).
+/// Locate the Smithy member behind a data-source projection.
+fn data_source_member(model: &SmithyModel, resource: &str, path: &str) -> carina_smithy::ShapeRef {
+    let source = match (resource, path) {
+        ("sts.CallerIdentity", "account_id") => {
+            Some(("com.amazonaws.sts#GetCallerIdentityResponse", "Account"))
+        }
+        ("sts.CallerIdentity", "arn") => {
+            Some(("com.amazonaws.sts#GetCallerIdentityResponse", "Arn"))
+        }
+        ("sts.CallerIdentity", "user_id") => {
+            Some(("com.amazonaws.sts#GetCallerIdentityResponse", "UserId"))
+        }
+        ("iam.Roles", "path_prefix") => Some(("com.amazonaws.iam#ListRolesRequest", "PathPrefix")),
+        ("iam.Roles", "arns[]") => Some(("com.amazonaws.iam#Role", "Arn")),
+        ("iam.Roles", "names[]") => Some(("com.amazonaws.iam#Role", "RoleName")),
+        ("identitystore.User", "identity_store_id") => Some((
+            "com.amazonaws.identitystore#DescribeUserRequest",
+            "IdentityStoreId",
+        )),
+        ("identitystore.User", "user_id") => {
+            Some(("com.amazonaws.identitystore#DescribeUserRequest", "UserId"))
+        }
+        ("identitystore.User", "display_name") => Some((
+            "com.amazonaws.identitystore#DescribeUserResponse",
+            "DisplayName",
+        )),
+        ("identitystore.User", "name") => {
+            Some(("com.amazonaws.identitystore#DescribeUserResponse", "Name"))
+        }
+        ("identitystore.User", "emails") => {
+            Some(("com.amazonaws.identitystore#DescribeUserResponse", "Emails"))
+        }
+        ("s3.Bucket", "bucket") => Some(("com.amazonaws.s3#HeadBucketRequest", "Bucket")),
+        _ => None,
+    };
+    if resource == "identitystore.User"
+        && path == "user_name"
+        && model
+            .get_shape("com.amazonaws.identitystore#UserName")
+            .is_some()
+    {
+        return carina_smithy::ShapeRef {
+            target: "com.amazonaws.identitystore#UserName".into(),
+            traits: Default::default(),
+        };
+    }
+    source
+        .and_then(|(structure, field)| {
+            model
+                .get_structure(structure)
+                .and_then(|s| s.members.get(field))
+        })
+        .map(|member| carina_smithy::ShapeRef {
+            target: member.target.clone(),
+            traits: member.traits.clone(),
+        })
+        .unwrap_or_else(|| carina_smithy::ShapeRef {
+            target: "smithy.api#String".into(),
+            traits: Default::default(),
+        })
+}
+
+fn data_source_type(
+    model: &SmithyModel,
+    resource: &str,
+    path: &str,
+    provider_name: &str,
+    source: &DataSourceType,
+) -> Result<ValueTypeOverride> {
+    if source.representation != Representation::String
+        && let Some(rule) = &source.decoration
+    {
+        anyhow::ensure!(
+            !matches!(
+                rule,
+                TypeOverride::StringBounds { .. } | TypeOverride::ListLength { .. }
+            ) && !matches!(
+                source.representation,
+                Representation::EmailValues | Representation::IdentityStoreName
+            ),
+            "{resource}.{path}: this declared decoration is unsupported for the authored representation"
+        );
+    }
+    if let Some(rule) = &source.decoration {
+        anyhow::ensure!(
+            string_members::input_patterns(std::slice::from_ref(rule)).is_empty(),
+            "{resource}.{path}: pattern tightening cannot attach an InputRule to a data-source attribute"
+        );
+    }
+    let member = data_source_member(model, resource, path);
+    if source.representation == Representation::EmailValues
+        && let Some(Shape::List(list)) = model.get_shape(&member.target)
+        && let Some(structure) = model.get_structure(&list.member.target)
+        && let Some(email) = structure.members.get("Value")
+    {
+        let element = string_members::derive(
+            model,
+            email,
+            resource,
+            &format!("{path}[]"),
+            &[TypeOverride::CoreIdentity(CoreIdentity::Email)],
+        )?;
+        let length = length_from_traits(&string_members::effective_traits(model, &member));
+        return Ok(ValueTypeOverride {
+            type_code: format!(
+                "AttributeType::refined_list({}, false, {length:?}, carina_core::schema::ListElements::AllowDuplicates)",
+                element.type_code
+            ),
+            attribute_type: AttributeType::refined_list(
+                element.attribute_type,
+                false,
+                length,
+                ListElements::AllowDuplicates,
+            ),
+            documentation: None,
+        });
+    }
+    if source.representation == Representation::IdentityStoreName
+        && model.get_structure(&member.target).is_some()
+    {
+        let mut values = Vec::new();
+        let mut codes = Vec::new();
+        for (field, child) in &model
+            .get_structure(&member.target)
+            .expect("name structure")
+            .members
+        {
+            let value = string_members::derive(
+                model,
+                child,
+                resource,
+                &format!("{path}.{}", field.to_snake_case()),
+                &[],
+            )?;
+            values.push(
+                carina_core::schema::StructField::optional(
+                    field.to_snake_case(),
+                    value.attribute_type,
+                )
+                .with_provider_name(field)
+                .build(),
+            );
+            codes.push(format!(
+                "StructField::optional({:?}, {}).with_provider_name({field:?}).build()",
+                field.to_snake_case(),
+                value.type_code
+            ));
+        }
+        return Ok(ValueTypeOverride {
+            type_code: format!(
+                "AttributeType::struct_(\"IdentityStoreUserName\", vec![{}])",
+                codes.join(", ")
+            ),
+            attribute_type: AttributeType::struct_("IdentityStoreUserName", values),
+            documentation: None,
+        });
+    }
+    if source.representation != Representation::String {
+        let value = ValueTypeOverride {
+            type_code: source.representation.code().into(),
+            attribute_type: attribute_type_from_code(source.representation.code())?,
+            documentation: None,
+        };
+        return match &source.decoration {
+            Some(rule) => {
+                string_members::decorate(value, rule).with_context(|| format!("{resource}.{path}"))
+            }
+            None => Ok(value),
+        };
+    }
+    let field = if provider_name.is_empty() {
+        path.trim_end_matches("[]").to_upper_camel_case()
+    } else {
+        provider_name.into()
+    };
+    let mut declarations = TypeDeclarations::default();
+    if let Some(rule) = &source.decoration {
+        declarations
+            .authoritative
+            .insert(field.as_str(), rule.clone());
+    }
+    let value = member_string_value(
+        model,
+        resource,
+        &member,
+        &field,
+        path,
+        &declarations,
+        &HashMap::new(),
+        None,
+    )?;
+    anyhow::ensure!(
+        declarations.input_patterns.borrow().is_empty(),
+        "{resource}.{path}: pattern tightening cannot attach an InputRule to a data-source attribute"
+    );
+    Ok(value)
+}
+
 fn generate_data_source(
     ds: &resource_defs::DataSourceDef,
-    _model: &SmithyModel,
+    model: &SmithyModel,
     dual_registered: bool,
 ) -> Result<String> {
     let ns = ds.service_namespace;
@@ -7177,15 +7697,17 @@ fn generate_data_source(
     carina_codegen_aws::kms_references::validate_data_source(ds)?;
     let mut ds_attrs: Vec<DsAttr> = Vec::new();
     for input in &ds.inputs {
-        let type_str = if let Some(override_type) = resource_value_override(ds.name, input.name) {
-            override_type.type_code
-        } else if let Some(t) = input.type_override {
-            t.to_string()
-        } else if is_email_property(input.provider_name) {
-            "types::email()".to_string()
-        } else {
-            PLAIN_STRING_TYPE_CODE.to_string()
-        };
+        let type_str = data_source_type(
+            model,
+            ds.name,
+            input.name,
+            input.provider_name,
+            &DataSourceType {
+                representation: input.representation,
+                decoration: input.type_override.clone(),
+            },
+        )?
+        .type_code;
         ds_attrs.push(DsAttr {
             name: input.name.to_string(),
             provider_name: input.provider_name.to_string(),
@@ -7208,9 +7730,14 @@ fn generate_data_source(
                 ds_attrs.push(DsAttr {
                     name: output.name.to_string(),
                     provider_name: output.provider_name.unwrap_or("").to_string(),
-                    type_str: resource_value_override(ds.name, output.name)
-                        .map(|value| value.type_code)
-                        .unwrap_or_else(|| output.type_code.to_string()),
+                    type_str: data_source_type(
+                        model,
+                        ds.name,
+                        output.name,
+                        output.provider_name.unwrap_or(""),
+                        &output.type_code,
+                    )?
+                    .type_code,
                     description: Description::authored(output.description),
                     required: false,
                     read_only: true,
@@ -7219,9 +7746,14 @@ fn generate_data_source(
         }
         resource_defs::DataSourceShape::ListAggregated { aggregated_outputs } => {
             for output in aggregated_outputs {
-                let item_type = resource_value_override(ds.name, &format!("{}[]", output.name))
-                    .map(|override_type| override_type.type_code)
-                    .unwrap_or_else(|| output.item_type.to_string());
+                let item_type = data_source_type(
+                    model,
+                    ds.name,
+                    &format!("{}[]", output.name),
+                    "",
+                    &output.item_type,
+                )?
+                .type_code;
                 ds_attrs.push(DsAttr {
                     name: output.name.to_string(),
                     provider_name: String::new(),
@@ -7251,11 +7783,16 @@ fn generate_data_source(
     if needs_types {
         schema_imports.push("types");
     }
-    let arn_identity = resource_identity_parts(ds.name)
-        .filter(|_| ds_attrs.iter().any(|a| a.name == "arn"))
-        .map(|(service, resource)| (service, resource, arn_emit_choice(service, resource)));
-    let arn_helper =
-        arn_identity.map(|(service, resource, choice)| emit_arn_helper(service, resource, choice));
+    if ds_attrs
+        .iter()
+        .any(|a| a.type_str.contains("StructField::"))
+    {
+        schema_imports.push("StructField");
+    }
+    let arn_helper = ds_attrs
+        .iter()
+        .find(|a| a.name == "arn" && exports_arn_helper(ds.name, SchemaView::DataSource))
+        .map(|a| emit_member_arn_helper(&a.type_str));
     let has_arn_helper = arn_helper.is_some();
     if has_arn_helper && !schema_imports.contains(&"AttributeType") {
         schema_imports.insert(1, "AttributeType");
@@ -7295,11 +7832,7 @@ fn generate_data_source(
 
     // Emit attributes.
     for attr in &ds_attrs {
-        let type_str = if has_arn_helper && attr.name == "arn" {
-            "self::arn()"
-        } else {
-            attr.type_str.as_str()
-        };
+        let type_str = attr.type_str.as_str();
         let constructor = mode_constructor(attr.required, attr.read_only);
         code.push_str(&format!(
             "\x20       .attribute(\n\
@@ -7333,7 +7866,7 @@ fn generate_data_source(
 /// Generate markdown documentation for a data source.
 fn generate_markdown_data_source(
     ds: &resource_defs::DataSourceDef,
-    _model: &SmithyModel,
+    model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
     carina_codegen_aws::kms_references::validate_data_source(ds)?;
@@ -7355,22 +7888,19 @@ fn generate_markdown_data_source(
             .map(|output| {
                 Ok(MarkdownDataSourceOutput {
                     name: output.name,
-                    attr_type: if let Some(value) = resource_value_override(ds.name, output.name) {
-                        value.markdown(
-                            &HeadingPath::root(output.name),
-                            &namespace,
-                            &mut all_enums,
-                            &mut struct_defs,
-                        )?
-                    } else {
-                        discover_markdown_override(
-                            output.type_code,
-                            &HeadingPath::root(output.name),
-                            &namespace,
-                            &mut all_enums,
-                            &mut struct_defs,
-                        )?
-                    },
+                    attr_type: data_source_type(
+                        model,
+                        ds.name,
+                        output.name,
+                        output.provider_name.unwrap_or(""),
+                        &output.type_code,
+                    )?
+                    .markdown(
+                        &HeadingPath::root(output.name),
+                        &namespace,
+                        &mut all_enums,
+                        &mut struct_defs,
+                    )?,
                     description: Description::authored(output.description),
                 })
             })
@@ -7381,32 +7911,21 @@ fn generate_markdown_data_source(
                 Ok(MarkdownDataSourceOutput {
                     name: output.name,
                     attr_type: {
-                        let (item, note) = if let Some(override_type) =
-                            resource_value_override(ds.name, &format!("{}[]", output.name))
-                        {
-                            (
-                                discover_markdown_attribute_type(
-                                    &override_type.attribute_type,
-                                    &HeadingPath::root(output.name).child(TypeEdge::Item),
-                                    &namespace,
-                                    &mut all_enums,
-                                    &mut struct_defs,
-                                    None,
-                                )?,
-                                override_type.documentation,
-                            )
-                        } else {
-                            (
-                                discover_markdown_override(
-                                    output.item_type,
-                                    &HeadingPath::root(output.name).child(TypeEdge::Item),
-                                    &namespace,
-                                    &mut all_enums,
-                                    &mut struct_defs,
-                                )?,
-                                None,
-                            )
-                        };
+                        let mut value = data_source_type(
+                            model,
+                            ds.name,
+                            &format!("{}[]", output.name),
+                            "",
+                            &output.item_type,
+                        )?;
+                        let documentation = value.documentation.take();
+                        let note = documentation.as_deref().map(ValidationNote::new);
+                        let item = value.markdown(
+                            &HeadingPath::root(output.name).child(TypeEdge::Item),
+                            &namespace,
+                            &mut all_enums,
+                            &mut struct_defs,
+                        )?;
                         list_display(
                             item,
                             false,
@@ -7414,7 +7933,7 @@ fn generate_markdown_data_source(
                                 length: None,
                                 elements: ListElements::AllowDuplicates,
                             },
-                            note.as_deref().map(ValidationNote::new),
+                            note,
                         )
                     },
                     description: Description::authored(output.description),
@@ -7435,29 +7954,25 @@ fn generate_markdown_data_source(
             page.heading(Heading::code(3, input.name))?;
             let required = if input.required { "Yes" } else { "No" };
             page.push_str(&format!("- **Required:** {}\n\n", required));
-            if let Some(override_type) = resource_value_override(ds.name, input.name) {
-                page.push_str("- **Type:** ");
-                override_type
-                    .markdown(
-                        &HeadingPath::root(input.name),
-                        &namespace,
-                        &mut all_enums,
-                        &mut struct_defs,
-                    )?
-                    .write_to(&mut page);
-                page.push_str("\n\n");
-            } else if let Some(code) = input.type_override {
-                let ty = discover_markdown_override(
-                    code,
-                    &HeadingPath::root(input.name),
-                    &namespace,
-                    &mut all_enums,
-                    &mut struct_defs,
-                )?;
-                page.push_str("- **Type:** ");
-                ty.write_to(&mut page);
-                page.push_str("\n\n");
-            }
+            page.push_str("- **Type:** ");
+            data_source_type(
+                model,
+                ds.name,
+                input.name,
+                input.provider_name,
+                &DataSourceType {
+                    representation: input.representation,
+                    decoration: input.type_override.clone(),
+                },
+            )?
+            .markdown(
+                &HeadingPath::root(input.name),
+                &namespace,
+                &mut all_enums,
+                &mut struct_defs,
+            )?
+            .write_to(&mut page);
+            page.push_str("\n\n");
 
             let description = Description::authored(input.description);
             let markdown = description.markdown();
@@ -7478,7 +7993,7 @@ fn generate_markdown_data_source(
         )?;
     }
 
-    write_markdown_type_definitions(&mut page, &all_enums, &struct_defs, &HashMap::new())?;
+    write_markdown_type_definitions(&mut page, &all_enums, &struct_defs)?;
     page.finish()
         .with_context(|| format!("generated invalid Markdown for aws.{}", ds.name))
 }
@@ -7575,6 +8090,92 @@ fn markdown_nested_field_target(
 /// can fire), and `None` for top-level attributes and list-element
 /// recursion where no parent struct is in scope.
 #[allow(clippy::too_many_arguments)]
+fn discover_markdown_member(
+    model: &SmithyModel,
+    resource_name: &str,
+    member: &carina_smithy::ShapeRef,
+    field_name: &str,
+    heading_path: &HeadingPath,
+    property_path: &str,
+    enum_namespace: &str,
+    type_overrides: &TypeDeclarations<'_>,
+    struct_field_type_overrides: &HashMap<(&str, &str), TypeOverride>,
+    parent_struct: Option<&str>,
+    all_enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
+    struct_defs: &mut MarkdownTypes,
+    discovering_structs: &mut HashMap<String, MarkdownStructKey>,
+) -> Result<MarkdownType> {
+    // Authored projections may have a String wire carrier (JSON policies).
+    // Resolve the closed representation before discovering scalar members.
+    if type_overrides
+        .representations
+        .get(field_name)
+        .is_some_and(|representation| *representation != Representation::String)
+    {
+        return discover_markdown_type(
+            model,
+            resource_name,
+            &member.target,
+            field_name,
+            heading_path,
+            property_path,
+            enum_namespace,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
+            all_enums,
+            struct_defs,
+            discovering_structs,
+        );
+    }
+    if matches!(
+        model.shape_kind(&member.target),
+        Some(ShapeKind::String | ShapeKind::Enum)
+    ) || member.target == "smithy.api#String"
+    {
+        if let Some((value, _)) = enum_member_value(
+            model,
+            resource_name,
+            member,
+            field_name,
+            property_path,
+            enum_namespace,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
+        )? {
+            return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
+        }
+        return member_string_value(
+            model,
+            resource_name,
+            member,
+            field_name,
+            property_path,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
+        )?
+        .markdown(heading_path, enum_namespace, all_enums, struct_defs);
+    }
+    discover_markdown_type(
+        model,
+        resource_name,
+        &member.target,
+        field_name,
+        heading_path,
+        property_path,
+        enum_namespace,
+        type_overrides,
+        struct_field_type_overrides,
+        parent_struct,
+        all_enums,
+        struct_defs,
+        discovering_structs,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn discover_markdown_type(
     model: &SmithyModel,
     resource_name: &str,
@@ -7583,134 +8184,93 @@ fn discover_markdown_type(
     heading_path: &HeadingPath,
     property_path: &str,
     enum_namespace: &str,
-    type_overrides: &HashMap<&str, &str>,
-    struct_field_type_overrides: &HashMap<(&str, &str), &str>,
+    type_overrides: &TypeDeclarations<'_>,
+    struct_field_type_overrides: &HashMap<(&str, &str), TypeOverride>,
     parent_struct: Option<&str>,
     all_enums: &mut BTreeMap<MarkdownEnumKey, MarkdownEnum>,
     struct_defs: &mut MarkdownTypes,
     discovering_structs: &mut HashMap<String, MarkdownStructKey>,
 ) -> Result<MarkdownType> {
-    if let Some(code) = reference_type_code(resource_name, property_path) {
-        return discover_markdown_override(
-            code,
-            heading_path,
-            enum_namespace,
-            all_enums,
-            struct_defs,
-        );
-    }
-    if let Some(override_type) = resource_value_override(resource_name, property_path) {
-        return bound_int_override(model, target, field_name, override_type).markdown(
-            heading_path,
-            enum_namespace,
-            all_enums,
-            struct_defs,
-        );
-    }
-    // Per-(parent_struct, member) override wins over per-member and Smithy
-    // default. Distinguishes a member name shared across structs (aws#302).
-    if let Some(parent) = parent_struct
-        && let Some(&override_type) = struct_field_type_overrides.get(&(parent, field_name))
-    {
-        let value = bound_int_override(
-            model,
-            target,
-            field_name,
-            ValueTypeOverride {
-                type_code: override_type.to_string(),
-                documentation: None,
-                attribute_type: attribute_type_from_code(override_type)?,
-            },
-        );
-        return discover_markdown_attribute_type(
-            &value.attribute_type,
-            heading_path,
-            enum_namespace,
-            all_enums,
-            struct_defs,
-            None,
-        );
-    }
-    // Check type overrides
-    if let Some(&override_type) = type_overrides.get(field_name) {
-        if let Some(list) =
-            string_list_value_override(model, target, resource_name, property_path, override_type)
-        {
-            return list.markdown(heading_path, enum_namespace, all_enums, struct_defs);
+    let member = carina_smithy::ShapeRef {
+        target: target.into(),
+        traits: Default::default(),
+    };
+    if let Some(representation) = type_overrides.representations.get(field_name).copied() {
+        if matches!(
+            representation,
+            Representation::RecordValues | Representation::UnorderedStrings
+        ) {
+            if let Some(value) = string_list_value_override(
+                model,
+                target,
+                resource_name,
+                property_path,
+                representation.code(),
+            )? {
+                return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
+            }
+        } else if representation != Representation::String {
+            return discover_markdown_override(
+                representation.code(),
+                heading_path,
+                enum_namespace,
+                all_enums,
+                struct_defs,
+            );
         }
-        let value = bound_int_override(
-            model,
-            target,
-            field_name,
-            ValueTypeOverride {
-                type_code: override_type.to_string(),
-                documentation: None,
-                attribute_type: attribute_type_from_code(override_type)?,
-            },
-        );
-        return discover_markdown_attribute_type(
-            &value.attribute_type,
-            heading_path,
-            enum_namespace,
-            all_enums,
-            struct_defs,
-            None,
-        );
     }
-
-    // Check known enum overrides
-    if let Some(values) = known_enum_overrides().get(field_name) {
-        let identity_override = enum_identity_override(resource_name, parent_struct, field_name);
-        let (enum_namespace, type_name) =
-            effective_enum_identity(identity_override, enum_namespace, field_name);
-        let key = register_markdown_enum(
-            MarkdownEnumSource::KnownOverride(field_name.to_string()),
-            field_name,
-            &type_name,
-            heading_path,
-            &enum_namespace,
-            values.iter().map(|value| value.to_string()).collect(),
-            all_enums,
-        );
-        return render_markdown_declaration(
-            &AttributeType::enum_(
-                TypeIdentity::bare(&type_name),
-                Some(all_enums[&key].info.values.clone()),
-                Vec::new(),
-                None,
-                None,
+    if let Some((value, _)) = enum_member_value(
+        model,
+        resource_name,
+        &member,
+        field_name,
+        property_path,
+        enum_namespace,
+        type_overrides,
+        struct_field_type_overrides,
+        parent_struct,
+    )? {
+        return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
+    }
+    if matches!(
+        model.shape_kind(target),
+        Some(ShapeKind::Integer | ShapeKind::Long)
+    ) {
+        let range = get_int_range(model, target, field_name).map(|b| (b.min, b.max));
+        let mut value = ValueTypeOverride {
+            type_code: String::new(),
+            attribute_type: AttributeType::int_member(
+                carina_core::schema::IntIdentityLayer::new(None, None),
+                carina_core::schema::IntMemberConstraints::new(range),
             ),
-            DocLink {
-                target: MarkdownTarget::Enum(key),
-                label: type_name,
-            },
-            struct_defs,
-        );
+            documentation: None,
+        };
+        if let Some(rule) = resource_type_overrides()
+            .get(&(resource_name, property_path))
+            .or_else(|| {
+                parent_struct.and_then(|p| struct_field_type_overrides.get(&(p, field_name)))
+            })
+            .or_else(|| type_overrides.get(field_name))
+        {
+            value = string_members::decorate(value, rule)?;
+        }
+        return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
     }
 
     let kind = model.shape_kind(target);
 
     Ok(match kind {
-        Some(ShapeKind::String) => {
-            if let Some(inferred) = infer_string_type(field_name) {
-                return discover_markdown_override(
-                    &inferred,
-                    heading_path,
-                    enum_namespace,
-                    all_enums,
-                    struct_defs,
-                );
-            }
-            scalar_display(
-                ScalarDoc::String {
-                    pattern: None,
-                    length: None,
-                    validate: false,
-                    to_dsl: None,
-                },
-                None,
-            )
-        }
+        Some(ShapeKind::String) => member_string_value(
+            model,
+            resource_name,
+            &member,
+            field_name,
+            property_path,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
+        )?
+        .markdown(heading_path, enum_namespace, all_enums, struct_defs)?,
         Some(ShapeKind::Boolean) => scalar_display(ScalarDoc::Bool, None),
         Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
             let range = get_int_range(model, target, field_name);
@@ -7797,10 +8357,10 @@ fn discover_markdown_type(
         ),
         Some(ShapeKind::List) => {
             if let Some(carina_smithy::Shape::List(list_shape)) = model.get_shape(target) {
-                let item = discover_markdown_type(
+                let item = discover_markdown_member(
                     model,
                     resource_name,
-                    &list_shape.member.target,
+                    &list_shape.member,
                     field_name,
                     &heading_path.child(TypeEdge::Item),
                     &kms_references::property_path(property_path, PathSegment::ListElement),
@@ -7812,10 +8372,7 @@ fn discover_markdown_type(
                     struct_defs,
                     discovering_structs,
                 )?;
-                let length = match resource_type_overrides().get(&(resource_name, property_path)) {
-                    Some(TypeOverride::ListLength { min, max }) => Some((Some(*min), Some(*max))),
-                    _ => None,
-                };
+                let length = list_bounds(model, &member, resource_name, property_path)?;
                 list_display(
                     item,
                     true,
@@ -7847,10 +8404,10 @@ fn discover_markdown_type(
         }
         Some(ShapeKind::Map) => {
             let value = if let Some(Shape::Map(map_shape)) = model.get_shape(target) {
-                discover_markdown_type(
+                discover_markdown_member(
                     model,
                     resource_name,
-                    &map_shape.value.target,
+                    &map_shape.value,
                     field_name,
                     &heading_path.child(TypeEdge::Value),
                     &kms_references::property_path(property_path, PathSegment::MapValue),
@@ -7878,7 +8435,24 @@ fn discover_markdown_type(
             } else {
                 None
             };
-            map_display(
+            let key = if let Some(Shape::Map(shape)) = model.get_shape(target) {
+                member_string_value(
+                    model,
+                    resource_name,
+                    &shape.key,
+                    "Key",
+                    &format!("{property_path}{{key}}"),
+                    &TypeDeclarations::default(),
+                    &HashMap::new(),
+                    None,
+                )?
+                .markdown(
+                    &heading_path.child(TypeEdge::Key),
+                    enum_namespace,
+                    all_enums,
+                    struct_defs,
+                )?
+            } else {
                 scalar_display(
                     ScalarDoc::String {
                         pattern: None,
@@ -7887,17 +8461,16 @@ fn discover_markdown_type(
                         to_dsl: None,
                     },
                     None,
-                ),
-                value,
-                MapConstraints { length },
-                None,
-            )
+                )
+            };
+            map_display(key, value, MapConstraints { length }, None)
         }
         Some(ShapeKind::Structure | ShapeKind::Union) => {
             let shape_name = SmithyModel::shape_name(target).to_string();
             if kind == Some(ShapeKind::Structure)
                 && (shape_name == "TagList" || shape_name == "Tag")
-                && let Some(tags) = TagMapType::from_shape(model, target)?
+                && let Some(tags) =
+                    TagMapType::from_shape(model, target, resource_name, property_path)?
             {
                 return discover_markdown_attribute_type(
                     &tags.attribute_type(),
@@ -7943,10 +8516,10 @@ fn discover_markdown_type(
                     .map(|(name, member_ref)| {
                         let child_heading_path =
                             heading_path.child(TypeEdge::Field(&name.to_snake_case()));
-                        let field_type = discover_markdown_type(
+                        let field_type = discover_markdown_member(
                             model,
                             resource_name,
-                            &member_ref.target,
+                            member_ref,
                             name,
                             &child_heading_path,
                             &kms_references::property_path(
@@ -7998,27 +8571,17 @@ fn discover_markdown_type(
             | ShapeKind::Resource
             | ShapeKind::Unit,
         )
-        | None => {
-            if let Some(inferred) = infer_string_type(field_name) {
-                discover_markdown_override(
-                    &inferred,
-                    heading_path,
-                    enum_namespace,
-                    all_enums,
-                    struct_defs,
-                )?
-            } else {
-                scalar_display(
-                    ScalarDoc::String {
-                        pattern: None,
-                        length: None,
-                        validate: false,
-                        to_dsl: None,
-                    },
-                    None,
-                )
-            }
-        }
+        | None => member_string_value(
+            model,
+            resource_name,
+            &member,
+            field_name,
+            property_path,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
+        )?
+        .markdown(heading_path, enum_namespace, all_enums, struct_defs)?,
     })
 }
 
@@ -8068,7 +8631,7 @@ fn render_markdown_declaration(
 
 fn register_markdown_enum(
     source: MarkdownEnumSource,
-    prop_name: &str,
+    _prop_name: &str,
     type_name: &str,
     heading_path: &HeadingPath,
     namespace: &str,
@@ -8083,7 +8646,6 @@ fn register_markdown_enum(
     all_enums
         .entry(key.clone())
         .or_insert_with(|| MarkdownEnum {
-            prop_name: prop_name.to_string(),
             dsl_aliases: vec![],
             info: EnumInfo {
                 type_name: type_name.to_string(),
@@ -8234,28 +8796,61 @@ fn snake_to_pascal_type(s: &str) -> String {
 
 // ── Type inference helpers (ported from codegen.rs) ──
 
-fn known_string_type_overrides() -> &'static HashMap<&'static str, &'static str> {
-    static OVERRIDES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+fn known_string_type_overrides() -> &'static HashMap<&'static str, TypeOverride> {
+    static OVERRIDES: LazyLock<HashMap<&'static str, TypeOverride>> = LazyLock::new(|| {
         let mut m = HashMap::new();
-        m.insert("DefaultSecurityGroup", "super::security_group_id()");
-        m.insert("DefaultNetworkAcl", "super::network_acl_id()");
-        m.insert("AccountId", "super::aws_account_id()");
-        m.insert("GatewayId", "super::gateway_id()");
-        m.insert("DeliverCrossAccountRole", "super::super::iam::role::arn()");
-        m.insert("DeliverLogsPermissionArn", "super::super::iam::role::arn()");
-        m.insert("PeerRoleArn", "super::super::iam::role::arn()");
-        m.insert("PermissionsBoundary", "super::super::iam::policy::arn()");
-        m.insert("ManagedPolicyArns", "super::super::iam::policy::arn()");
-        m.insert("SecurityGroupRuleId", "super::security_group_rule_id()");
-        m.insert("Locale", "super::aws_region()");
-        m.insert("BucketAccountId", "super::aws_account_id()");
-        m.insert("PublicIp", "types::ipv4_address()");
-        m.insert("LogDestination", "super::arn()");
-        m.insert("GrantFullControl", "super::s3_grantee()");
-        m.insert("GrantRead", "super::s3_grantee()");
-        m.insert("GrantReadACP", "super::s3_grantee()");
-        m.insert("GrantWrite", "super::s3_grantee()");
-        m.insert("GrantWriteACP", "super::s3_grantee()");
+        m.insert(
+            "DefaultSecurityGroup",
+            TypeOverride::Identity(AwsType::SecurityGroupId),
+        );
+        m.insert(
+            "DefaultNetworkAcl",
+            TypeOverride::Identity(AwsType::NetworkAclId),
+        );
+        m.insert("AccountId", TypeOverride::Identity(AwsType::AccountId));
+        m.insert(
+            "GatewayId",
+            TypeOverride::Identities(&[AwsType::InternetGatewayId, AwsType::VpnGatewayId]),
+        );
+        m.insert(
+            "DeliverCrossAccountRole",
+            TypeOverride::Identity(AwsType::IamRoleArn),
+        );
+        m.insert(
+            "DeliverLogsPermissionArn",
+            TypeOverride::Identity(AwsType::IamRoleArn),
+        );
+        m.insert("PeerRoleArn", TypeOverride::Identity(AwsType::IamRoleArn));
+        m.insert(
+            "PermissionsBoundary",
+            TypeOverride::Identity(AwsType::IamPolicyArn),
+        );
+        m.insert(
+            "ManagedPolicyArns",
+            TypeOverride::Identity(AwsType::IamPolicyArn),
+        );
+        m.insert(
+            "SecurityGroupRuleId",
+            TypeOverride::Identity(AwsType::SecurityGroupRuleId),
+        );
+        m.insert("Locale", TypeOverride::Identity(AwsType::Region));
+        m.insert(
+            "BucketAccountId",
+            TypeOverride::Identity(AwsType::AccountId),
+        );
+        m.insert(
+            "PublicIp",
+            TypeOverride::CoreIdentity(CoreIdentity::Ipv4Address),
+        );
+        m.insert("LogDestination", TypeOverride::Identity(AwsType::Arn));
+        m.insert(
+            "GrantFullControl",
+            TypeOverride::Identity(AwsType::S3Grantee),
+        );
+        m.insert("GrantRead", TypeOverride::Identity(AwsType::S3Grantee));
+        m.insert("GrantReadACP", TypeOverride::Identity(AwsType::S3Grantee));
+        m.insert("GrantWrite", TypeOverride::Identity(AwsType::S3Grantee));
+        m.insert("GrantWriteACP", TypeOverride::Identity(AwsType::S3Grantee));
         m
     });
     &OVERRIDES
@@ -8288,50 +8883,46 @@ fn known_int_range_overrides() -> &'static HashMap<&'static str, (i64, i64)> {
 /// markers. EnumIdentity entries use their existing Smithy shape/member keys.
 /// Use this when a property needs resource-specific type treatment that differs
 /// from global overrides or pattern-based inference.
-// acm.json DomainNameString: remove (?!-) by requiring each label to start
-// with an alphanumeric. Interior labels are 1..63, the final label is 2..63.
-// Unlike core's wildcard_domain_name(), ACM's pattern excludes a terminal dot.
-const ACM_DOMAIN_NAME_PATTERN: &str = carina_aws_types::ACM_CERTIFICATE_DOMAIN_NAME_PATTERN;
-
 fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), TypeOverride> {
     static OVERRIDES: LazyLock<HashMap<(&'static str, &'static str), TypeOverride>> =
         LazyLock::new(|| {
-            HashMap::from([
-                // Share Route 53's anonymous DNS carrier, as ACM validation
-                // records do, so CloudFront/Route 53/module references retain
-                // compatible grammar and bounds in both managed and read views.
+            let mut overrides = HashMap::from([
+                (
+                    ("iam.Role", "path"),
+                    // Smithy's alternation is a search: ^(/) OR (/.../)$.
+                    // CreateRole's path must match the whole value. Keep the
+                    // source pattern and add the established whole-value rule.
+                    TypeOverride::StringPattern(PatternSpec::new(
+                        carina_aws_types::IAM_PATH_PATTERN,
+                        PatternMatch::Full,
+                    )),
+                ),
+                // Provider outputs cannot carry portable input rules. Keep DNS
+                // bounds here; their grammar comes from the Smithy member.
                 // https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html
                 // Keep region as String in both Bucket views: aws.Region
                 // canonicalizes read values and changes their recorded state.
                 (
                     ("s3.Bucket", "bucket_domain_name"),
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     ("s3.Bucket", "bucket_regional_domain_name"),
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     ("route53.RecordSet", "name"),
                     // ResourceRecordSet$Name -> DNSName (0..1024); the guide
                     // requires nonempty labels, decoded byte limits, and the
-                    // record-specific wildcard rules. Share ACM's DNS carrier.
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    // record-specific wildcard rules. Add its DNS input rule.
+                    TypeOverride::StringProfile(StringProfile::DnsName),
                 ),
                 (
                     ("route53.RecordSet", "alias_target.dns_name"),
                     // AliasTarget$DNSName -> DNSName. CloudFront, ALB (also
                     // dualstack), S3 websites and another record's DNS name:
                     // https://docs.aws.amazon.com/Route53/latest/APIReference/API_AliasTarget.html
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringProfile(StringProfile::DnsName),
                 ),
                 (
                     ("route53.RecordSet", "resource_records[]"),
@@ -8346,13 +8937,13 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // ResourceId (max 32), same as AliasTarget$HostedZoneId.
                     // Reuse the existing AWS-only zone identity.
                     // https://docs.aws.amazon.com/Route53/latest/APIReference/API_ChangeResourceRecordSets.html
-                    TypeOverride::SharedType(AwsType::Route53HostedZoneId),
+                    TypeOverride::Identity(AwsType::Route53HostedZoneId),
                 ),
                 (
                     ("ec2.Eip", "address"),
                     // ec2.json AllocateAddressRequest$Address -> PublicIpAddress.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_AllocateAddress.html
-                    TypeOverride::CoreType("types::ipv4_address()"),
+                    TypeOverride::CoreIdentity(CoreIdentity::Ipv4Address),
                 ),
                 (
                     ("ec2.FlowLog", "log_format"),
@@ -8372,7 +8963,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // CreateFlowLogsRequest$MaxAggregationInterval: {60,600}.
                     // The transit-only 60 rule lives in normalizer.rs.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFlowLogs.html
-                    TypeOverride::SharedType(AwsType::Ec2FlowLogMaxAggregationInterval),
+                    TypeOverride::Identity(AwsType::Ec2FlowLogMaxAggregationInterval),
                 ),
                 (
                     ("ec2.FlowLog", "log_group_name"),
@@ -8403,12 +8994,8 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 (
                     ("ec2.FlowLog", "tag_field_specifications[].tag_keys[]"),
                     // TagKeyList$member -> TagKey: length 1..128, no pattern.
-                    // (?s) preserves the entire Smithy string alphabet.
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(r"(?s)^.{1,128}\z", PatternMatch::Full),
-                        min_length: 1,
-                        max_length: 128,
-                    },
+                    // Bounds express this directly; no redundant input pattern.
+                    TypeOverride::StringBounds { min: 1, max: 128 },
                 ),
                 (
                     ("ec2.SecurityGroup", "group_name"),
@@ -8416,26 +9003,26 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // The callback enforces the reserved sg- prefix as well as
                     // the documented alphabet and length through the SDK seam.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateSecurityGroup.html
-                    TypeOverride::SharedType(AwsType::Ec2SecurityGroupName),
+                    TypeOverride::Identity(AwsType::Ec2SecurityGroupName),
                 ),
                 (
                     ("ec2.Subnet", "cidr_block"),
                     // CreateSubnetRequest$CidrBlock. Keep the CIDR parser and
                     // host-bit acceptance; only this resource gets /16..=/28.
                     // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
-                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv4CidrBlock),
+                    TypeOverride::Identity(AwsType::Ec2SubnetIpv4CidrBlock),
                 ),
                 (
                     ("ec2.Subnet", "ipv6_cidr_block"),
                     // CreateSubnetRequest$Ipv6CidrBlock: /44..=/64, step four.
                     // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
-                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv6CidrBlock),
+                    TypeOverride::Identity(AwsType::Ec2SubnetIpv6CidrBlock),
                 ),
                 (
                     ("ec2.Subnet", "ipv6_netmask_length"),
                     // CreateSubnetRequest$Ipv6NetmaskLength uses the same set.
                     // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-sizing.html
-                    TypeOverride::SharedType(AwsType::Ec2SubnetIpv6NetmaskLength),
+                    TypeOverride::Identity(AwsType::Ec2SubnetIpv6NetmaskLength),
                 ),
                 (
                     ("ec2.Subnet", "ipv4_netmask_length"),
@@ -8460,7 +9047,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // ASN ranges, not their bounding interval.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
                     // https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
-                    TypeOverride::SharedType(AwsType::Ec2AmazonSideAsn),
+                    TypeOverride::Identity(AwsType::Ec2AmazonSideAsn),
                 ),
                 (
                     (
@@ -8472,14 +9059,14 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // prefixes. /23 is larger than /24, as the guide explains.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TransitGatewayRequestOptions.html
                     // https://docs.aws.amazon.com/vpc/latest/tgw/create-tgw.html
-                    TypeOverride::SharedType(AwsType::Ec2TransitGatewayCidrBlock),
+                    TypeOverride::Identity(AwsType::Ec2TransitGatewayCidrBlock),
                 ),
                 (
                     ("ec2.Vpc", "cidr_block"),
                     // CreateVpcRequest$CidrBlock, with the documented excluded
                     // ranges. Public IPv4 CIDRs and noncanonical host bits work.
                     // https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html
-                    TypeOverride::SharedType(AwsType::Ec2VpcCidrBlock),
+                    TypeOverride::Identity(AwsType::Ec2VpcCidrBlock),
                 ),
                 (
                     ("ec2.Vpc", "ipv4_netmask_length"),
@@ -8496,7 +9083,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // a scalar cannot decide the region-specific pairing.
                     // https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateVpnGateway.html
                     // https://aws.amazon.com/vpn/faqs/
-                    TypeOverride::SharedType(AwsType::Ec2VpnGatewayAmazonSideAsn),
+                    TypeOverride::Identity(AwsType::Ec2VpnGatewayAmazonSideAsn),
                 ),
                 (
                     ("acm.Certificate", "domain_name"),
@@ -8507,7 +9094,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Request-only Punycode: positions 3–4 of a label may be
                     // -- only for xn--; that A-label must pass IDNA validation.
                     // https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
-                    TypeOverride::SharedType(AwsType::AcmCertificateDomainName),
+                    TypeOverride::Identity(AwsType::AcmCertificateDomainName),
                 ),
                 (
                     ("acm.Certificate", "subject_alternative_names[]"),
@@ -8516,18 +9103,14 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // The same RequestCertificate docs cap each label at 63.
                     // Apply the same request-only IDNA validator to each SAN:
                     // https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate-characteristics.html
-                    TypeOverride::SharedType(AwsType::AcmCertificateSubjectAlternativeName),
+                    TypeOverride::Identity(AwsType::AcmCertificateSubjectAlternativeName),
                 ),
                 (
                     ("acm.Certificate", "domain_validation_options[].domain_name"),
                     // DomainValidation$DomainName -> DomainNameString. Read
                     // domains retain the full 253 cap, without the request cap.
                     // https://docs.aws.amazon.com/acm/latest/APIReference/API_DomainValidation.html
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
-                        min_length: 1,
-                        max_length: 253,
-                    },
+                    TypeOverride::StringBounds { min: 1, max: 253 },
                 ),
                 (
                     (
@@ -8535,11 +9118,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                         "domain_validation_options[].validation_domain",
                     ),
                     // DomainValidation$ValidationDomain -> DomainNameString.
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
-                        min_length: 1,
-                        max_length: 253,
-                    },
+                    TypeOverride::StringBounds { min: 1, max: 253 },
                 ),
                 (
                     (
@@ -8547,22 +9126,14 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                         "renewal_summary.domain_validation_options[].domain_name",
                     ),
                     // RenewalSummary reuses the same DomainValidation shape.
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
-                        min_length: 1,
-                        max_length: 253,
-                    },
+                    TypeOverride::StringBounds { min: 1, max: 253 },
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].validation_domain",
                     ),
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(ACM_DOMAIN_NAME_PATTERN, PatternMatch::Full),
-                        min_length: 1,
-                        max_length: 253,
-                    },
+                    TypeOverride::StringBounds { min: 1, max: 253 },
                 ),
                 (
                     (
@@ -8571,68 +9142,56 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     ),
                     // ACM supplies the DNS name and CNAME target to publish:
                     // https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     (
                         "acm.Certificate",
                         "domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.name",
                     ),
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].resource_record.value",
                     ),
-                    TypeOverride::AnonymousStringConstructor(
-                        "carina_aws_types::route53_dns_name()",
-                    ),
+                    TypeOverride::StringBounds { min: 1, max: 1024 },
                 ),
                 (
                     (
                         "acm.Certificate",
                         "domain_validation_options[].http_redirect.redirect_from",
                     ),
-                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                    TypeOverride::Identity(AwsType::AcmCertificateValidationUrl),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "domain_validation_options[].http_redirect.redirect_to",
                     ),
-                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                    TypeOverride::Identity(AwsType::AcmCertificateValidationUrl),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].http_redirect.redirect_from",
                     ),
-                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
+                    TypeOverride::Identity(AwsType::AcmCertificateValidationUrl),
                 ),
                 (
                     (
                         "acm.Certificate",
                         "renewal_summary.domain_validation_options[].http_redirect.redirect_to",
                     ),
-                    TypeOverride::SharedType(AwsType::AcmCertificateValidationUrl),
-                ),
-                (
-                    ("acm.Certificate", "certificate_arn"),
-                    TypeOverride::SharedType(AwsType::AcmCertificateArn),
+                    TypeOverride::Identity(AwsType::AcmCertificateValidationUrl),
                 ),
                 (
                     ("acm.Certificate", "key_algorithm"),
@@ -8642,7 +9201,10 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // ACM reads canonicalize known hyphenated spellings back
                     // to these underscore wire values, preserving future ones.
                     // https://docs.aws.amazon.com/acm/latest/APIReference/API_RequestCertificate.html
-                    TypeOverride::SharedType(AwsType::AcmCertificateKeyAlgorithm),
+                    TypeOverride::NamedValues {
+                        identity: AwsType::AcmCertificateKeyAlgorithm,
+                        values: &["EC_prime256v1", "EC_secp384r1", "RSA_2048"],
+                    },
                 ),
                 // RenewalSummary$UpdatedAt -> TStamp stays String: its SDK
                 // DateTime.to_string() spelling is not S3LifecycleDate's fixed
@@ -8655,35 +9217,13 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Share the named type with Roles.names[] and AWSCC.
                     // carina-test-004, 2026-11-03 (IAM): CreateRole/GetRole/
                     // ListRoles preserve RoleName; "bad name" and 65 chars fail.
-                    TypeOverride::SharedType(AwsType::IamRoleName),
-                ),
-                (
-                    ("iam.Role", "path"),
-                    // carina-provider-aws/tests/fixtures/smithy/iam.json:
-                    // CreateRoleRequest$Path and Role$Path -> pathType,
-                    // length 1..512; ^(\u002F)|(\u002F[\u0021-\u007E]+\u002F)$.
-                    // Group the alternatives under whole-string anchors.
-                    // carina-test-004, 2026-11-03 (IAM): CreateRole/GetRole/
-                    // ListRoles preserve /carina-588/probe/; /no-trailing fails.
-                    // '-' succeeds: use the model range, not the error prose.
-                    TypeOverride::AnonymousStringConstructor("carina_aws_types::iam_path()"),
-                ),
-                (
-                    ("iam.Roles", "path_prefix"),
-                    // carina-provider-aws/tests/fixtures/smithy/iam.json:
-                    // ListRolesRequest$PathPrefix -> pathPrefixType,
-                    // length 1..512; ^\u002F[\u0021-\u007F]*$.
-                    // Unlike pathType, this includes DEL (U+007F) and does not
-                    // require a trailing slash. Preserve the exact model range.
-                    // carina-test-004, 2026-11-03 (IAM): ListRoles rejects
-                    // "carina" because the leading slash is missing.
-                    TypeOverride::AnonymousStringConstructor("carina_aws_types::iam_path_prefix()"),
+                    TypeOverride::Identity(AwsType::IamRoleName),
                 ),
                 (
                     ("iam.Roles", "names[]"),
                     // Smithy ListRolesResponse$Roles -> roleListType ->
                     // Role$RoleName -> roleNameType, in the same iam.json.
-                    TypeOverride::SharedType(AwsType::IamRoleName),
+                    TypeOverride::Identity(AwsType::IamRoleName),
                 ),
                 (
                     ("organizations.Account", "role_name"),
@@ -8694,7 +9234,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // set as iam.json's roleNameType. It names the IAM role
                     // created in the new account; reuse that role's identity.
                     // https://docs.aws.amazon.com/organizations/latest/APIReference/API_CreateAccount.html
-                    TypeOverride::SharedType(AwsType::IamRoleName),
+                    TypeOverride::Identity(AwsType::IamRoleName),
                 ),
                 (
                     ("organizations.Account", "account_name"),
@@ -8719,7 +9259,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Account$Email -> Email, length 6..64. The shared catalog
                     // type adds these bounds to core's public validate_email;
                     // core's cross-service Email identity stays unchanged.
-                    TypeOverride::SharedType(AwsType::OrganizationsAccountEmail),
+                    TypeOverride::Identity(AwsType::OrganizationsAccountEmail),
                 ),
                 (
                     ("organizations.Organization", "master_account_email"),
@@ -8727,79 +9267,37 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // shape and 6..64 bounds. Use the output member's model,
                     // without CreateAccount's stricter creation-only prose.
                     // https://docs.aws.amazon.com/organizations/latest/APIReference/API_Organization.html#organizations-Type-Organization-MasterAccountEmail
-                    TypeOverride::SharedType(AwsType::OrganizationsAccountEmail),
+                    TypeOverride::Identity(AwsType::OrganizationsAccountEmail),
                 ),
                 (
                     ("organizations.Account", "id"),
                     // organizations.json: Account$Id -> AccountId, length
                     // 0..12 and ^\d{12}$. The pattern forces exactly 12 ASCII
                     // digits (ECMA-262), matching the shared aws.AccountId.
-                    TypeOverride::SharedType(AwsType::AccountId),
-                ),
-                (
-                    ("organizations.Organization", "id"),
-                    // organizations.json: Organization$Id -> OrganizationId,
-                    // ^o-[a-z0-9]{10,32}$. No length trait; the prefix and
-                    // quantifier give an effective total length of 12..34.
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(r"^o-[a-z0-9]{10,32}\z", PatternMatch::Full),
-                        min_length: 12,
-                        max_length: 34,
-                    },
-                ),
-                (
-                    ("organizations.Account", "arn"),
-                    // Account$Arn -> AccountArn; keep the Smithy resource
-                    // grammar and use the shared Partition set (#638).
-                    TypeOverride::SharedType(AwsType::OrganizationsAccountArn),
-                ),
-                (
-                    ("organizations.Organization", "arn"),
-                    // Organization$Arn -> OrganizationArn, in the same model.
-                    TypeOverride::SharedType(AwsType::OrganizationsOrganizationArn),
+                    TypeOverride::Identity(AwsType::AccountId),
                 ),
                 (
                     ("organizations.Organization", "master_account_arn"),
                     // Organization$MasterAccountArn -> AccountArn: exactly
                     // the same target as Account$Arn, not a generic ARN.
-                    TypeOverride::SharedType(AwsType::OrganizationsAccountArn),
+                    TypeOverride::Identity(AwsType::OrganizationsAccountArn),
                 ),
                 (
                     ("organizations.Organization", "master_account_id"),
                     // Organization$MasterAccountId -> the same AccountId
                     // shape as Account$Id. Preserve its existing shared type
                     // and include the catalog bounds in generated docs.
-                    TypeOverride::SharedType(AwsType::AccountId),
+                    TypeOverride::Identity(AwsType::AccountId),
                 ),
                 // Account$JoinedTimestamp -> Timestamp stays String pending
                 // a real-AWS read and a decision about SDK DateTime formatting.
-                (
-                    ("logs.LogGroup", "log_group_name"),
-                    // Smithy com.amazonaws.cloudwatchlogs#LogGroupName:
-                    // length 1..512 and pattern ^[.\-_/#A-Za-z0-9]+$.
-                    // CreateLogGroup also forbids the prefix aws/:
-                    // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html
-                    // Leave that create-only rule to AWS: custom scalar validators
-                    // require an identity and are not portable anonymous refinements.
-                    // Match AWSCC's exact anonymous pattern and length metadata
-                    // so name references are assignable in both directions:
-                    // carina-provider-awscc/src/schemas/generated/logs/log_group.rs
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(
-                            r"^[.\-_/#A-Za-z0-9]{1,512}\z",
-                            PatternMatch::Full,
-                        ),
-                        min_length: 1,
-                        max_length: 512,
-                    },
-                ),
                 (
                     ("logs.LogGroup", "retention_in_days"),
                     // PutRetentionPolicyRequest$retentionInDays -> Days:
                     // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html
                     // Share AWSCC's established RetentionInDays identity and
                     // validated Int shape through the common catalog.
-                    TypeOverride::SharedType(AwsType::LogsLogGroupRetentionInDays),
+                    TypeOverride::Identity(AwsType::LogsLogGroupRetentionInDays),
                 ),
                 (
                     ("sqs.Queue", "queue_name"),
@@ -8861,15 +9359,21 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 // catalog owning their identities and API <-> DSL aliases.
                 (
                     ("sqs.Queue", "deduplication_scope"),
-                    TypeOverride::SharedType(AwsType::SqsQueueDeduplicationScope),
+                    TypeOverride::NamedValues {
+                        identity: AwsType::SqsQueueDeduplicationScope,
+                        values: &["messageGroup", "queue"],
+                    },
                 ),
                 (
                     ("sqs.Queue", "fifo_throughput_limit"),
-                    TypeOverride::SharedType(AwsType::SqsQueueFifoThroughputLimit),
+                    TypeOverride::NamedValues {
+                        identity: AwsType::SqsQueueFifoThroughputLimit,
+                        values: &["perQueue", "perMessageGroupId"],
+                    },
                 ),
                 (
                     ("sqs.Queue", "queue_arn"),
-                    TypeOverride::SharedType(AwsType::SqsQueueArn),
+                    TypeOverride::Identity(AwsType::SqsQueueArn),
                 ),
                 (
                     ("route53.RecordSet", "Type"),
@@ -8881,15 +9385,24 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // it cannot share Route 53's full DNS enum definition.
                     TypeOverride::EnumIdentity(AwsType::AcmCertificateResourceRecordType),
                 ),
-            ])
+            ]);
+            for (resource, path, row) in carina_codegen_aws::overrides::RESOURCE_ARN_IDENTITIES {
+                assert!(
+                    overrides
+                        .insert((*resource, *path), TypeOverride::Identity(*row))
+                        .is_none(),
+                    "duplicate resource ARN declaration"
+                );
+            }
+            overrides
         });
     &OVERRIDES
 }
 
-fn infer_string_type(prop_name: &str) -> Option<String> {
+fn infer_string_type(prop_name: &str) -> Option<TypeOverride> {
     // Check known string type overrides
-    if let Some(&override_type) = known_string_type_overrides().get(prop_name) {
-        return Some(override_type.to_string());
+    if let Some(override_type) = known_string_type_overrides().get(prop_name) {
+        return Some(override_type.clone());
     }
 
     // Normalize plural forms for type inference
@@ -8904,8 +9417,8 @@ fn infer_string_type(prop_name: &str) -> Option<String> {
     };
 
     // Check overrides for singular form too (e.g., list items)
-    if let Some(&override_type) = known_string_type_overrides().get(singular_name) {
-        return Some(override_type.to_string());
+    if let Some(override_type) = known_string_type_overrides().get(singular_name) {
+        return Some(override_type.clone());
     }
 
     let prop_lower = singular_name.to_lowercase();
@@ -8913,9 +9426,9 @@ fn infer_string_type(prop_name: &str) -> Option<String> {
     // CIDR types - differentiate IPv4 vs IPv6 based on property name
     if prop_lower.contains("cidr") {
         if prop_lower.contains("ipv6") {
-            return Some("types::ipv6_cidr()".to_string());
+            return Some(TypeOverride::CoreIdentity(CoreIdentity::Ipv6Cidr));
         }
-        return Some("types::ipv4_cidr()".to_string());
+        return Some(TypeOverride::CoreIdentity(CoreIdentity::Ipv4Cidr));
     }
 
     // IP address types (not CIDR) - e.g., PrivateIpAddress, PublicIp
@@ -8926,51 +9439,51 @@ fn infer_string_type(prop_name: &str) -> Option<String> {
         && !prop_lower.contains("type")
     {
         if prop_lower.contains("ipv6") {
-            return Some("types::ipv6_address()".to_string());
+            return Some(TypeOverride::CoreIdentity(CoreIdentity::Ipv6Address));
         }
-        return Some("types::ipv4_address()".to_string());
+        return Some(TypeOverride::CoreIdentity(CoreIdentity::Ipv4Address));
     }
 
     // Availability zone (but not AvailabilityZoneId which uses AZ ID format like "use1-az1")
     if prop_lower == "availabilityzone" || prop_lower == "availabilityzones" {
-        return Some("super::availability_zone()".to_string());
+        return Some(TypeOverride::Identity(AwsType::AvailabilityZone));
     }
 
     // Availability zone ID (e.g., "use1-az1", "usw2-az2")
     if prop_lower == "availabilityzoneid" || prop_lower == "availabilityzoneids" {
-        return Some("super::availability_zone_id()".to_string());
+        return Some(TypeOverride::Identity(AwsType::AvailabilityZoneId));
     }
 
     // Region types (e.g., PeerRegion, ServiceRegion, RegionName, ResourceRegion)
     if prop_lower.ends_with("region") || prop_lower == "regionname" {
-        return Some("super::aws_region()".to_string());
+        return Some(TypeOverride::Identity(AwsType::Region));
     }
 
     // Check ARN pattern
     if prop_lower.ends_with("arn") || prop_lower.ends_with("arns") || prop_lower.contains("_arn") {
-        return Some("super::arn()".to_string());
+        return Some(TypeOverride::Identity(AwsType::Arn));
     }
 
     // IPAM Pool IDs
     if is_ipam_pool_id_property(singular_name) {
-        return Some("super::ipam_pool_id()".to_string());
+        return Some(TypeOverride::Identity(AwsType::IpamPoolId));
     }
 
     // Check resource ID pattern
     if is_aws_resource_id_property(singular_name) {
-        return Some(get_resource_id_type(singular_name).to_string());
+        return Some(get_resource_id_type(singular_name));
     }
 
     // AWS Account ID (owner IDs and account IDs are 12-digit account IDs)
     if prop_lower.ends_with("ownerid") || prop_lower.ends_with("accountid") {
-        return Some("super::aws_account_id()".to_string());
+        return Some(TypeOverride::Identity(AwsType::AccountId));
     }
 
     // Email address fields. Match conservatively: only when the field IS the
     // email value itself, not arbitrary names that happen to contain "email"
     // (e.g. EmailEnabled, EmailNotificationConfig).
     if is_email_property(prop_name) {
-        return Some("types::email()".to_string());
+        return Some(TypeOverride::CoreIdentity(CoreIdentity::Email));
     }
 
     None
@@ -9117,27 +9630,31 @@ fn classify_resource_id(prop_name: &str) -> ResourceIdKind {
     ResourceIdKind::Generic
 }
 
-fn get_resource_id_type(prop_name: &str) -> &'static str {
+fn get_resource_id_type(prop_name: &str) -> TypeOverride {
     match classify_resource_id(prop_name) {
-        ResourceIdKind::VpcId => "super::vpc_id()",
-        ResourceIdKind::SubnetId => "super::subnet_id()",
-        ResourceIdKind::SecurityGroupId => "super::security_group_id()",
-        ResourceIdKind::EgressOnlyInternetGatewayId => "super::egress_only_internet_gateway_id()",
-        ResourceIdKind::InternetGatewayId => "super::internet_gateway_id()",
-        ResourceIdKind::RouteTableId => "super::route_table_id()",
-        ResourceIdKind::NatGatewayId => "super::nat_gateway_id()",
-        ResourceIdKind::VpcPeeringConnectionId => "super::vpc_peering_connection_id()",
-        ResourceIdKind::TransitGatewayId => "super::transit_gateway_id()",
-        ResourceIdKind::VpnGatewayId => "super::vpn_gateway_id()",
-        ResourceIdKind::VpcEndpointId => "super::vpc_endpoint_id()",
-        ResourceIdKind::InstanceId => "super::instance_id()",
-        ResourceIdKind::NetworkInterfaceId => "super::network_interface_id()",
-        ResourceIdKind::AllocationId => "super::allocation_id()",
-        ResourceIdKind::PrefixListId => "super::prefix_list_id()",
-        ResourceIdKind::CarrierGatewayId => "super::carrier_gateway_id()",
-        ResourceIdKind::LocalGatewayId => "super::local_gateway_id()",
-        ResourceIdKind::NetworkAclId => "super::network_acl_id()",
-        ResourceIdKind::Generic => "super::aws_resource_id()",
+        ResourceIdKind::VpcId => TypeOverride::Identity(AwsType::VpcId),
+        ResourceIdKind::SubnetId => TypeOverride::Identity(AwsType::SubnetId),
+        ResourceIdKind::SecurityGroupId => TypeOverride::Identity(AwsType::SecurityGroupId),
+        ResourceIdKind::EgressOnlyInternetGatewayId => {
+            TypeOverride::Identity(AwsType::EgressOnlyInternetGatewayId)
+        }
+        ResourceIdKind::InternetGatewayId => TypeOverride::Identity(AwsType::InternetGatewayId),
+        ResourceIdKind::RouteTableId => TypeOverride::Identity(AwsType::RouteTableId),
+        ResourceIdKind::NatGatewayId => TypeOverride::Identity(AwsType::NatGatewayId),
+        ResourceIdKind::VpcPeeringConnectionId => {
+            TypeOverride::Identity(AwsType::VpcPeeringConnectionId)
+        }
+        ResourceIdKind::TransitGatewayId => TypeOverride::Identity(AwsType::TransitGatewayId),
+        ResourceIdKind::VpnGatewayId => TypeOverride::Identity(AwsType::VpnGatewayId),
+        ResourceIdKind::VpcEndpointId => TypeOverride::Identity(AwsType::VpcEndpointId),
+        ResourceIdKind::InstanceId => TypeOverride::Identity(AwsType::InstanceId),
+        ResourceIdKind::NetworkInterfaceId => TypeOverride::Identity(AwsType::NetworkInterfaceId),
+        ResourceIdKind::AllocationId => TypeOverride::Identity(AwsType::AllocationId),
+        ResourceIdKind::PrefixListId => TypeOverride::Identity(AwsType::PrefixListId),
+        ResourceIdKind::CarrierGatewayId => TypeOverride::Identity(AwsType::CarrierGatewayId),
+        ResourceIdKind::LocalGatewayId => TypeOverride::Identity(AwsType::LocalGatewayId),
+        ResourceIdKind::NetworkAclId => TypeOverride::Identity(AwsType::NetworkAclId),
+        ResourceIdKind::Generic => TypeOverride::Identity(AwsType::ResourceId),
     }
 }
 
@@ -9245,13 +9762,13 @@ mod tests {
                 "test#Value":{"type":"string","traits":{"smithy.api#pattern":"^path\\\\[a-z]+$","smithy.api#length":{"min":2,"max":40}}}
             }
         }"##).unwrap();
-        let tags = TagMapType::from_shape(&model, "test#Tags")
+        let tags = TagMapType::from_shape(&model, "test#Tags", "test.Tags", "tags")
             .unwrap()
             .unwrap();
         let pattern = r"^path\\[a-z]+$";
         assert!(
             tags.code()
-                .contains(&format!("Some(carina_core::schema::PatternSpec::new({pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }}))")),
+                .contains(&format!("Some(carina_core::schema::PatternSpec::new({pattern:?}, carina_core::schema::PatternMatch::Full))")),
             "{}",
             tags.code()
         );
@@ -9338,11 +9855,10 @@ mod tests {
                 struct_path: Vec::new(),
                 resolving_shapes: Vec::new(),
                 property_path: "entries".to_string(),
-                type_overrides: &HashMap::new(),
-                enum_alias_map: &HashMap::new(),
-                to_dsl_overrides: &HashMap::new(),
+                type_overrides: &TypeDeclarations::default(),
+
                 all_enums: &mut BTreeMap::new(),
-                all_ranged_ints: &mut BTreeMap::new(),
+
                 current_root_attr: None,
                 deferred_populate_struct_fields: &HashSet::new(),
                 nested_write_only_struct_fields: &HashSet::new(),
@@ -9510,7 +10026,7 @@ mod tests {
                     r"^([\p{L}\p{Z}\p{N}_.:/=+\-@]*)$"
                 };
                 format!(
-                    "AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new({key_pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }})), {key_length}, None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new({value_pattern:?}, carina_core::schema::PatternMatch::Substring {{ reason: carina_core::schema::PatternReason::new(\"Smithy tag patterns retain their authored search semantics.\").expect(\"visible pattern reason\") }})), {value_length}, None), Some(({minimum:?}, {maximum:?})))"
+                    "AttributeType::refined_map(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new({key_pattern:?}, carina_core::schema::PatternMatch::Full)), {key_length})), AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new({value_pattern:?}, carina_core::schema::PatternMatch::Full)), {value_length})), Some(({minimum:?}, {maximum:?})))"
                 )
             } else {
                 "AttributeType::map(AttributeType::string())".to_string()
@@ -9671,7 +10187,10 @@ mod tests {
         assert_eq!(retention.type_code, original);
         assert!(matches!(
             retention.attribute_type.raw_shape(),
-            RawShape::Int { range: None, .. }
+            RawShape::Int {
+                identity_layer: carina_core::schema::IntIdentityParts { range: None, .. },
+                ..
+            }
         ));
 
         for (minimum, maximum) in [(0, 100), (i64::from(i32::MIN), i64::from(i32::MAX))] {
@@ -9715,7 +10234,7 @@ mod tests {
             &HeadingPath::root("count"),
             "count",
             "aws.test.Fixture",
-            &HashMap::new(),
+            &TypeDeclarations::default(),
             &HashMap::new(),
             None,
             &mut BTreeMap::new(),
@@ -9763,13 +10282,13 @@ mod tests {
             ("test#Long", i64::MAX),
         ] {
             let value = bound_int_override(&model, target, "Count", ValueTypeOverride {
-                type_code: "AttributeType::refined_int(None, Some((Some(1), Some(9223372036854775807))))".to_string(),
+                type_code: "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(9223372036854775807)))))".to_string(),
                 documentation: None,
-                attribute_type: AttributeType::refined_int(None, Some((Some(1), Some(i64::MAX)))),
+                attribute_type: AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(i64::MAX))))),
             });
-            assert!(matches!(value.attribute_type.raw_shape(), RawShape::Int {
-                range: Some((Some(1), Some(actual))), ..
-            } if actual == maximum));
+            assert!(
+                matches!(value.attribute_type.raw_shape(), RawShape::Int { member_layer: carina_core::schema::IntMemberParts { range: Some((Some(1), Some(actual))) }, .. } if actual == maximum)
+            );
         }
     }
 
@@ -9814,15 +10333,48 @@ mod tests {
             .is_none()
         );
         let markdown = lifecycle_markdown_fixture();
-        assert!(markdown.contains("`Int (range: 1..=100)`"), "{markdown}");
         assert!(
-            markdown.contains("`Int (range: 1..=2147483647)`"),
+            markdown.contains("`Int (member constraints: range: 1..=100)`"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("`Int (member constraints: range: 1..=2147483647)`"),
             "{markdown}"
         );
         assert!(markdown.contains("`String (len: 0..=255)`"), "{markdown}");
     }
 
     use super::*;
+
+    #[test]
+    fn identity_662_round9_new_input_predicates_emit_typed_literals() {
+        use carina_core::schema::{
+            InputLiteral, InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope,
+        };
+        for (predicate, expected) in [
+            (InputPredicate::Present, "InputPredicate::Present"),
+            (InputPredicate::Absent, "InputPredicate::Absent"),
+            (
+                InputPredicate::Equals(InputLiteral::Bool(true)),
+                "InputLiteral::Bool(true)",
+            ),
+            (
+                InputPredicate::Equals(InputLiteral::Float(
+                    carina_core::FiniteF64::new(1.0).unwrap(),
+                )),
+                "FiniteF64::new(1.0)",
+            ),
+        ] {
+            let rule = InputRule::value(
+                InputRuleScope::EveryWrite,
+                InputPath::new("value").unwrap(),
+                InputRuleCode::new("test.literal").unwrap(),
+                predicate,
+            );
+            let code = input_rule_code(&rule);
+            assert!(code.contains(expected), "{expected}: {code}");
+        }
+    }
 
     fn route53_value_fixture() -> (ResourceDef, SmithyModel) {
         let resource = resource_defs::route53_resources().remove(0);
@@ -9862,7 +10414,7 @@ mod tests {
     }
 
     #[test]
-    fn acm_and_route53_dns_overrides_share_one_bounded_constructor() {
+    fn acm_and_route53_dns_bounds_do_not_donate_a_structural_pattern() {
         for (resource, path) in [
             ("route53.RecordSet", "name"),
             ("route53.RecordSet", "alias_target.dns_name"),
@@ -9884,22 +10436,22 @@ mod tests {
             ),
         ] {
             let value = resource_value_override(resource, path).unwrap();
-            assert_eq!(
-                value.type_code, "carina_aws_types::route53_dns_name()",
-                "{resource}.{path}"
-            );
+            assert!(value.type_code.starts_with("AttributeType::string_member("));
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
+                identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+                member_layer: carina_core::schema::StringMemberParts { pattern, length },
             } = value.attribute_type.raw_shape()
             else {
                 panic!("{resource}.{path}: DNS String");
             };
             assert!(identity.is_none());
-            assert!(pattern.is_some());
+            assert!(pattern.is_none());
             assert_eq!(length, Some((Some(1), Some(1024))));
+            let rule = &resource_type_overrides()[&(resource, path)];
+            assert_eq!(
+                string_members::input_patterns(std::slice::from_ref(rule)).len(),
+                usize::from(resource == "route53.RecordSet")
+            );
         }
     }
 
@@ -9919,17 +10471,15 @@ mod tests {
             assert_ne!(attr.type_code, PLAIN_STRING_TYPE_CODE, "{path}");
         }
         let generated = generate_resource(&resource, &model).unwrap();
-        assert!(generated.contains("carina_aws_types::route53_hosted_zone_id()"));
+        assert!(
+            generated.contains("carina_aws_types::AwsType::Route53HostedZoneId.attribute_type()")
+        );
         assert!(generated.contains("Some(4000)"), "{generated}");
         assert!(
-            generated.contains(
-                "StructField::required(\"dns_name\", carina_aws_types::route53_dns_name())"
-            )
+            generated.contains("StructField::required(\"dns_name\", AttributeType::string_member(")
         );
         assert!(
-            generated.contains(
-                "AttributeSchema::required(\"name\", carina_aws_types::route53_dns_name())"
-            )
+            generated.contains("AttributeSchema::required(\"name\", AttributeType::string_member(")
         );
         for path in [
             "name",
@@ -9985,7 +10535,7 @@ mod tests {
     }
     use carina_core::schema::StructField;
 
-    fn markdown_resource_example(dsl_name: &str) -> DocExample {
+    pub(super) fn markdown_resource_example(dsl_name: &str) -> DocExample {
         let source = format!("aws.{dsl_name} {{}}\n");
         example::check(
             &source,
@@ -10047,7 +10597,7 @@ mod tests {
         let nat_type = vpc_id_type("ec2.NatGateway");
         assert_eq!(
             nat_type,
-            "`VpcId (pattern: /^vpc-[0-9a-f]{8,}$/ (Full), custom validator)`"
+            "`VpcId (identity constraints: pattern: /^vpc-[0-9a-f]{8,}$/ (Full))`"
         );
         assert_eq!(vpc_id_type("ec2.InternetGateway"), nat_type);
     }
@@ -10074,7 +10624,7 @@ mod tests {
         let resource = resource_defs::s3_resources().remove(0);
         let schema = generate_resource(&resource, &model).unwrap();
         assert!(
-            schema.contains(r#"AttributeSchema::provider_populated("arn", self::arn())"#),
+            schema.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.attribute_type()))"#),
             "{schema}"
         );
         let attributes = collect_resource_attributes(&resource, &model).unwrap();
@@ -10083,9 +10633,18 @@ mod tests {
             .iter()
             .find(|attr| attr.snake_name == "arn")
             .unwrap();
-        assert_eq!(arn.type_code, "super::arn()");
-        let schema_display = discover_markdown_override(
-            &arn.type_code,
+        assert!(
+            arn.type_code
+                .contains("AwsType::S3BucketArn.attribute_type()")
+        );
+        let schema_display = synthetic_extra_attribute_type(
+            &resource,
+            &model,
+            "Arn",
+            &TypeDeclarations::from_resource(&resource),
+        )
+        .unwrap()
+        .markdown(
             &HeadingPath::root("arn"),
             "aws.s3.Bucket",
             &mut BTreeMap::new(),
@@ -10095,9 +10654,9 @@ mod tests {
         let mut page = PageBuilder::new();
         schema_display.write_to(&mut page);
         let schema_type = page.finish().unwrap();
-        assert_eq!(
-            schema_type,
-            "`Arn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$/ (Full), custom validator)`"
+        assert!(
+            schema_type.starts_with("`Arn (identity constraints: pattern:"),
+            "{schema_type}"
         );
         let markdown = generate_markdown_resource(
             &resource,
@@ -10205,7 +10764,7 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("generate Logs schema");
         assert!(
             generated.contains(
-                "AttributeSchema::required(\"log_group_name\", AttributeType::refined_string("
+                "AttributeSchema::required(\"log_group_name\", AttributeType::string_member("
             ),
             "{generated}"
         );
@@ -10214,13 +10773,14 @@ mod tests {
             "{generated}"
         );
         assert!(
-            generated.contains(r#"Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]{1,512}\\z", carina_core::schema::PatternMatch::Full))"#),
+            generated.contains(r#"Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]+$", carina_core::schema::PatternMatch::Full))"#),
             "match AWSCC's exact anonymous name refinement: {generated}"
         );
         assert!(
-            generated
-                .contains("StructField::optional(\"log_group_name\", AttributeType::string())"),
-            "a nested name with the same Smithy target must stay unchanged: {generated}"
+            generated.contains(
+                "StructField::optional(\"log_group_name\", AttributeType::string_member("
+            ),
+            "a nested member retains the same Smithy constraints: {generated}"
         );
 
         // Use a real resource definition and its actual Smithy member names.
@@ -10288,17 +10848,15 @@ mod tests {
             .expect("retention attribute");
         assert_eq!(
             retention.type_code,
-            "carina_aws_types::logs_log_group_retention_in_days()"
+            "carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.attribute_type())"
         );
         assert_eq!(retention.send_type, SendFieldType::Int);
         let generated = generate_resource(&resource, &model).expect("generate Logs schema");
         // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
             generated.contains(concat!(
-                "StructField::optional(\"retention_in_days\", AttributeType::refined_int(\n",
-                "                None,\n",
-                "                Some((Some(-2147483648), Some(2147483647))),\n",
-                "            ))",
+                "StructField::optional(\"retention_in_days\", AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(",
+                "Some((Some(-2147483648), Some(2147483647))))))",
             )),
             "the override must not match nested suffixes: {generated}"
         );
@@ -10314,29 +10872,39 @@ mod tests {
         )
         .expect("generate Logs markdown");
         assert!(
-            markdown.contains(
-                "`String (pattern: /^[.\\-_/#A-Za-z0-9]{1,512}\\z/ (Full), len: 1..=512)`"
-            ),
+            markdown.contains("`String (member constraints: pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)`"),
             "{markdown}"
         );
         assert!(
-            markdown.contains("`LogsLogGroupRetentionInDays (custom validator)`; allowed: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653"),
+            markdown.contains("`LogsLogGroupRetentionInDays (member constraints: range: -2147483648..=2147483647, custom validator)`; allowed: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653"),
             "{markdown}"
         );
         assert!(
-            markdown.contains("| `log_group_name` | `String` |"),
+            markdown.contains("| `log_group_name` | `String (member constraints: pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)` |"),
             "{markdown}"
         );
         // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            markdown.contains("| `retention_in_days` | `Int (range: -2147483648..=2147483647)` |"),
+            markdown.contains("| `retention_in_days` | `Int (member constraints: range: -2147483648..=2147483647)` |"),
             "{markdown}"
         );
     }
 
     fn iam_role_value_fixture() -> (ResourceDef, SmithyModel) {
         let fields = [("RoleName", true), ("Path", false), ("Description", false)];
-        let model = string_fixture_model(&fields, &fields);
+        let mut model = string_fixture_model(&fields, &fields);
+        for shape in [
+            "com.amazonaws.test#CreateFixtureRequest",
+            "com.amazonaws.test#ReadFixture",
+        ] {
+            fixture_string_traits(
+                &mut model,
+                shape,
+                "Path",
+                r"^(\u002F)|(\u002F[\u0021-\u007E]+\u002F)$",
+                Some((1, 512)),
+            );
+        }
         let mut resource = provider_fixture_resource(
             "iam.Role",
             "RoleName",
@@ -10354,8 +10922,30 @@ mod tests {
             .unwrap()
             .attrs;
         for (field, constructor) in [
-            ("role_name", "carina_aws_types::iam_role_name()"),
-            ("path", "carina_aws_types::iam_path()"),
+            (
+                "role_name",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())",
+            ),
+            (
+                "path",
+                &member_string_value(
+                    &model,
+                    resource.name,
+                    model
+                        .get_structure("com.amazonaws.test#CreateFixtureRequest")
+                        .unwrap()
+                        .members
+                        .get("Path")
+                        .unwrap(),
+                    "Path",
+                    "path",
+                    &TypeDeclarations::default(),
+                    &HashMap::new(),
+                    None,
+                )
+                .unwrap()
+                .type_code,
+            ),
         ] {
             let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
             assert_eq!(attr.type_code, constructor);
@@ -10368,12 +10958,19 @@ mod tests {
         );
         assert!(
             generated.contains(
-                "AttributeSchema::required(\"role_name\", carina_aws_types::iam_role_name())"
+                "AttributeSchema::required(\"role_name\", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type()))"
             ),
             "{generated}"
         );
         assert!(
-            generated.contains("AttributeSchema::optional(\"path\", carina_aws_types::iam_path())"),
+            generated.contains(&format!(
+                "AttributeSchema::optional(\"path\", {})",
+                &attrs
+                    .iter()
+                    .find(|attr| attr.snake_name == "path")
+                    .unwrap()
+                    .type_code
+            )),
             "{generated}"
         );
         assert!(
@@ -10389,11 +10986,11 @@ mod tests {
         let attrs = collect_resource_attributes_unvalidated(&unrelated, &model, &[])
             .unwrap()
             .attrs;
-        assert!(
-            attrs
-                .iter()
-                .all(|attr| attr.type_code == PLAIN_STRING_TYPE_CODE)
-        );
+        assert!(attrs.iter().all(|attr| if attr.snake_name == "path" {
+            attr.type_code.starts_with("AttributeType::string_member(")
+        } else {
+            attr.type_code == PLAIN_STRING_TYPE_CODE
+        }));
         for path in ["nested.role_name", "nested.path", "role_name[]", "path[]"] {
             assert!(
                 resource_value_override("iam.Role", path).is_none(),
@@ -10412,14 +11009,12 @@ mod tests {
         )
         .unwrap();
         assert!(
-            markdown.contains(
-                r"`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`"
-            ),
+            markdown.contains(r"`IamRoleName (identity constraints:"),
             "{markdown}"
         );
+        assert!(markdown.contains("len: 1..=512"), "{markdown}");
         assert!(
-            markdown
-                .contains(r"`String (pattern: /^(?:/|/[\x21-\x7E]+/)\z/ (Full), len: 1..=512)`"),
+            markdown.contains("Smithy pattern is unanchored"),
             "{markdown}"
         );
     }
@@ -10432,11 +11027,23 @@ mod tests {
             .unwrap()
             .attrs;
         for (field, expected_constructor) in [
-            ("account_name", "AttributeType::refined_string("),
-            ("role_name", "carina_aws_types::iam_role_name()"),
-            ("email", "carina_aws_types::organizations_account_email()"),
-            ("id", "carina_aws_types::aws_account_id()"),
-            ("arn", "carina_aws_types::organizations_account_arn()"),
+            ("account_name", "AttributeType::string_member("),
+            (
+                "role_name",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())",
+            ),
+            (
+                "email",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.attribute_type())",
+            ),
+            (
+                "id",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type())",
+            ),
+            (
+                "arn",
+                "carina_aws_types::with_member_identity(AttributeType::string_member(",
+            ),
         ] {
             let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
             assert!(
@@ -10471,7 +11078,7 @@ mod tests {
             .expect("management account output must share the Organizations Email type");
         assert_eq!(
             output.type_code,
-            "carina_aws_types::organizations_account_email()"
+            "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.attribute_type())"
         );
         for resource in [
             "organizations.Other",
@@ -10496,12 +11103,13 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (pattern: /^[ -;=?-~]+\z/ (Full), len: 1..=50)`",
-            r"`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`",
-            "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
-            r"`AwsAccountId (pattern: /^\d{12}$/ (Full), len: 12..=12, custom validator)`",
+            "`String (member constraints: len: 1..=50)`",
+            r"`account_name` | Create and update | `String (pattern: /^[ -;=?-~]+\z/ (Full))`",
+            r"`IamRoleName (identity constraints:",
+            "`OrganizationsAccountEmail (identity constraints: len: 6..=64, custom validator)`",
+            r"`AwsAccountId (identity constraints: pattern:",
             // #638: Organizations account ARN docs pin all eight supported partitions.
-            r"`OrganizationsAccountArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z/ (Full))`",
+            "OrganizationsAccountArn (identity constraints: pattern:",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -10515,7 +11123,28 @@ mod tests {
             ("MasterAccountArn", false),
             ("MasterAccountId", false),
         ];
-        let model = string_fixture_model(&[], &fields);
+        let mut model = string_fixture_model(&[], &fields);
+        fixture_string_traits(
+            &mut model,
+            "com.amazonaws.test#ReadFixture",
+            "Arn",
+            member_constraints_tests::ORGANIZATION_ARN_SOURCE,
+            None,
+        );
+        fixture_string_traits(
+            &mut model,
+            "com.amazonaws.test#ReadFixture",
+            "MasterAccountArn",
+            member_constraints_tests::ACCOUNT_ARN_SOURCE,
+            None,
+        );
+        fixture_string_traits(
+            &mut model,
+            "com.amazonaws.test#ReadFixture",
+            "Id",
+            r"^o-[a-z0-9]{10,32}$",
+            None,
+        );
         let mut resource =
             provider_fixture_resource("organizations.Organization", "Id", &[], vec![]);
         resource.extra_read_only = vec!["Arn", "MasterAccountArn", "MasterAccountId"];
@@ -10523,13 +11152,19 @@ mod tests {
             .unwrap()
             .attrs;
         for (field, constructor) in [
-            ("id", "AttributeType::refined_string("),
-            ("arn", "carina_aws_types::organizations_organization_arn()"),
+            ("id", "AttributeType::string_member("),
+            (
+                "arn",
+                "carina_aws_types::with_member_identity(AttributeType::string_member(",
+            ),
             (
                 "master_account_arn",
-                "carina_aws_types::organizations_account_arn()",
+                "carina_aws_types::with_member_identity(AttributeType::string_member(",
             ),
-            ("master_account_id", "carina_aws_types::aws_account_id()"),
+            (
+                "master_account_id",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type())",
+            ),
         ] {
             let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
             assert!(
@@ -10553,11 +11188,11 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (pattern: /^o-[a-z0-9]{10,32}\z/ (Full), len: 12..=34)`",
+            r"`String (member constraints: pattern: /^o-[a-z0-9]{10,32}$/ (Full))`",
             // #638: Management-account ARN docs pin all eight supported partitions.
-            r"`OrganizationsAccountArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z/ (Full))`",
+            "OrganizationsAccountArn (identity constraints: pattern:",
             // #638: Organization ARN docs pin all eight supported partitions.
-            r"`OrganizationsOrganizationArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z/ (Full))`",
+            "OrganizationsOrganizationArn (identity constraints: pattern:",
         ] {
             assert!(markdown.contains(expected), "{markdown}");
         }
@@ -10624,10 +11259,8 @@ mod tests {
         // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
             code.contains(concat!(
-                "StructField::optional(\"count\", AttributeType::refined_int(\n",
-                "                None,\n",
-                "                Some((Some(-2147483648), Some(2147483647))),\n",
-                "            ))",
+                "StructField::optional(\"count\", AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(",
+                "Some((Some(-2147483648), Some(2147483647))))))",
             )),
             "{code}"
         );
@@ -10673,7 +11306,7 @@ mod tests {
             let enum_expression = format!(
                 concat!(
                     "AttributeType::enum_(carina_core::schema::enum_identity(\"{}\",Some(\"aws.ec2.RouteTable.EnumCollections\")),",
-                    "Some(vec![\"FAST\".to_string()]),vec![(\"FAST\".to_string(),\"fast\".to_string())],None,None,)"
+                    "Some(vec![\"FAST\".to_string()]),vec![(\"FAST\".to_string(),\"fast\".to_string())],None,None)"
                 ),
                 name
             );
@@ -10842,7 +11475,7 @@ mod tests {
         let markdown = lifecycle_markdown_fixture();
         assert_eq!(
             markdown
-                .matches("| `date` | `S3LifecycleDate (pattern: /^(?:[0-9]{4}-(?:(?:01\\|03\\|05\\|07\\|08\\|10\\|12)-(?:0[1-9]\\|[12][0-9]\\|3[01])\\|(?:04\\|06\\|09\\|11)-(?:0[1-9]\\|[12][0-9]\\|30)\\|02-(?:0[1-9]\\|1[0-9]\\|2[0-8]))\\|(?:[0-9]{2}(?:0[48]\\|[2468][048]\\|[13579][26])\\|(?:[02468][048]\\|[13579][26])00)-02-29)T00:00:00Z\\z/ (Full), len: 20..=20, custom validator)` | No |")
+                .matches("| `date` | `S3LifecycleDate (identity constraints:")
                 .count(),
             2,
             "{markdown}"
@@ -10853,7 +11486,6 @@ mod tests {
             type_code_to_display("super::s3_lifecycle_date()")
         );
     }
-
     #[test]
     fn markdown_struct_field_groups_lifecycle_filter_uses_the_declared_type() {
         let markdown = lifecycle_markdown_fixture();
@@ -10913,7 +11545,7 @@ mod tests {
             page.heading(Heading::plain(1, "Declared type")).unwrap();
             ty.write_to(&mut page);
             page.push_str("\n\n");
-            write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+            write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
             let markdown = page.finish().expect("valid declared-type docs");
             assert_eq!(markdown.matches(sentence).count(), 1, "{markdown}");
             assert!(
@@ -10949,14 +11581,12 @@ mod tests {
         .unwrap();
         let mut page = PageBuilder::new();
         page.heading(Heading::plain(1, "Declared types")).unwrap();
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page
             .finish()
             .expect("declared enum aliases produce valid docs");
         assert!(
-            markdown.contains(
-                "| `zone` | `Route53HostedZoneId (pattern: /^Z[A-Z0-9]+$/ (Full), len: ..=32)` |"
-            ),
+            markdown.contains("| `zone` | `Route53HostedZoneId (identity constraints:"),
             "{markdown}"
         );
         assert!(
@@ -10973,13 +11603,14 @@ mod tests {
             provider_name: "Names",
             description: "Names to look up.",
             required: false,
-            type_override: Some("super::availability_zone()"),
+            type_override: Some(TypeOverride::Identity(AwsType::AvailabilityZone)),
+            representation: Representation::String,
         }];
         source.shape = resource_defs::DataSourceShape::ListAggregated {
             aggregated_outputs: vec![resource_defs::DataSourceListOutput {
                 name: "names",
                 description: "Names returned by the lookup.",
-                item_type: "super::availability_zone()",
+                item_type: DataSourceType::named(AwsType::AvailabilityZone),
             }],
         };
         let markdown = generate_markdown_data_source(
@@ -11022,7 +11653,7 @@ mod tests {
             aggregated_outputs: vec![resource_defs::DataSourceListOutput {
                 name: "subject_alternative_names",
                 description: "Certificate domain names.",
-                item_type: "AttributeType::string()",
+                item_type: DataSourceType::plain(Representation::String),
             }],
         };
         let markdown = generate_markdown_data_source(
@@ -11060,7 +11691,7 @@ mod tests {
                 name: "rules",
                 provider_name: None,
                 description: "Lifecycle rules.",
-                type_code: "super::bucket_lifecycle_rules()",
+                type_code: DataSourceType::plain(Representation::BucketLifecycleRules),
             }],
         };
         let markdown = generate_markdown_data_source(
@@ -11081,7 +11712,8 @@ mod tests {
             provider_name: "Rules",
             description: "Lifecycle rules.",
             required: false,
-            type_override: Some("super::bucket_lifecycle_rules()"),
+            type_override: None,
+            representation: Representation::BucketLifecycleRules,
         }];
         let markdown = generate_markdown_data_source(
             &source,
@@ -11351,7 +11983,7 @@ mod tests {
             provider_fixture_resource("test.Resource", "Name", &["KmsNewKey"], vec![]);
         resource
             .type_overrides
-            .push(("KmsNewKey", "AttributeType::string()"));
+            .push(("KmsNewKey", TypeOverride::NoIdentity));
         let error = generate_resource(&resource, &model).unwrap_err();
         assert!(
             error
@@ -11359,6 +11991,35 @@ mod tests {
                 .contains("unclassified KMS string test.Resource.kms_new_key"),
             "{error:#}"
         );
+    }
+
+    fn fixture_string_traits(
+        model: &mut SmithyModel,
+        shape: &str,
+        member: &str,
+        pattern: &str,
+        length: Option<(u64, u64)>,
+    ) {
+        let Some(Shape::Structure(shape)) = model.shapes.get_mut(shape) else {
+            panic!("fixture structure")
+        };
+        let member = shape.members.get_mut(member).expect("fixture member");
+        member
+            .traits
+            .insert("smithy.api#pattern".into(), serde_json::json!(pattern));
+        if let Some((min, max)) = length {
+            member.traits.insert(
+                "smithy.api#length".into(),
+                serde_json::json!({"min":min,"max":max}),
+            );
+        }
+    }
+
+    fn iam_roles_input_fixture_model() -> SmithyModel {
+        carina_smithy::parse(r##"{"smithy":"2.0","shapes":{
+            "com.amazonaws.iam#ListRolesRequest":{"type":"structure","members":{"PathPrefix":{"target":"com.amazonaws.iam#pathPrefixType"}}},
+            "com.amazonaws.iam#pathPrefixType":{"type":"string","traits":{"smithy.api#length":{"min":1,"max":512},"smithy.api#pattern":"^\\u002F[\\u0021-\\u007F]*$"}}
+        }}"##).unwrap()
     }
 
     fn string_fixture_model(
@@ -11453,7 +12114,7 @@ mod tests {
     }
 
     fn organizations_account_fixture_model() -> SmithyModel {
-        carina_smithy::parse(
+        let mut model = carina_smithy::parse(
             r##"{
               "smithy": "2.0",
               "shapes": {
@@ -11489,7 +12150,15 @@ mod tests {
               }
             }"##,
         )
-        .expect("parse inline Organizations account model")
+        .expect("parse inline Organizations account model");
+        fixture_string_traits(
+            &mut model,
+            "com.amazonaws.organizations#Account",
+            "Arn",
+            member_constraints_tests::ACCOUNT_ARN_SOURCE,
+            None,
+        );
+        model
     }
 
     fn account_update_fixture_model(input_members: Option<&str>) -> SmithyModel {
@@ -11804,6 +12473,7 @@ mod tests {
             identifier,
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: PROVIDER_FIXTURE_FIELDS
                 .iter()
                 .copied()
@@ -11826,7 +12496,7 @@ mod tests {
         }
     }
 
-    fn enum_fixture_model() -> SmithyModel {
+    pub(super) fn enum_fixture_model() -> SmithyModel {
         carina_smithy::parse(
             r##"{
               "smithy": "2.0",
@@ -11858,7 +12528,7 @@ mod tests {
         .expect("parse enum codegen fixture model")
     }
 
-    fn enum_fixture_resource() -> ResourceDef {
+    pub(super) fn enum_fixture_resource() -> ResourceDef {
         ResourceDef {
             input_rules: vec![],
             read_back: resource_defs::ReadBackOverrides::default(),
@@ -11878,6 +12548,7 @@ mod tests {
             identifier: "",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -12097,25 +12768,21 @@ mod tests {
     }
 
     #[test]
-    fn nested_write_only_fails_when_a_type_override_bypasses_struct_emission() {
+    fn nested_write_only_decoration_cannot_bypass_struct_emission() {
         let model = nested_write_only_fixture_model();
         let mut resource =
             provider_fixture_resource("test.NestedWriteOnly", "", &["Options"], vec![]);
         resource
             .type_overrides
-            .push(("Options", "AttributeType::string()"));
+            .push(("Options", TypeOverride::NoIdentity));
         let dispositions = [resource_defs::ReadDisposition::NestedWriteOnly {
             field: "Options",
             member: "ValidationMethod",
             reason: "test fixture",
         }];
 
-        let error = validate_read_contract(&resource, &model, &dispositions)
-            .expect_err("type override must not silently drop nested write-only emission");
-        let message = error.to_string();
-        assert!(message.contains("Options.ValidationMethod"), "{error:#}");
-        assert!(message.contains("generated 0"), "{error:#}");
-        assert!(message.contains("expected exactly one"), "{error:#}");
+        validate_read_contract(&resource, &model, &dispositions)
+            .expect("identity selection must preserve the struct's nested emission");
     }
 
     #[test]
@@ -12829,7 +13496,7 @@ mod tests {
         let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().expect("valid union display and definitions");
         assert!(
             markdown.starts_with("[Union(Zone)](#zone-union)"),
@@ -12840,8 +13507,7 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown
-                .contains("- `Route53HostedZoneId (pattern: /^Z[A-Z0-9]+$/ (Full), len: ..=32)`"),
+            markdown.contains("- `Route53HostedZoneId (identity constraints:"),
             "{markdown}"
         );
         assert_eq!(structs.len(), 1);
@@ -12877,7 +13543,7 @@ mod tests {
         let mut page = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().unwrap();
         let members: Vec<_> = markdown
             .lines()
@@ -12907,7 +13573,7 @@ mod tests {
         let mut page: PageBuilder<MarkdownTarget> = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().expect("valid nested union display");
         assert!(
             markdown.starts_with("[Union(Zone)](#zone-union)"),
@@ -12920,12 +13586,45 @@ mod tests {
         assert!(markdown.contains("- `Bool`\n"), "{markdown}");
         assert!(markdown.contains("- [HostedZoneId]"), "{markdown}");
         assert!(
-            markdown.contains("- `Route53HostedZoneId (pattern:"),
+            markdown.contains("- `Route53HostedZoneId (identity constraints:"),
             "{markdown}"
         );
     }
 
-    fn test_attr(
+    #[test]
+    fn identity_662_round4_input_patterns_reject_provider_outputs_and_bind_scope() {
+        use carina_core::schema::InputRuleScope;
+        let patterns = BTreeMap::from([(
+            "label".into(),
+            vec![PatternSpec::new("^extra$", PatternMatch::Full)],
+        )]);
+        let mut attr = test_attr(
+            "Label",
+            "label",
+            PLAIN_STRING_TYPE_CODE,
+            true,
+            true,
+            false,
+            None,
+        );
+        let error =
+            bind_input_patterns("test.InputPattern", &[attr.clone()], &patterns).unwrap_err();
+        assert!(error.to_string().contains("test.InputPattern.label"));
+        assert!(error.to_string().contains("provider-populated"));
+        attr.is_read_only = false;
+        assert_eq!(
+            bind_input_patterns("test.InputPattern", &[attr.clone()], &patterns).unwrap()[0]
+                .scope(),
+            InputRuleScope::EveryWrite
+        );
+        attr.is_create_only = true;
+        assert_eq!(
+            bind_input_patterns("test.InputPattern", &[attr], &patterns).unwrap()[0].scope(),
+            InputRuleScope::CreateOnly
+        );
+    }
+
+    pub(super) fn test_attr(
         provider_name: &str,
         snake_name: &str,
         type_code: &str,
@@ -12935,6 +13634,8 @@ mod tests {
         enum_info: Option<EnumInfo>,
     ) -> AttrInfo {
         AttrInfo {
+            attribute_type: attribute_type_from_code(type_code)
+                .unwrap_or_else(|_| AttributeType::string()),
             snake_name: snake_name.to_string(),
             provider_name: provider_name.to_string(),
             type_code: type_code.to_string(),
@@ -13067,7 +13768,7 @@ mod tests {
             error_for(&[test_attr(
                 "RoleName",
                 "role_name",
-                "super::iam_role_name()",
+                "AttributeType::bool()",
                 false,
                 true,
                 false,
@@ -13128,12 +13829,12 @@ mod tests {
         );
         assert!(
             generated.contains(
-                r#"AttributeSchema::provider_populated("account_id", super::aws_account_id())"#
+                r#"AttributeSchema::provider_populated("account_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type()))"#
             ),
             "account_id must use aws_account_id(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::provider_populated("arn", self::arn())"#),
+            generated.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::StsCallerIdentityArn.attribute_type()))"#),
             "arn must use arn(): {generated}"
         );
         assert!(
@@ -13194,7 +13895,7 @@ mod tests {
     /// `arns: List(...)` rather than scalar.
     #[test]
     fn generate_data_source_for_iam_roles_emits_list_attributes() {
-        let model = empty_test_model();
+        let model = iam_roles_input_fixture_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -13213,22 +13914,39 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::provider_populated(\"arns\", AttributeType::unordered_list(super::super::iam::role::arn()))"
+                "AttributeSchema::provider_populated(\"arns\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleArn.attribute_type())))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
         // names is an unordered list of the shared, named role-name type.
         assert!(
             generated.contains(
-                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(carina_aws_types::iam_role_name()))"
+                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())))"
             ),
             "names must be List(refined String): {generated}"
         );
         // Inputs are both optional strings.
         assert!(
-            generated.contains(
-                r#"AttributeSchema::optional("path_prefix", carina_aws_types::iam_path_prefix())"#
-            ),
+            generated.contains(&format!(
+                "AttributeSchema::optional(\"path_prefix\", {})",
+                member_string_value(
+                    &model,
+                    "iam.Roles",
+                    model
+                        .get_structure("com.amazonaws.iam#ListRolesRequest")
+                        .unwrap()
+                        .members
+                        .get("PathPrefix")
+                        .unwrap(),
+                    "PathPrefix",
+                    "path_prefix",
+                    &TypeDeclarations::default(),
+                    &HashMap::new(),
+                    None
+                )
+                .unwrap()
+                .type_code
+            )),
             "path_prefix input: {generated}"
         );
         assert!(
@@ -13256,7 +13974,7 @@ mod tests {
         let generated =
             generate_data_source(&unrelated, &model, false).expect("unrelated data source");
         assert!(
-            !generated.contains("carina_aws_types::iam_role_name()")
+            !generated.contains("carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())")
                 && !generated.contains("carina_aws_types::iam_path_prefix()"),
             "{generated}"
         );
@@ -13264,7 +13982,7 @@ mod tests {
 
     #[test]
     fn markdown_data_source_for_iam_roles_emits_list_types() {
-        let model = empty_test_model();
+        let model = iam_roles_input_fixture_model();
         let ds = resource_defs::iam_data_sources()
             .into_iter()
             .next()
@@ -13276,17 +13994,17 @@ mod tests {
         assert!(md.contains("### `arns`"), "arns section: {md}");
         assert!(md.contains("### `names`"), "names section: {md}");
         assert!(
-            md.contains("- **Type:** List\\<`IamRoleArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$/ (Full), custom validator)`\\> (unordered)"),
+            md.contains("- **Type:** List\\<`IamRoleArn (identity constraints:"),
             "aggregated outputs must use MarkdownType's list renderer: {md}"
         );
         assert!(
-            md.contains(r"- **Type:** `String (pattern: /^/[\x21-\x7F]*\z/ (Full), len: 1..=512)`"),
+            md.contains(
+                r"- **Type:** `String (member constraints: pattern: /^\u002F[\u0021-\u007F]*$/ (Full), len: 1..=512)`"
+            ),
             "path_prefix constraint: {md}"
         );
         assert!(
-            md.contains(
-                r"- **Type:** List\<`IamRoleName (pattern: /^[A-Za-z0-9_+=,.@-]+\z/ (Full), len: 1..=64, custom validator)`\> (unordered)"
-            ),
+            md.contains(r"- **Type:** List\<`IamRoleName (identity constraints:"),
             "names element constraint: {md}"
         );
     }
@@ -13296,13 +14014,16 @@ mod tests {
         let model = provider_fixture_model();
         let mut res = provider_fixture_resource("iam.Role", "RoleName", &["RoleName"], vec![]);
         res.extra_read_only = vec!["Arn"];
-        res.type_overrides = vec![("Arn", "super::super::iam::role::arn()")];
+        res.type_overrides = vec![("Arn", TypeOverride::Identity(AwsType::IamRoleArn))];
 
         let md = generate_markdown_resource(&res, &model, &markdown_resource_example(res.name))
             .expect("md");
 
         assert!(md.contains("### `arn`"), "{md}");
-        assert!(md.contains("- **Type:** `IamRoleArn (pattern: /^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$/ (Full), custom validator)`"), "{md}");
+        assert!(
+            md.contains("- **Type:** `IamRoleArn (identity constraints:"),
+            "{md}"
+        );
     }
 
     #[test]
@@ -13535,6 +14256,7 @@ mod tests {
             identifier: "",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: ["VpcId", "PeerVpcId"]
                 .into_iter()
                 .filter(|field| *field != attr)
@@ -13816,7 +14538,7 @@ mod tests {
                       "traits": {}
                     },
                     "SubjectAlternativeNames": {
-                      "target": "smithy.api#String",
+                      "target": "com.amazonaws.acm#SubjectAlternativeNames",
                       "traits": {}
                     },
                     "ValidationMethod": {
@@ -13826,6 +14548,11 @@ mod tests {
                   },
                   "traits": { "smithy.api#input": {} }
                 },
+                "com.amazonaws.acm#SubjectAlternativeNames": {
+                  "type": "list", "member": {"target": "com.amazonaws.acm#San"},
+                  "traits": {"smithy.api#length": {"min": 1, "max": 100}}
+                },
+                "com.amazonaws.acm#San": {"type": "string", "traits": {"smithy.api#length": {"min": 1, "max": 253}}},
                 "com.amazonaws.acm#CertificateOptions": {
                   "type": "structure",
                   "members": {
@@ -13875,7 +14602,7 @@ mod tests {
                       "traits": {}
                     },
                     "SubjectAlternativeNames": {
-                      "target": "smithy.api#String",
+                      "target": "com.amazonaws.acm#SubjectAlternativeNames",
                       "traits": {}
                     },
                     "ValidationMethod": {
@@ -14083,7 +14810,7 @@ mod tests {
             &HeadingPath::root("tags"),
             "tags",
             "aws.test",
-            &HashMap::new(),
+            &TypeDeclarations::default(),
             &HashMap::new(),
             None,
             &mut enums,
@@ -14111,7 +14838,7 @@ mod tests {
         let mut page = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().unwrap();
         assert!(markdown.contains("[Struct(Entry)](#tagskey)"), "{markdown}");
         assert!(
@@ -14178,7 +14905,7 @@ mod tests {
         let mut page = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().unwrap();
         for link in ["[Kind](#tags-keys-kind)", "[Kind](#tagskey-kind)"] {
             assert!(markdown.contains(link), "{markdown}");
@@ -14276,7 +15003,7 @@ mod tests {
         let mut page = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new()).unwrap();
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
         let markdown = page.finish().unwrap();
         assert!(
             markdown.contains("### fixture.tags['\\<key\\>'].value\n"),
@@ -14342,7 +15069,7 @@ mod tests {
         let mut page = PageBuilder::new();
         display.write_to(&mut page);
         page.push_str("\n\n");
-        write_markdown_type_definitions(&mut page, &enums, &structs, &HashMap::new())?;
+        write_markdown_type_definitions(&mut page, &enums, &structs)?;
         Ok(page.finish()?)
     }
 
@@ -14489,7 +15216,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             sans.type_code,
-            "AttributeType::unordered_list(carina_aws_types::acm_certificate_subject_alternative_name())"
+            "AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(253))))), carina_aws_types::AwsType::AcmCertificateSubjectAlternativeName.attribute_type()), false, Some((Some(1), Some(100))), carina_core::schema::ListElements::AllowDuplicates)"
         );
         let generated = generate_resource(&resource, &model).unwrap();
         assert!(
@@ -14497,11 +15224,12 @@ mod tests {
             "{generated}"
         );
         assert!(
-            generated.contains("carina_aws_types::acm_certificate_arn()"),
+            generated.contains("carina_aws_types::AwsType::AcmCertificateArn.attribute_type()"),
             "{generated}"
         );
         assert!(
-            generated.contains("carina_aws_types::acm_certificate_key_algorithm()"),
+            generated
+                .contains("carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.attribute_type()"),
             "{generated}"
         );
         let markdown = generate_markdown_resource(
@@ -14511,7 +15239,7 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            "len: 1..=64",
+            "Request domain limit: 64 octets",
             "len: 1..=253",
             carina_aws_types::ACM_CERTIFICATE_REQUEST_DOMAIN_RULE,
             "aws.acm.Certificate.KeyAlgorithm.rsa_2048",
@@ -14533,7 +15261,7 @@ mod tests {
             generate_resource(&resource, &markdown_read_shape_override_model()).unwrap();
         assert_eq!(
             generated
-                .matches("carina_aws_types::acm_certificate_validation_url()")
+                .matches("carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type()")
                 .count(),
             4,
             "{generated}"
@@ -15770,28 +16498,28 @@ mod tests {
         // Exact and plural matches.
         assert_eq!(
             infer_string_type("Email"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         assert_eq!(
             infer_string_type("Emails"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         assert_eq!(
             infer_string_type("EmailAddress"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         assert_eq!(
             infer_string_type("EmailAddresses"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         // PascalCase suffix.
         assert_eq!(
             infer_string_type("MasterAccountEmail"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         assert_eq!(
             infer_string_type("ContactEmailAddress"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
     }
 
@@ -15800,11 +16528,11 @@ mod tests {
         // Names that contain "email" but are not email values.
         assert_ne!(
             infer_string_type("EmailEnabled"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
         assert_ne!(
             infer_string_type("EmailNotificationConfig"),
-            Some("types::email()".to_string())
+            Some(TypeOverride::CoreIdentity(CoreIdentity::Email))
         );
     }
 
@@ -15857,6 +16585,7 @@ mod tests {
             identifier: "",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -15877,7 +16606,7 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
         assert!(
-            generated.contains("\"email\", types::email()"),
+            generated.contains("\"email\", carina_aws_types::with_member_identity(AttributeType::string(), types::email()))"),
             "organizations.account.email should be types::email(): {generated}"
         );
         assert!(

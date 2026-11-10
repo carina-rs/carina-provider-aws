@@ -39,14 +39,14 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
         (
             "Eip",
             vec![
-                "AttributeSchema::optional(\"address\", types::ipv4_address())",
+                "AttributeSchema::optional(\"address\", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_address()))",
                 "AttributeSchema::optional(\"public_ipv4_pool\", AttributeType::string())",
             ],
         ),
         (
             "FlowLog",
             vec![
-                "carina_aws_types::ec2_flow_log_max_aggregation_interval()",
+                "carina_aws_types::AwsType::Ec2FlowLogMaxAggregationInterval.attribute_type()",
                 "AttributeType::refined_list(",
                 "Some(3)",
                 "Some(2)",
@@ -56,16 +56,16 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
         (
             "SecurityGroup",
             vec![
-                "carina_aws_types::ec2_security_group_name()",
+                "carina_aws_types::AwsType::Ec2SecurityGroupName.attribute_type()",
                 "AttributeSchema::required(\"description\", AttributeType::string())",
             ],
         ),
         (
             "Subnet",
             vec![
-                "carina_aws_types::ec2_subnet_ipv4_cidr_block()",
-                "carina_aws_types::ec2_subnet_ipv6_cidr_block()",
-                "carina_aws_types::ec2_subnet_ipv6_netmask_length()",
+                "carina_aws_types::AwsType::Ec2SubnetIpv4CidrBlock.attribute_type()",
+                "carina_aws_types::AwsType::Ec2SubnetIpv6CidrBlock.attribute_type()",
+                "carina_aws_types::AwsType::Ec2SubnetIpv6NetmaskLength.attribute_type()",
                 "Some(2147483647)",
                 "Some(16), Some(28)",
             ],
@@ -73,21 +73,21 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
         (
             "TransitGateway",
             vec![
-                "carina_aws_types::ec2_amazon_side_asn()",
-                "carina_aws_types::ec2_transit_gateway_cidr_block()",
+                "carina_aws_types::AwsType::Ec2AmazonSideAsn.attribute_type()",
+                "carina_aws_types::AwsType::Ec2TransitGatewayCidrBlock.attribute_type()",
             ],
         ),
         (
             "Vpc",
             vec![
-                "carina_aws_types::ec2_vpc_cidr_block()",
+                "carina_aws_types::AwsType::Ec2VpcCidrBlock.attribute_type()",
                 "Some(16), Some(28)",
                 "\"host\".to_string()",
             ],
         ),
         (
             "VpnGateway",
-            vec!["carina_aws_types::ec2_vpn_gateway_amazon_side_asn()"],
+            vec!["carina_aws_types::AwsType::Ec2VpnGatewayAmazonSideAsn.attribute_type()"],
         ),
     ] {
         let Some((_output, generated)) = generate(resource, "rust") else {
@@ -108,8 +108,8 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
             return;
         };
         assert!(generated.contains(unaffected));
-        assert!(!generated.contains("ec2_vpc_cidr_block()"));
-        assert!(!generated.contains("ec2_subnet_ipv4_cidr_block()"));
+        assert!(!generated.contains("AwsType::Ec2VpcCidrBlock"));
+        assert!(!generated.contains("AwsType::Ec2SubnetIpv4CidrBlock"));
     }
 }
 
@@ -119,14 +119,14 @@ fn ec2_vpn_gateway_codegen_documents_legacy_asns_without_broadening_transit_gate
         return;
     };
     assert!(
-        vgw.contains("carina_aws_types::ec2_vpn_gateway_amazon_side_asn()"),
+        vgw.contains("carina_aws_types::AwsType::Ec2VpnGatewayAmazonSideAsn.attribute_type()"),
         "{vgw}"
     );
     let Some((_output, tgw)) = generate("TransitGateway", "rust") else {
         return;
     };
-    assert!(tgw.contains("carina_aws_types::ec2_amazon_side_asn()"));
-    assert!(!tgw.contains("ec2_vpn_gateway_amazon_side_asn()"));
+    assert!(tgw.contains("carina_aws_types::AwsType::Ec2AmazonSideAsn.attribute_type()"));
+    assert!(!tgw.contains("AwsType::Ec2VpnGatewayAmazonSideAsn"));
     let Some((_output, docs)) = generate("VpnGateway", "markdown") else {
         return;
     };
@@ -166,8 +166,8 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
             "Subnet",
             vec![
                 "allowed: 44, 48, 52, 56, 60, 64",
-                "`Int (range: 16..=28)`",
-                "`Int (range: 1..=2147483647)`",
+                "`Int (member constraints: range: 16..=28)`",
+                "`Int (member constraints: range: 1..=2147483647)`",
             ],
         ),
         (
@@ -178,7 +178,13 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
                 "transit_gateway_cidr_blocks",
             ],
         ),
-        ("Vpc", vec!["`Int (range: 16..=28)`", "Ec2VpcCidrBlock"]),
+        (
+            "Vpc",
+            vec![
+                "`Int (member constraints: range: 16..=28)`",
+                "Ec2VpcCidrBlock",
+            ],
+        ),
     ] {
         let Some((_output, generated)) = generate(resource, "markdown") else {
             return;

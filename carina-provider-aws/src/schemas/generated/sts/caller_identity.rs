@@ -8,7 +8,19 @@ use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 pub fn arn() -> AttributeType {
-    super::sts_caller_identity_arn()
+    carina_aws_types::with_member_identity(
+        AttributeType::string_member(
+            carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+            carina_core::schema::StringMemberConstraints::new(
+                Some(carina_core::schema::PatternSpec::new(
+                    "^[\\u0009\\u000A\\u000D\\u0020-\\u007E\\u0085\\u00A0-\\uD7FF\\uE000-\\uFFFD\\u10000-\\u10FFFF]+$",
+                    carina_core::schema::PatternMatch::Full,
+                )),
+                Some((Some(20), Some(2048))),
+            ),
+        ),
+        carina_aws_types::AwsType::StsCallerIdentityArn.attribute_type(),
+    )
 }
 
 /// Returns the schema config for sts.CallerIdentity (Smithy: com.amazonaws.sts)
@@ -21,13 +33,13 @@ pub fn sts_caller_identity_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("sts.CallerIdentity")
         .as_data_source()
         .attribute(
-            AttributeSchema::provider_populated("account_id", super::aws_account_id())
+            AttributeSchema::provider_populated("account_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type()))
                 .with_description("The Amazon Web Services account ID number of the account that owns or contains the calling entity.")
                 .with_provider_name("Account")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("arn", self::arn())
+            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\u0009\\u000A\\u000D\\u0020-\\u007E\\u0085\\u00A0-\\uD7FF\\uE000-\\uFFFD\\u10000-\\u10FFFF]+$", carina_core::schema::PatternMatch::Full)), Some((Some(20), Some(2048))))), carina_aws_types::AwsType::StsCallerIdentityArn.attribute_type()))
                 .with_description("The Amazon Web Services ARN associated with the calling entity.")
                 .with_provider_name("Arn")
                 .build(),

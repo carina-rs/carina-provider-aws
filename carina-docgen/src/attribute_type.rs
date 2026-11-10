@@ -403,26 +403,34 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             None,
         ),
         RawShape::String {
-            identity,
-            pattern,
-            length,
-            validate,
-            to_dsl,
+            identity_layer,
+            member_layer,
         } => scalar_text(
-            identity.map_or_else(|| "String".into(), |identity| hooks.scalar_name(identity)),
-            string_constraints(pattern, length),
-            validate.is_some(),
-            to_dsl,
+            identity_layer
+                .identity
+                .map_or_else(|| "String".into(), |identity| hooks.scalar_name(identity)),
+            refinement_layers(
+                identity_layer.identity.is_some(),
+                string_constraints(identity_layer.pattern, identity_layer.length),
+                string_constraints(member_layer.pattern, member_layer.length),
+            ),
+            identity_layer.validate.is_some(),
+            identity_layer.to_dsl,
             None,
         ),
         RawShape::Int {
-            identity,
-            range,
-            validate,
+            identity_layer,
+            member_layer,
         } => scalar_text(
-            identity.map_or_else(|| "Int".into(), |identity| hooks.scalar_name(identity)),
-            number_constraints(range),
-            validate.is_some(),
+            identity_layer
+                .identity
+                .map_or_else(|| "Int".into(), |identity| hooks.scalar_name(identity)),
+            refinement_layers(
+                identity_layer.identity.is_some(),
+                number_constraints(identity_layer.range),
+                number_constraints(member_layer.range),
+            ),
+            identity_layer.validate.is_some(),
             None,
             None,
         ),
@@ -475,6 +483,7 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             name,
             fields,
             field_groups,
+            input_rules: _,
         } => registry.register(
             scope,
             Declaration {
@@ -531,6 +540,21 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     Ok(display)
 }
 
+fn refinement_layers(named: bool, identity: Vec<String>, member: Vec<String>) -> Vec<String> {
+    let mut refinements = Vec::new();
+    if !identity.is_empty() {
+        if named || !member.is_empty() {
+            refinements.push(format!("identity constraints: {}", identity.join(", ")))
+        } else {
+            refinements.extend(identity)
+        }
+    }
+    if !member.is_empty() {
+        refinements.push(format!("member constraints: {}", member.join(", ")))
+    }
+    refinements
+}
+
 fn enum_base_refinements<R: PatternForm>(
     base: &PatternAttributeType<R>,
     identity: &TypeIdentity,
@@ -540,22 +564,32 @@ fn enum_base_refinements<R: PatternForm>(
     // validator and DSL transform because carina never runs them (carina-rs/carina#4300).
     Ok(match base.raw_shape() {
         RawShape::String {
-            identity: _,
-            pattern,
-            length,
-            validate: _,
-            to_dsl: _,
+            identity_layer,
+            member_layer,
+        } => {
+            anyhow::ensure!(
+                member_layer.pattern.is_none() && member_layer.length.is_none(),
+                "enum base cannot contain member constraints"
+            );
+            refinement_layers(
+                true,
+                string_constraints(identity_layer.pattern, identity_layer.length),
+                vec![],
+            )
         }
-        | RawShape::Reference {
-            identity: _,
-            pattern,
-            length,
+        RawShape::Reference {
+            pattern, length, ..
         } => string_constraints(pattern, length),
         RawShape::Int {
-            identity: _,
-            range,
-            validate: _,
-        } => number_constraints(range),
+            identity_layer,
+            member_layer,
+        } => {
+            anyhow::ensure!(
+                member_layer.range.is_none(),
+                "enum base cannot contain member constraints"
+            );
+            refinement_layers(true, number_constraints(identity_layer.range), vec![])
+        }
         RawShape::Float {
             identity: _,
             range,
@@ -576,6 +610,7 @@ fn enum_base_refinements<R: PatternForm>(
             name: _,
             fields: _,
             field_groups: _,
+            input_rules: _,
         }
         | RawShape::List {
             element_type: _,

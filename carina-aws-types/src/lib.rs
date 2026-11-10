@@ -18,11 +18,13 @@ mod assume_role;
 mod catalog;
 mod common;
 mod host_credentials;
+mod identity_definition;
 pub mod kms_reference;
 mod read_back;
 pub mod sdk;
 mod sdk_config;
 mod services;
+pub use identity_definition::IdentityDefinition;
 
 /// Implementation details used by exported catalog macros.
 #[doc(hidden)]
@@ -54,7 +56,7 @@ mod tests {
     pub(crate) struct TestRootlessType(RootlessType);
 
     impl TestRootlessType {
-        fn validate(&self, value: &Value) -> Result<(), carina_core::schema::TypeError> {
+        pub(crate) fn validate(&self, value: &Value) -> Result<(), carina_core::schema::TypeError> {
             self.0.validate(value)
         }
 
@@ -194,8 +196,10 @@ mod tests {
     }
 
     fn assert_refined_string_identity(attr: &AttributeType, expected: &str) {
-        if let carina_core::schema::Shape::String { identity, .. } =
-            attr.shape_ref_free().expect("test schema is Ref-free")
+        if let carina_core::schema::Shape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+            ..
+        } = attr.shape_ref_free().expect("test schema is Ref-free")
         {
             assert_eq!(identity.map(|id| id.to_string()).as_deref(), Some(expected));
         } else {
@@ -522,13 +526,17 @@ mod tests {
     }
 
     #[test]
-    fn aws_account_id_carries_pattern_and_length() {
+    fn aws_account_id_owns_pattern_and_length_in_its_callback() {
         let t = aws_account_id();
         if let carina_core::schema::Shape::String {
-            identity,
-            pattern,
-            length,
-            to_dsl: None,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    to_dsl: None,
+                    ..
+                },
             ..
         } = t.shape_ref_free().expect("test schema is Ref-free")
         {
@@ -536,23 +544,26 @@ mod tests {
                 identity.map(|id| id.to_string()).as_deref(),
                 Some("aws.AccountId")
             );
-            assert_eq!(
-                pattern.map(carina_core::schema::PatternSpec::as_str),
-                Some(r"^\d{12}$")
+            assert!(
+                pattern.is_some() && length == Some((Some(12), Some(12))),
+                "identity layer owns the policy"
             );
-            assert_eq!(length, Some((Some(12), Some(12))));
         } else {
             panic!("aws_account_id() should be refined String");
         }
     }
 
     #[test]
-    fn vpc_id_carries_identity_and_pattern() {
+    fn vpc_id_carries_identity_and_callback_owned_pattern() {
         let t = vpc_id();
         if let carina_core::schema::Shape::String {
-            identity,
-            pattern,
-            to_dsl: None,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    to_dsl: None,
+                    ..
+                },
             ..
         } = t.shape_ref_free().expect("test schema is Ref-free")
         {
@@ -560,7 +571,10 @@ mod tests {
                 identity.map(|id| id.to_string()).as_deref(),
                 Some("aws.ec2.Vpc.Id")
             );
-            assert!(pattern.is_some(), "VpcId should carry a pattern");
+            assert_eq!(
+                pattern.map(carina_core::schema::PatternSpec::as_str),
+                Some("^vpc-[0-9a-f]{8,}$")
+            );
         } else {
             panic!("vpc_id() should be refined String");
         }
@@ -1749,16 +1763,19 @@ mod tests {
         let attr = route53_hosted_zone_id();
         assert_refined_string_identity(&attr, "aws.route53.HostedZone.Id");
         let carina_core::schema::Shape::String {
-            pattern, length, ..
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    pattern, length, ..
+                },
+            ..
         } = attr.shape_ref_free().expect("test schema is Ref-free")
         else {
             panic!("expected refined String");
         };
-        assert_eq!(
-            pattern.map(carina_core::schema::PatternSpec::as_str),
-            Some(r"^Z[A-Z0-9]+$")
+        assert!(
+            pattern.is_some() && length == Some((None, Some(32))),
+            "identity layer owns both constraints"
         );
-        assert_eq!(length, Some((None, Some(32))));
 
         let schema = rootless(attr);
         for hosted_zone_id in ["Z05136711ZXUHBDOA8D5O", "Z2FDTNDATAQYW2", "Z14GRHDCWA56QT"] {
@@ -1868,7 +1885,7 @@ mod tests {
         )));
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not match required pattern"));
+        assert!(err.contains("Grantee") && err.contains("pattern"));
     }
 
     // --- Condition operator tests ---

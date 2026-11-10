@@ -19,18 +19,27 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
             .with_description("Describes an egress-only internet gateway.")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::required("vpc_id", super::vpc_id())
-                    .create_only()
-                    .with_description(
-                        "The ID of the VPC for which to create the egress-only internet gateway.",
-                    )
-                    .with_provider_name("VpcId")
-                    .build(),
+                AttributeSchema::required(
+                    "vpc_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::VpcId.attribute_type(),
+                    ),
+                )
+                .create_only()
+                .with_description(
+                    "The ID of the VPC for which to create the egress-only internet gateway.",
+                )
+                .with_provider_name("VpcId")
+                .build(),
             )
             .attribute(
                 AttributeSchema::provider_populated(
                     "egress_only_internet_gateway_id",
-                    super::egress_only_internet_gateway_id(),
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::EgressOnlyInternetGatewayId.attribute_type(),
+                    ),
                 )
                 .with_description("The ID of the egress-only internet gateway. (read-only)")
                 .with_provider_name("EgressOnlyInternetGatewayId")

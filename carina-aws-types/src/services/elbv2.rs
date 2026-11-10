@@ -20,18 +20,22 @@ pub fn elbv2_health_check_port() -> AttributeType {
     )
 }
 
-pub(crate) fn elbv2_matcher_codes(identity: TypeIdentity, min: u16, max: u16) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+pub(crate) fn elbv2_matcher_codes(
+    identity: TypeIdentity,
+    min: u16,
+    max: u16,
+) -> crate::IdentityDefinition {
+    crate::IdentityDefinition::string(
         identity,
         None,
         None,
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 validate_matcher_codes(value.expose_plaintext(), min, max).map_err(Into::into)
             } else {
                 Err("Expected string".into())
             }
-        }),
+        })),
         None,
     )
 }
@@ -77,10 +81,14 @@ mod tests {
     fn elbv2_health_check_port_is_anonymous_and_validates_whole_strings() {
         let attr = elbv2_health_check_port();
         let RawShape::String {
-            identity,
-            pattern: Some(pattern),
-            length,
-            validate,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern: Some(pattern),
+                    length,
+                    validate,
+                    ..
+                },
             ..
         } = attr.raw_shape()
         else {
@@ -141,7 +149,11 @@ mod tests {
     fn elbv2_health_check_port_pattern_covers_every_port() {
         let attr = elbv2_health_check_port();
         let RawShape::String {
-            pattern: Some(pattern),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    pattern: Some(pattern),
+                    ..
+                },
             ..
         } = attr.raw_shape()
         else {

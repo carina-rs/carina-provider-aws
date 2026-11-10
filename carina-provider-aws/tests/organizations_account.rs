@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -30,17 +33,19 @@ fn organizations_account_refinements_use_iam_role_identity_and_anonymous_account
                 r"^[A-Za-z0-9_+=,.@-]+\z",
                 64,
             ),
-            ("account_name", None, r"^[ -;=?-~]+\z", 50),
+            ("account_name", None, r"^[\u0020-\u007E]+$", 50),
         ] {
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
+                identity_layer,
+                member_layer,
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {
                 panic!("{field} must remain a String");
             };
+            let identity = identity_layer.identity;
+            let pattern = identity_layer.pattern.or(member_layer.pattern);
+            let length =
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
             assert_eq!(
                 identity.map(ToString::to_string).as_deref(),
                 expected_identity,
@@ -65,9 +70,13 @@ fn organizations_account_id_and_arn_use_shared_catalog_types_after_protocol_roun
         ] {
             let expected = row.attribute_type();
             let RawShape::String {
-                identity: expected_identity,
-                pattern: expected_pattern,
-                length: expected_length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: expected_identity,
+                        pattern: expected_pattern,
+                        length: expected_length,
+                        ..
+                    },
                 ..
             } = expected.raw_shape()
             else {
@@ -75,15 +84,12 @@ fn organizations_account_id_and_arn_use_shared_catalog_types_after_protocol_roun
             };
             let attribute = schema.effective_attribute(field).unwrap();
             assert!(attribute.is_read_only());
-            let RawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
-            } = attribute.field_type().raw_shape()
-            else {
+            let RawShape::String { identity_layer, .. } = attribute.field_type().raw_shape() else {
                 panic!("{field} must be a String");
             };
+            let identity = identity_layer.identity;
+            let pattern = identity_layer.pattern;
+            let length = identity_layer.length;
             assert_eq!(identity, expected_identity, "{field}");
             assert_eq!(pattern, expected_pattern, "{field}");
             assert_eq!(length, expected_length, "{field}");
@@ -108,7 +114,8 @@ fn organizations_account_name_validates_create_and_rename_constraints() {
         ) {
             let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
             assert!(
-                name.validate(&value).is_ok(),
+                name.validate(&value).is_ok()
+                    && input_patterns::accept(&schema, "account_name", &valid),
                 "valid account name: {valid:?}"
             );
         }
@@ -130,7 +137,8 @@ fn organizations_account_name_validates_create_and_rename_constraints() {
         ] {
             let value: Value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
             assert!(
-                name.validate(&value).is_err(),
+                name.validate(&value).is_err()
+                    || !input_patterns::accept(&schema, "account_name", &invalid),
                 "invalid account name: {invalid:?}"
             );
         }
@@ -142,14 +150,20 @@ fn organizations_account_email_has_named_bounds_and_timestamp_stays_string() {
     for schema in organizations_account_schemas() {
         let email = schema.effective_attribute("email").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
+            identity_layer,
+            member_layer,
         } = email.field_type().raw_shape()
         else {
             panic!("email must use the shared Organizations Email type");
         };
+        let identity = identity_layer.identity;
+        let pattern = identity_layer.pattern;
+        assert!(
+            member_layer.pattern.is_some(),
+            "Smithy Email pattern stays on the slot"
+        );
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert_eq!(
             identity.unwrap().to_string(),
             "aws.organizations.Account.Email"
@@ -166,16 +180,18 @@ fn organizations_account_email_has_named_bounds_and_timestamp_stays_string() {
             assert!(email.validate(&value).is_ok(), "plus addressing: {valid}");
         }
         let RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
+            identity_layer,
+            member_layer,
         } = schema.parts().attributes["joined_timestamp"]
             .attr_type()
             .raw_shape()
         else {
             panic!("joined_timestamp must remain a plain String pending real-AWS reads");
         };
+        let identity = identity_layer.identity;
+        let pattern = member_layer.pattern.or(identity_layer.pattern);
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert!(identity.is_none());
         assert!(pattern.is_none());
         assert!(length.is_none());
@@ -289,7 +305,11 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             "source.description",
             Some("expected aws.iam.Role.Name, got String"),
         ),
-        ("account_name", "source.description", None),
+        (
+            "account_name",
+            "source.description",
+            Some("cannot assign String"),
+        ),
     ] {
         let sink_fields = if field == "role_name" {
             format!("account_name = 'registry-prod'\nrole_name = {expression}")

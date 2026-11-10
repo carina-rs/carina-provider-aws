@@ -7,27 +7,39 @@ pub fn with_int_range(
     minimum: Option<i64>,
     maximum: Option<i64>,
 ) -> AttributeType {
+    use carina_core::schema::{IntIdentityLayer, IntMemberConstraints, intersect_bounds};
     let RawShape::Int {
-        identity,
-        range,
-        validate,
+        identity_layer,
+        member_layer,
     } = attribute_type.raw_shape()
     else {
-        panic!("integer bounds require an Int constructor");
+        panic!("integer bounds require an Int constructor")
     };
-    let (old_minimum, old_maximum) = range.unwrap_or((None, None));
-    let range = Some((
-        old_minimum.into_iter().chain(minimum).max(),
-        old_maximum.into_iter().chain(maximum).min(),
-    ));
-    match validate {
-        Some(validate) => AttributeType::refined_int_with_validator(
-            identity.expect("a validated Int has an identity").clone(),
-            range,
-            validate.clone(),
+    let old = if identity_layer.identity.is_none() {
+        intersect_bounds(identity_layer.range, member_layer.range)
+    } else {
+        member_layer.range
+    };
+    let range = intersect_bounds(old, Some((minimum, maximum)));
+    let definition = match identity_layer.validate {
+        Some(check) => IntIdentityLayer::with_validator(
+            identity_layer
+                .identity
+                .expect("validated Int identity")
+                .clone(),
+            identity_layer.range,
+            check.clone(),
         ),
-        None => AttributeType::refined_int(identity.cloned(), range),
-    }
+        None => IntIdentityLayer::new(
+            identity_layer.identity.cloned(),
+            if identity_layer.identity.is_none() {
+                None
+            } else {
+                identity_layer.range
+            },
+        ),
+    };
+    AttributeType::int_member(definition, IntMemberConstraints::new(range))
 }
 
 /// Anonymous signed 32-bit carrier for authored helpers that model Smithy
@@ -49,9 +61,11 @@ mod tests {
     fn wire_bounds_intersect_existing_ranges_and_preserve_semantic_validation() {
         let bounded = with_int_range(crate::logs_log_group_retention_in_days(), Some(3), Some(90));
         let RawShape::Int {
-            identity,
-            range,
-            validate,
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity, validate, ..
+                },
+            member_layer: carina_core::schema::IntMemberParts { range },
         } = bounded.raw_shape()
         else {
             panic!("bounded Int");
@@ -83,7 +97,9 @@ mod tests {
         assert!(matches!(
             narrower.raw_shape(),
             RawShape::Int {
-                range: Some((Some(1), Some(100))),
+                member_layer: carina_core::schema::IntMemberParts {
+                    range: Some((Some(1), Some(100)))
+                },
                 ..
             }
         ));

@@ -8,7 +8,10 @@ use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 pub fn arn() -> AttributeType {
-    super::s3_bucket_arn()
+    carina_aws_types::with_member_identity(
+        AttributeType::string(),
+        carina_aws_types::AwsType::S3BucketArn.attribute_type(),
+    )
 }
 
 /// Returns the schema config for s3.Bucket (Smithy: com.amazonaws.s3)
@@ -27,10 +30,16 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::provider_populated("arn", self::arn())
-                    .with_description("ARN of the bucket.")
-                    .with_provider_name("")
-                    .build(),
+                AttributeSchema::provider_populated(
+                    "arn",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::S3BucketArn.attribute_type(),
+                    ),
+                )
+                .with_description("ARN of the bucket.")
+                .with_provider_name("")
+                .build(),
             )
             .attribute(
                 AttributeSchema::provider_populated("region", AttributeType::string())
@@ -41,7 +50,13 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::provider_populated(
                     "bucket_domain_name",
-                    carina_aws_types::route53_dns_name(),
+                    AttributeType::string_member(
+                        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+                        carina_core::schema::StringMemberConstraints::new(
+                            None,
+                            Some((Some(1), Some(1024))),
+                        ),
+                    ),
                 )
                 .with_description("Bucket domain name (`<bucket>.s3.amazonaws.com`).")
                 .with_provider_name("")
@@ -50,7 +65,13 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::provider_populated(
                     "bucket_regional_domain_name",
-                    carina_aws_types::route53_dns_name(),
+                    AttributeType::string_member(
+                        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+                        carina_core::schema::StringMemberConstraints::new(
+                            None,
+                            Some((Some(1), Some(1024))),
+                        ),
+                    ),
                 )
                 .with_description(
                     "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
@@ -61,7 +82,10 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::provider_populated(
                     "hosted_zone_id",
-                    super::route53_hosted_zone_id(),
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::Route53HostedZoneId.attribute_type(),
+                    ),
                 )
                 .with_description("Route 53 Hosted Zone ID for the bucket's region.")
                 .with_provider_name("")

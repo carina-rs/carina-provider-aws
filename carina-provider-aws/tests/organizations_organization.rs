@@ -24,20 +24,22 @@ fn organizations_organization_id_is_anonymous_and_validates_smithy_bounds() {
     for schema in organizations_organization_schemas() {
         let id = schema.effective_attribute("id").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
+            identity_layer,
+            member_layer,
         } = id.field_type().raw_shape()
         else {
             panic!("id must be String");
         };
+        let identity = identity_layer.identity;
+        let pattern = member_layer.pattern.or(identity_layer.pattern);
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert!(identity.is_none());
         assert_eq!(
             pattern.map(carina_core::schema::PatternSpec::as_str),
-            Some(r"^o-[a-z0-9]{10,32}\z")
+            Some(r"^o-[a-z0-9]{10,32}$")
         );
-        assert_eq!(length, Some((Some(12), Some(34))));
+        assert_eq!(length, None, "Smithy encodes this bound in the pattern");
         for valid in ["o-0123456789".to_string(), format!("o-{}", "a".repeat(32))] {
             let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
             assert!(
@@ -79,9 +81,13 @@ fn organizations_organization_account_outputs_use_matching_catalog_identities() 
         ] {
             let expected = row.attribute_type();
             let RawShape::String {
-                identity: expected_identity,
-                pattern: expected_pattern,
-                length: expected_length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: expected_identity,
+                        pattern: expected_pattern,
+                        length: expected_length,
+                        ..
+                    },
                 ..
             } = expected.raw_shape()
             else {
@@ -89,15 +95,12 @@ fn organizations_organization_account_outputs_use_matching_catalog_identities() 
             };
             let attribute = schema.effective_attribute(field).unwrap();
             assert!(attribute.is_read_only());
-            let RawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
-            } = attribute.field_type().raw_shape()
-            else {
+            let RawShape::String { identity_layer, .. } = attribute.field_type().raw_shape() else {
                 panic!("{field} must be a String");
             };
+            let identity = identity_layer.identity;
+            let pattern = identity_layer.pattern;
+            let length = identity_layer.length;
             assert_eq!(identity, expected_identity, "{field}");
             assert_eq!(pattern, expected_pattern, "{field}");
             assert_eq!(length, expected_length, "{field}");
@@ -197,14 +200,20 @@ fn organizations_organization_email_uses_output_bounds_without_creation_only_res
     for schema in organizations_organization_schemas() {
         let email = schema.effective_attribute("master_account_email").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
-            ..
+            identity_layer,
+            member_layer,
         } = email.field_type().raw_shape()
         else {
             panic!("master_account_email must share Organizations Account Email");
         };
+        let identity = identity_layer.identity;
+        let pattern = identity_layer.pattern;
+        assert!(
+            member_layer.pattern.is_some(),
+            "Smithy Email pattern stays on the slot"
+        );
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert_eq!(
             identity.unwrap().to_string(),
             "aws.organizations.Account.Email"

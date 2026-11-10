@@ -20,18 +20,30 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .with_description("Describes a security group rule.")
             .with_conflicting_replacement()
             .attribute(
-                AttributeSchema::optional("cidr_ip", types::ipv4_cidr())
-                    .create_only()
-                    .with_description("Not supported. Use IP permissions instead.")
-                    .with_provider_name("CidrIp")
-                    .build(),
+                AttributeSchema::optional(
+                    "cidr_ip",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        types::ipv4_cidr(),
+                    ),
+                )
+                .create_only()
+                .with_description("Not supported. Use IP permissions instead.")
+                .with_provider_name("CidrIp")
+                .build(),
             )
             .attribute(
-                AttributeSchema::optional("cidr_ipv6", types::ipv6_cidr())
-                    .create_only()
-                    .with_description("The IPv6 CIDR range.")
-                    .with_provider_name("CidrIpv6")
-                    .build(),
+                AttributeSchema::optional(
+                    "cidr_ipv6",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        types::ipv6_cidr(),
+                    ),
+                )
+                .create_only()
+                .with_description("The IPv6 CIDR range.")
+                .with_provider_name("CidrIpv6")
+                .build(),
             )
             .attribute(
                 AttributeSchema::optional("description", AttributeType::string())
@@ -41,16 +53,28 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     .build(),
             )
             .attribute(
-                AttributeSchema::optional("destination_prefix_list_id", super::prefix_list_id())
-                    .create_only()
-                    .with_description("The ID of the destination prefix list.")
-                    .with_provider_name("DestinationPrefixListId")
-                    .build(),
+                AttributeSchema::optional(
+                    "destination_prefix_list_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::PrefixListId.attribute_type(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the destination prefix list.")
+                .with_provider_name("DestinationPrefixListId")
+                .build(),
             )
             .attribute(
                 AttributeSchema::optional(
                     "from_port",
-                    AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
+                    AttributeType::int_member(
+                        carina_core::schema::IntIdentityLayer::new(None, None),
+                        carina_core::schema::IntMemberConstraints::new(Some((
+                            Some(-1),
+                            Some(65535),
+                        ))),
+                    ),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
@@ -58,11 +82,17 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                 .build(),
             )
             .attribute(
-                AttributeSchema::required("group_id", super::security_group_id())
-                    .create_only()
-                    .with_description("The ID of the security group.")
-                    .with_provider_name("GroupId")
-                    .build(),
+                AttributeSchema::required(
+                    "group_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::SecurityGroupId.attribute_type(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the security group.")
+                .with_provider_name("GroupId")
+                .build(),
             )
             .attribute(
                 AttributeSchema::required(
@@ -98,7 +128,10 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::optional(
                     "source_security_group_owner_id",
-                    super::aws_account_id(),
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::AccountId.attribute_type(),
+                    ),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
@@ -108,7 +141,13 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::optional(
                     "to_port",
-                    AttributeType::refined_int(None, Some((Some(-1), Some(65535)))),
+                    AttributeType::int_member(
+                        carina_core::schema::IntIdentityLayer::new(None, None),
+                        carina_core::schema::IntMemberConstraints::new(Some((
+                            Some(-1),
+                            Some(65535),
+                        ))),
+                    ),
                 )
                 .create_only()
                 .with_description("Not supported. Use IP permissions instead.")
@@ -118,7 +157,10 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::optional(
                     "destination_security_group_id",
-                    super::security_group_id(),
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::SecurityGroupId.attribute_type(),
+                    ),
                 )
                 .create_only()
                 .with_description("The ID of the destination security group.")
@@ -128,7 +170,10 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
             .attribute(
                 AttributeSchema::provider_populated(
                     "security_group_rule_id",
-                    super::security_group_rule_id(),
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::SecurityGroupRuleId.attribute_type(),
+                    ),
                 )
                 .with_description("The ID of the security group rule. (read-only)")
                 .with_provider_name("SecurityGroupRuleId")

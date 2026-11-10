@@ -96,10 +96,7 @@ fn test_egress(
         .expect("test consent matches guest")
 }
 
-async fn guest_normalizer() -> (
-    carina_core::provider::ConfiguredNormalizer,
-    tempfile::TempDir,
-) {
+async fn guest_factory() -> (WasmProviderFactory, tempfile::TempDir) {
     let path = std::env::var_os("CARINA_AWS_WASM")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -124,6 +121,14 @@ async fn guest_normalizer() -> (
     )
     .await
     .expect("load the built AWS component");
+    (factory, cache)
+}
+
+async fn guest_normalizer() -> (
+    carina_core::provider::ConfiguredNormalizer,
+    tempfile::TempDir,
+) {
+    let (factory, cache) = guest_factory().await;
     let mut parsed = ExpandedInferredFile::default();
     parsed.providers = vec![ProviderConfig {
         name: "aws".into(),
@@ -331,5 +336,87 @@ async fn wasm_guest_normalizes_mixed_leaves_restores_deferred_values_and_maps_er
             .map(|resource| resource.attributes.clone())
             .collect::<Vec<_>>(),
         normalized
+    );
+}
+
+/// Identity constraints survive transport and semantic validation crosses the
+/// WIT boundary into the real guest's SDK cache. Loading admits every schema,
+/// including the Smithy-constrained built-in Email list element.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the built wasm32-wasip2 AWS guest; CI runs all ignored guest tests"]
+async fn wasm_guest_dispatches_identity_layers_and_semantic_validation() {
+    use carina_core::parser::{
+        CustomTypeValidationTarget, IdentifiedCustomTypeDeclaration, validate_custom_type_value,
+    };
+    use carina_core::provider::ProviderFactory;
+    use carina_core::schema::RawShape;
+    let (factory, _cache) = guest_factory().await;
+    let schemas = factory.schemas();
+    let factories: Vec<Box<dyn ProviderFactory>> = vec![Box::new(factory)];
+    let loaded = carina_core::provider::loaded_provider_snapshot_from_factories(
+        Arc::new(factories),
+        carina_core::schema::SchemaRegistry::new(),
+        carina_core::EnvironmentSnapshot::empty(),
+    );
+    let check = |resource: &str, attribute: &str, value: &str| {
+        let schema = schemas
+            .iter()
+            .find(|s| s.parts().resource_type == resource)
+            .unwrap();
+        let ty = schema.parts().attributes[attribute].attr_type();
+        let RawShape::String { identity_layer, .. } = ty.raw_shape() else {
+            panic!("String")
+        };
+        assert!(
+            identity_layer.pattern.is_some() && identity_layer.validate.is_none(),
+            "portable identity metadata survives; executable callbacks stay in the guest"
+        );
+        let declaration = IdentifiedCustomTypeDeclaration::new(ty).unwrap();
+        let value = string(value);
+        let known = value
+            .knowledge(&carina_core::resource::knowledge::KnowledgeContext::validation())
+            .unwrap()
+            .into_classification()
+            .into_known()
+            .unwrap();
+        validate_custom_type_value(
+            loaded.provider_context().custom_type_resolver(),
+            CustomTypeValidationTarget::Declaration {
+                owner: "aws",
+                declaration,
+            },
+            &known,
+        )
+        .map_err(Box::new)
+    };
+    for (resource, attribute, bad, good) in [
+        ("s3.Bucket", "hosted_zone_id", "/hostedzone/Z0", "Z012345"),
+        ("ec2.Subnet", "vpc_id", "vpc-ABCDEF12", "vpc-abcdef12"),
+        (
+            "iam.Role",
+            "arn",
+            "arn:aws:iam::123:role/a",
+            "arn:aws:iam::123456789012:role/a",
+        ),
+    ] {
+        let error = check(resource, attribute, bad).unwrap_err();
+        if resource == "iam.Role" {
+            assert!(
+                matches!(
+                    *error,
+                    carina_core::parser::CustomTypeValidationError::ProviderRejected { .. }
+                ),
+                "{error}"
+            );
+        }
+        check(resource, attribute, good).unwrap();
+    }
+    assert!(
+        check(
+            "s3.Bucket",
+            "hosted_zone_id",
+            &format!("Z{}", "A".repeat(39))
+        )
+        .is_err()
     );
 }

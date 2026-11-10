@@ -570,36 +570,31 @@ fn s3_website_index_suffix_is_nonempty_without_slashes() {
 }
 
 #[test]
-fn s3_bucket_domain_outputs_use_the_shared_route53_dns_contract() {
-    let shared = carina_aws_types::route53_dns_name();
-    let RawShape::String {
-        pattern: shared_pattern,
-        length: shared_length,
-        ..
-    } = shared.raw_shape()
-    else {
-        panic!("shared DNS String");
-    };
+fn s3_bucket_domain_outputs_preserve_bounds_without_the_removed_anonymous_pattern() {
     for path in ["bucket_domain_name", "bucket_regional_domain_name"] {
         for schema in schemas("Bucket") {
             let ty = field(&schema, path);
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                ..
+                identity_layer,
+                member_layer,
             } = ty.as_type().raw_shape()
             else {
                 panic!("DNS String");
             };
+            let identity = identity_layer.identity;
+            let pattern = member_layer.pattern.or(identity_layer.pattern);
+            let length =
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
             assert!(identity.is_none());
-            assert_eq!(pattern, shared_pattern);
-            assert_eq!(length, shared_length);
+            assert!(
+                pattern.is_none(),
+                "approved anonymous-output pattern removal"
+            );
+            assert_eq!(length, Some((Some(1), Some(1024))));
+            assert!(ty.validate(&string("a..example.com")).is_ok());
+            assert!(ty.validate(&string("")).is_err());
         }
     }
-    // The shared DNS contract caps labels at 63 bytes. Synthesized domains
-    // for pre-2018 bucket labels longer than 63 bytes need separate treatment;
-    // this test does not silently give the S3 outputs a different DNS contract.
 }
 
 #[test]

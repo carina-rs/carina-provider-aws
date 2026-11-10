@@ -26,16 +26,16 @@ pub fn validate_iam_policy_name(name: &str) -> Result<(), String> {
     validate_iam_name(name, 128)
 }
 
-/// Shared anonymous IAM pathType, including the root path '/'.
-/// Source: carina-provider-aws/tests/fixtures/smithy/iam.json, pathType:
-/// length 1..512; `^(\u002F)|(\u002F[\u0021-\u007E]+\u002F)$`.
+/// Established whole-value IAM path check, including the root path '/'.
+/// Smithy's pathType has a looser alternation (`^(/)|(/.../)$`); member
+/// derivation preserves that search and applies this check as an input rule.
+pub const IAM_PATH_PATTERN: &str = r"^(?:/|/[\x21-\x7E]+/)\z";
+
+/// Shared standalone anonymous IAM path, with length 1..512.
 pub fn iam_path() -> AttributeType {
     AttributeType::refined_string(
         None,
-        Some(PatternSpec::new(
-            r"^(?:/|/[\x21-\x7E]+/)\z",
-            PatternMatch::Full,
-        )),
+        Some(PatternSpec::new(IAM_PATH_PATTERN, PatternMatch::Full)),
         Some((Some(1), Some(512))),
         None,
     )
@@ -80,10 +80,14 @@ mod tests {
             (iam_path_prefix(), r"^/[\x21-\x7F]*\z"),
         ] {
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                validate,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        validate,
+                        ..
+                    },
                 ..
             } = attr.raw_shape()
             else {

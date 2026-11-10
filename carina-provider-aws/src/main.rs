@@ -1100,7 +1100,11 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "ec2.VpnGateway")
             .unwrap();
         let RawShape::Int {
-            identity: Some(identity),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    ..
+                },
             ..
         } = vgw.parts().attributes["amazon_side_asn"]
             .attr_type()
@@ -1208,10 +1212,18 @@ mod tests {
     ) {
         match attribute_type.raw_shape() {
             RawShape::String {
-                identity, validate, ..
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity, validate, ..
+                    },
+                ..
             }
             | RawShape::Int {
-                identity, validate, ..
+                identity_layer:
+                    carina_core::schema::IntIdentityParts {
+                        identity, validate, ..
+                    },
+                ..
             }
             | RawShape::Float {
                 identity, validate, ..
@@ -1278,6 +1290,7 @@ mod tests {
                 "",
                 "__carina_sdk_bridge_probe__",
                 "not-an-arn",
+                "sg-reserved",
                 "0",
                 "xn--carina588.carina-rs.dev",
                 "ab--carina588.carina-rs.dev",
@@ -1555,7 +1568,7 @@ mod tests {
         let provider = AwsProcessProvider::new();
         let expected_schema_count = carina_provider_aws::schemas::generated::configs().len();
         let cache = ProviderSchemaCache::from_provider(&provider)
-            .expect("every AWS resource and config schema must pass v12 admission");
+            .expect("every AWS resource and config schema must pass protocol 27 admission");
 
         assert_eq!(cache.schemas().len(), expected_schema_count);
         let mut bindings = BTreeMap::new();
@@ -1632,10 +1645,14 @@ mod tests {
                 .find(|schema| schema.parts().resource_type == resource)
                 .unwrap();
             let RawShape::String {
-                identity: Some(identity),
-                pattern,
-                length,
-                validate: Some(_),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(identity),
+                        pattern,
+                        length,
+                        validate: Some(_),
+                        ..
+                    },
                 ..
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {
@@ -1654,21 +1671,33 @@ mod tests {
             dispatch_custom_type_validation(&cache, &identity, &valid)
                 .unwrap_or_else(|error| panic!("valid email {valid:?}: {error}"));
         }
-        for invalid in [
-            "a@b.c".to_string(),
-            format!("{}@b.com", "a".repeat(59)),
-            "not-an-email".to_string(),
-            "user@b..com".to_string(),
-        ] {
+        for invalid in ["not-an-email", "user@b..com"] {
             assert!(
-                dispatch_custom_type_validation(&cache, &identity, &invalid).is_err(),
-                "invalid email: {invalid}"
+                dispatch_custom_type_validation(&cache, &identity, invalid).is_err(),
+                "invalid semantic email: {invalid}"
+            );
+        }
+        let field = cache
+            .schemas()
+            .iter()
+            .find(|s| s.parts().resource_type == "organizations.Account")
+            .unwrap()
+            .effective_attribute("email")
+            .unwrap();
+        for outside_length in ["a@b.c".to_string(), format!("{}@b.com", "a".repeat(59))] {
+            dispatch_custom_type_validation(&cache, &identity, &outside_length)
+                .expect("semantic-only callback");
+            let input: CoreValue =
+                CoreValue::Concrete(ConcreteValue::String(outside_length.into()));
+            assert!(
+                field.validate(&input).is_err(),
+                "portable identity length is enforced alongside the callback"
             );
         }
     }
 
     #[test]
-    fn iam_role_name_witness_dispatches_through_the_sdk_bridge() {
+    fn iam_role_name_identity_constraints_are_portable() {
         let provider = AwsProcessProvider::new();
         let cache = ProviderSchemaCache::from_provider(&provider)
             .expect("AWS schemas must build a dispatch table");
@@ -1680,10 +1709,14 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "iam.Role")
             .expect("generated Role schema");
         let RawShape::String {
-            identity: Some(identity),
-            pattern,
-            length,
-            validate: Some(_),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    pattern,
+                    length,
+                    validate: None,
+                    ..
+                },
             ..
         } = role.parts().attributes["role_name"].attr_type().raw_shape()
         else {
@@ -1695,6 +1728,7 @@ mod tests {
             Some(r"^[A-Za-z0-9_+=,.@-]+\z")
         );
         assert_eq!(length, Some((Some(1), Some(64))));
+        let field = role.effective_attribute("role_name").unwrap();
         let identity = wire_identity(&expected);
         for valid in [
             row.valid_sample().to_string(),
@@ -1712,8 +1746,12 @@ mod tests {
             "valid\n".to_string(),
             "rôle".to_string(),
         ] {
+            dispatch_custom_type_validation(&cache, &identity, &invalid)
+                .expect("no semantic callback needed");
+            let input: CoreValue =
+                CoreValue::Concrete(ConcreteValue::String(invalid.clone().into()));
             assert!(
-                dispatch_custom_type_validation(&cache, &identity, &invalid).is_err(),
+                field.validate(&input).is_err(),
                 "invalid role name {invalid:?}"
             );
         }
@@ -1732,9 +1770,14 @@ mod tests {
             .find(|schema| schema.parts().resource_type == "logs.LogGroup")
             .expect("generated LogGroup schema");
         let RawShape::Int {
-            identity: Some(identity),
-            range: None,
-            validate: Some(_),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    range: None,
+                    validate: Some(_),
+                    ..
+                },
+            ..
         } = logs.parts().attributes["retention_in_days"]
             .attr_type()
             .raw_shape()

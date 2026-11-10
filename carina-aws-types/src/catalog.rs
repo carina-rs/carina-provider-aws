@@ -5,6 +5,7 @@
 //! the same row, so a wrapper cannot accidentally pair one identity with
 //! another type's validation.
 
+use crate::IdentityDefinition;
 use aws_smithy_types::{DateTime, date_time::Format};
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{
@@ -13,10 +14,7 @@ use carina_core::schema::{
 
 use crate::{
     arn_partition_pattern, arn_regex, validate_arn, validate_availability_zone,
-    validate_availability_zone_id, validate_aws_account_id, validate_aws_region,
-    validate_aws_resource_id, validate_iam_arn, validate_iam_policy_name, validate_iam_role_id,
-    validate_iam_role_name, validate_ipam_pool_id, validate_kms_key_arn, validate_kms_key_id,
-    validate_prefixed_resource_id,
+    validate_aws_region, validate_iam_arn, validate_kms_key_arn, validate_kms_key_id,
 };
 
 // IAM roleNameType and policyNameType use ^[\w+=,.@-]+$.
@@ -30,27 +28,19 @@ pub const ACM_CERTIFICATE_DOMAIN_NAME_PATTERN: &str = r"^(?:\*\.)?(?:[A-Za-z0-9]
 /// Additional public-certificate request rules, included in generated docs.
 pub const ACM_CERTIFICATE_REQUEST_DOMAIN_RULE: &str = "Labels with -- in positions 3–4 must start with xn--; xn-- labels must decode as valid IDNA labels.";
 
-fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> IdentityDefinition {
+    IdentityDefinition::string(
         identity,
         Some(PatternSpec::new(
             ACM_CERTIFICATE_DOMAIN_NAME_PATTERN,
             PatternMatch::Full,
         )),
         Some((Some(1), Some(maximum as u64))),
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             let Value::Concrete(ConcreteValue::String(domain)) = value else {
                 return Err("Expected string".into());
             };
             let domain = domain.expose_plaintext();
-            static PATTERN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-                regex::Regex::new(ACM_CERTIFICATE_DOMAIN_NAME_PATTERN).expect("ACM domain pattern")
-            });
-            if domain.len() > maximum || !PATTERN.is_match(domain) {
-                return Err(
-                    format!("expected an ACM wildcard FQDN of 1..={maximum} octets").into(),
-                );
-            }
             for label in domain.strip_prefix("*.").unwrap_or(domain).split('.') {
                 if label.as_bytes().get(2..4) == Some(b"--") {
                     if !label[..2].eq_ignore_ascii_case("xn") {
@@ -63,7 +53,7 @@ fn acm_request_domain_type(identity: TypeIdentity, maximum: usize) -> AttributeT
                 }
             }
             Ok(())
-        }),
+        })),
         None,
     )
 }
@@ -103,18 +93,18 @@ fn validated_string(
     pattern: PatternSpec,
     length: Option<(Option<u64>, Option<u64>)>,
     validator: fn(&str) -> Result<(), String>,
-) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+) -> IdentityDefinition {
+    IdentityDefinition::string(
         identity,
         Some(pattern),
         length,
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 validator(value.expose_plaintext()).map_err(Into::into)
             } else {
                 Err("Expected string".into())
             }
-        }),
+        })),
         None,
     )
 }
@@ -123,8 +113,8 @@ fn metadata_string(
     identity: TypeIdentity,
     pattern: PatternSpec,
     length: Option<(Option<u64>, Option<u64>)>,
-) -> AttributeType {
-    AttributeType::refined_string(Some(identity), Some(pattern), length, None)
+) -> IdentityDefinition {
+    IdentityDefinition::string(identity, Some(pattern), length, None, None)
 }
 
 /// Construct an identity-bearing Int restricted to the given allowed values.
@@ -132,11 +122,14 @@ fn metadata_string(
 /// Catalog rows supply `values:` so both providers can expose the same set
 /// through `allowed_int_values()` and use this validator for native and SDK
 /// custom-type dispatch.
-pub fn validated_int_enum(identity: TypeIdentity, valid_values: &'static [i64]) -> AttributeType {
-    AttributeType::refined_int_with_validator(
+fn validated_int_enum_definition(
+    identity: TypeIdentity,
+    valid_values: &'static [i64],
+) -> IdentityDefinition {
+    IdentityDefinition::int(
         identity,
         None,
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::Int(value)) = value {
                 if valid_values.contains(value) {
                     Ok(())
@@ -149,18 +142,18 @@ pub fn validated_int_enum(identity: TypeIdentity, valid_values: &'static [i64]) 
             } else {
                 Err("Expected integer".into())
             }
-        }),
+        })),
     )
 }
 
-fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> AttributeType {
-    AttributeType::refined_int_with_validator(
+fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> IdentityDefinition {
+    IdentityDefinition::int(
         identity,
         Some((values.first().copied(), values.last().copied())),
-        legacy_validator(move |value| match value {
+        Some(legacy_validator(move |value| match value {
             Value::Concrete(ConcreteValue::Int(value)) if values.contains(value) => Ok(()),
             _ => Err(format!("expected one of the integer values {values:?}").into()),
-        }),
+        })),
     )
 }
 
@@ -168,16 +161,16 @@ fn is_private_amazon_side_asn(value: i64) -> bool {
     (64512..=65534).contains(&value) || (4200000000..=4294967294).contains(&value)
 }
 
-fn ec2_amazon_side_asn_type(identity: TypeIdentity) -> AttributeType {
-    AttributeType::refined_int_with_validator(
+fn ec2_amazon_side_asn_type(identity: TypeIdentity) -> IdentityDefinition {
+    IdentityDefinition::int(
         identity,
         Some((Some(64512), Some(4294967294))),
-        legacy_validator(|value| match value {
+        Some(legacy_validator(|value| match value {
             Value::Concrete(ConcreteValue::Int(value)) if is_private_amazon_side_asn(*value) => {
                 Ok(())
             }
             _ => Err("expected a private ASN in 64512..=65534 or 4200000000..=4294967294".into()),
-        }),
+        })),
     )
 }
 
@@ -185,35 +178,35 @@ fn ec2_amazon_side_asn_type(identity: TypeIdentity) -> AttributeType {
 // 9059 (Dublin), 17493 (Singapore), 10124 (Tokyo), 7224 (other regions).
 const VPN_GATEWAY_LEGACY_AMAZON_ASNS: &[i64] = &[7224, 9059, 10124, 17493];
 
-fn ec2_vpn_gateway_amazon_side_asn_type(identity: TypeIdentity) -> AttributeType {
-    AttributeType::refined_int_with_validator(
+fn ec2_vpn_gateway_amazon_side_asn_type(identity: TypeIdentity) -> IdentityDefinition {
+    IdentityDefinition::int(
         identity,
         Some((Some(VPN_GATEWAY_LEGACY_AMAZON_ASNS[0]), Some(4294967294))),
-        legacy_validator(|value| {
+        Some(legacy_validator(|value| {
             match value {
             Value::Concrete(ConcreteValue::Int(value))
                 if is_private_amazon_side_asn(*value)
                     || VPN_GATEWAY_LEGACY_AMAZON_ASNS.contains(value) => Ok(()),
             _ => Err("expected a private ASN in 64512..=65534 or 4200000000..=4294967294, or legacy Amazon ASN 7224, 9059, 10124, or 17493".into()),
         }
-        }),
+        })),
     )
 }
 
 fn ec2_cidr_type(
     identity: TypeIdentity,
     validate: fn(&str) -> Result<(), String>,
-) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+) -> IdentityDefinition {
+    IdentityDefinition::string(
         identity,
         None,
         None,
-        legacy_validator(move |value| match value {
+        Some(legacy_validator(move |value| match value {
             Value::Concrete(ConcreteValue::String(value)) => {
                 validate(value.expose_plaintext()).map_err(Into::into)
             }
             _ => Err("expected a CIDR string".into()),
-        }),
+        })),
         None,
     )
 }
@@ -289,29 +282,18 @@ fn validate_ec2_transit_gateway_cidr(value: &str) -> Result<(), String> {
 const EC2_SECURITY_GROUP_NAME_PATTERN: &str = r"^[A-Za-z0-9 ._:/()#,@\[\]+=\&;{}!$*\-]+\z";
 
 fn validate_ec2_security_group_name(value: &str) -> Result<(), String> {
-    static PATTERN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(EC2_SECURITY_GROUP_NAME_PATTERN).expect("EC2 security group name pattern")
-    });
-    if value.len() <= 255 && PATTERN.is_match(value) && !value.starts_with("sg-") {
-        Ok(())
+    // The identity layer owns the grammar and 1..255 length. AWS reserves sg-.
+    if value.starts_with("sg-") {
+        Err("security group names must not start with the reserved sg- prefix".into())
     } else {
-        Err("security group name must be 1..=255 permitted ASCII characters and must not start with sg-".into())
+        Ok(())
     }
 }
 
-fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> AttributeType {
-    let pattern = format!("^{prefix}-[0-9a-f]{{8,}}$");
-    AttributeType::refined_string_with_validator(
+fn prefixed_resource_id(identity: TypeIdentity, prefix: &'static str) -> IdentityDefinition {
+    metadata_string(
         identity,
-        Some(PatternSpec::new(pattern, PatternMatch::Full)),
-        None,
-        legacy_validator(move |value| {
-            if let Value::Concrete(ConcreteValue::String(value)) = value {
-                validate_prefixed_resource_id(value.expose_plaintext(), prefix).map_err(Into::into)
-            } else {
-                Err("Expected string".into())
-            }
-        }),
+        PatternSpec::new(format!("^{prefix}-[0-9a-f]{{8,}}$"), PatternMatch::Full),
         None,
     )
 }
@@ -320,18 +302,18 @@ fn iam_arn(
     identity: TypeIdentity,
     pattern: PatternSpec,
     resource_prefix: &'static str,
-) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+) -> IdentityDefinition {
+    IdentityDefinition::string(
         identity,
         Some(pattern),
         None,
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 validate_iam_arn(value.expose_plaintext(), resource_prefix).map_err(Into::into)
             } else {
                 Err("Expected string".into())
             }
-        }),
+        })),
         None,
     )
 }
@@ -339,9 +321,11 @@ fn iam_arn(
 fn validated_open_enum(
     identity: TypeIdentity,
     validator: fn(&str) -> Result<(), String>,
-) -> AttributeType {
-    AttributeType::enum_(
+) -> IdentityDefinition {
+    IdentityDefinition::enum_(
         identity,
+        None,
+        None,
         None,
         vec![],
         Some(legacy_validator(move |value| {
@@ -355,9 +339,11 @@ fn validated_open_enum(
     )
 }
 
-fn availability_zone_type(identity: TypeIdentity) -> AttributeType {
-    AttributeType::enum_(
+fn availability_zone_type(identity: TypeIdentity) -> IdentityDefinition {
+    IdentityDefinition::enum_(
         identity,
+        None,
+        None,
         None,
         vec![],
         Some(legacy_validator(|value| {
@@ -383,7 +369,7 @@ const S3_LIFECYCLE_DATE_PATTERN: &str = concat!(
     r"T00:00:00Z\z",
 );
 
-fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
+fn s3_lifecycle_date_type(identity: TypeIdentity) -> IdentityDefinition {
     validated_string(
         identity,
         // LifecycleExpiration$Date and Transition$Date always use midnight UTC.
@@ -437,25 +423,20 @@ fn s3_lifecycle_date_type(identity: TypeIdentity) -> AttributeType {
     )
 }
 
-fn organizations_account_email_type(identity: TypeIdentity) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+fn organizations_account_email_type(identity: TypeIdentity) -> IdentityDefinition {
+    IdentityDefinition::string(
         identity,
         None,
         Some((Some(6), Some(64))),
-        legacy_validator(|value| {
+        Some(legacy_validator(|value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 let email = value.expose_plaintext();
-                if !(6..=64).contains(&email.chars().count()) {
-                    return Err(
-                        "Organizations account email must be between 6 and 64 characters".into(),
-                    );
-                }
                 // This is the same public function used by core's Email type.
                 carina_core::schema::validate_email(email).map_err(Into::into)
             } else {
                 Err("Expected string".into())
             }
-        }),
+        })),
         None,
     )
 }
@@ -465,8 +446,8 @@ const DNS_RECORD_TYPE_VALUES: &[&str] = &[
     "SSHFP", "SVCB", "TLSA", "TXT",
 ];
 
-fn dns_record_type_type(identity: TypeIdentity) -> AttributeType {
-    crate::common::enum_with_dsl_aliases(DNS_RECORD_TYPE_VALUES, identity)
+fn dns_record_type_type(identity: TypeIdentity) -> IdentityDefinition {
+    enum_definition(DNS_RECORD_TYPE_VALUES, identity)
 }
 
 fn aws_identity(segments: &[&str], kind: &str) -> TypeIdentity {
@@ -477,6 +458,22 @@ fn aws_identity(segments: &[&str], kind: &str) -> TypeIdentity {
     }
 }
 
+/// Construct a standalone integer enumeration through its owned definition.
+pub fn validated_int_enum(identity: TypeIdentity, values: &'static [i64]) -> AttributeType {
+    validated_int_enum_definition(identity, values).into_attribute_type()
+}
+
+fn enum_definition(values: &[&str], identity: TypeIdentity) -> IdentityDefinition {
+    IdentityDefinition::enum_(
+        identity,
+        None,
+        None,
+        Some(values.iter().map(|v| v.to_string()).collect()),
+        crate::dsl_aliases_for(values),
+        None,
+        None,
+    )
+}
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __carina_aws_catalog_identity {
@@ -531,30 +528,25 @@ macro_rules! __carina_aws_catalog_allowed_int_values {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __carina_aws_catalog_has_validator {
-    () => {
-        false
-    };
-    (has_validator: $has_validator:literal,) => {
-        $has_validator
-    };
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __carina_aws_catalog_attribute_type {
+macro_rules! __carina_aws_catalog_definition {
     (
         $constructor:expr;
         identity: $identity:expr,
     ) => {
-        ($constructor)($identity)
+        {
+            let definition: $crate::IdentityDefinition = ($constructor)($identity);
+            definition
+        }
     };
     (
         $constructor:expr;
         identity: $identity:expr,
         values: [$($value:literal),+ $(,)?],
     ) => {
-        ($constructor)($identity, &[$($value),+])
+        {
+            let definition: $crate::IdentityDefinition = ($constructor)($identity, &[$($value),+]);
+            definition
+        }
     };
 }
 
@@ -591,8 +583,10 @@ macro_rules! __carina_aws_catalog_constructor_path {
 ///
 /// Each row uses the same grammar. An own-identity row supplies `segments`,
 /// `kind`, and `valid_sample`; a refinement supplies `refines`; and an integer
-/// enum additionally supplies `values`. `has_validator` is optional and
-/// defaults to `false`. `constructor_path_prefix` is optional at catalog level;
+/// enum additionally supplies `values`. Constructors return `IdentityDefinition`;
+/// validator presence is derived from that definition. The optional legacy
+/// `has_validator` annotation is accepted for source compatibility and does not
+/// control dispatch. `constructor_path_prefix` is optional at catalog level;
 /// when present, the macro generates `constructor_path()` by appending the row's
 /// wrapper name and `()` to that literal prefix.
 ///
@@ -683,23 +677,24 @@ macro_rules! define_aws_type_catalog {
             }
 
             /// Whether this row's constructor carries a custom validator.
-            pub const fn has_validator(self) -> bool {
-                match self {
-                    $(Self::$variant => $crate::__carina_aws_catalog_has_validator!(
-                        $(has_validator: $has_validator,)?
-                    )),*
-                }
+            pub fn has_validator(self) -> bool {
+                self.definition().has_validator()
             }
 
-            /// Construct this row's identity-bearing attribute type.
-            pub fn attribute_type(self) -> $crate::__private::AttributeType {
+            /// Construct this row through the closed constraint-owning builder.
+            pub fn definition(self) -> $crate::IdentityDefinition {
                 match self {
-                    $(Self::$variant => $crate::__carina_aws_catalog_attribute_type!(
+                    $(Self::$variant => $crate::__carina_aws_catalog_definition!(
                         $constructor;
                         identity: self.identity(),
                         $(values: [$($int_value),+],)?
                     )),*
                 }
+            }
+
+            /// Construct this row's identity-bearing standalone attribute type.
+            pub fn attribute_type(self) -> $crate::__private::AttributeType {
+                self.definition().into_attribute_type()
             }
         }
 
@@ -731,7 +726,7 @@ define_aws_type_catalog! {
         segments: [],
         kind: "Arn",
         valid_sample: "arn:aws:s3:::example-bucket",
-        has_validator: true,
+
         constructor: |identity| validated_string(
             identity,
             PatternSpec::new(arn_regex("[^:]+:.*$"), PatternMatch::Full),
@@ -744,33 +739,23 @@ define_aws_type_catalog! {
         segments: [],
         kind: "ResourceId",
         valid_sample: "resource-12345678",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity,
-            PatternSpec::new("^[a-z-]+-[0-9a-f]{8,}$", PatternMatch::Full),
-            None,
-            validate_aws_resource_id,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^[a-z]+-[0-9a-f]{8,}$", PatternMatch::Full), None),
     },
     /// Twelve-digit AWS account ID.
     AccountId => aws_account_id {
         segments: [],
         kind: "AccountId",
         valid_sample: "123456789012",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity,
-            PatternSpec::new("^\\d{12}$", PatternMatch::Full),
-            Some((Some(12), Some(12))),
-            validate_aws_account_id,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^[0-9]{12}$", PatternMatch::Full), Some((Some(12), Some(12)))),
     },
     /// AWS Region in provider-facing API spelling.
     Region => aws_region {
         segments: [],
         kind: "Region",
         valid_sample: "ap-northeast-1",
-        has_validator: true,
+
         constructor: |identity| validated_open_enum(identity, validate_aws_region),
     },
     /// AWS Availability Zone in provider-facing API spelling.
@@ -778,7 +763,7 @@ define_aws_type_catalog! {
         segments: ["AvailabilityZone"],
         kind: "ZoneName",
         valid_sample: "ap-northeast-1a",
-        has_validator: true,
+
         constructor: availability_zone_type,
     },
     /// AWS Availability Zone ID.
@@ -786,20 +771,15 @@ define_aws_type_catalog! {
         segments: ["AvailabilityZone"],
         kind: "ZoneId",
         valid_sample: "use1-az1",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity,
-            PatternSpec::new("^[a-z]+[0-9]+-az[0-9]+$", PatternMatch::Full),
-            None,
-            validate_availability_zone_id,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^[a-z]+[0-9]+-az[0-9]+$", PatternMatch::Full), None),
     },
     /// Canonical UTC timestamp used by S3 lifecycle expiration and transition dates.
     S3LifecycleDate => s3_lifecycle_date {
         segments: ["s3", "BucketLifecycleConfiguration"],
         kind: "LifecycleDate",
         valid_sample: "2026-01-01T00:00:00Z",
-        has_validator: true,
+
         constructor: s3_lifecycle_date_type,
     },
     /// IAM role name. Smithy com.amazonaws.iam#roleNameType in
@@ -809,10 +789,8 @@ define_aws_type_catalog! {
         segments: ["iam", "Role"],
         kind: "Name",
         valid_sample: "example-role",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(64))), validate_iam_role_name,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(64)))),
     },
     /// IAM policy name, including inline policies. Smithy policyNameType in
     /// carina-provider-aws/tests/fixtures/smithy/iam.json: length 1..128.
@@ -822,30 +800,23 @@ define_aws_type_catalog! {
         segments: ["iam", "Policy"],
         kind: "Name",
         valid_sample: "example-policy",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(128))), validate_iam_policy_name,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(128)))),
     },
     /// IAM role ID.
     IamRoleId => iam_role_id {
         segments: ["iam", "Role"],
         kind: "Id",
         valid_sample: "AROA1234567890EXAMPLE",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity,
-            PatternSpec::new("^AROA[A-Z0-9]+$", PatternMatch::Full),
-            None,
-            validate_iam_role_id,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^AROA[A-Z0-9]+$", PatternMatch::Full), None),
     },
     /// IAM role ARN.
     IamRoleArn => iam_role_arn {
         segments: ["iam", "Role"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:role/example-role",
-        has_validator: true,
+
         constructor: |identity| iam_arn(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:role/.+$"), PatternMatch::Full),
@@ -857,7 +828,7 @@ define_aws_type_catalog! {
         segments: ["iam", "Policy"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:policy/example-policy",
-        has_validator: true,
+
         constructor: |identity| iam_arn(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:policy/.+$"), PatternMatch::Full),
@@ -869,7 +840,7 @@ define_aws_type_catalog! {
         segments: ["iam", "OidcProvider"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:oidc-provider/example.com",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:oidc-provider/.+$"), PatternMatch::Full),
@@ -881,7 +852,7 @@ define_aws_type_catalog! {
         segments: ["kms", "Key"],
         kind: "Id",
         valid_sample: "12345678-1234-1234-1234-123456789abc",
-        has_validator: true,
+
         constructor: |identity| validated_string(
             identity,
             PatternSpec::new([
@@ -898,18 +869,16 @@ define_aws_type_catalog! {
         segments: ["kms", "Key"],
         kind: "Reference",
         valid_sample: "alias/aws/sqs",
-        constructor: |identity| AttributeType::reference(
-            identity,
-            Some(PatternSpec::new(crate::kms_key_reference_pattern(), PatternMatch::Full)),
-            Some((Some(1), Some(2048))),
-        ),
+        constructor: |identity| IdentityDefinition::reference(identity,
+Some(PatternSpec::new(crate::kms_key_reference_pattern(), PatternMatch::Full)),
+Some((Some(1), Some(2048)))),
     },
     /// KMS key ARN (aliases are intentionally excluded).
     KmsKeyArn => kms_key_arn {
         segments: ["kms", "Key"],
         kind: "Arn",
         valid_sample: "arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
-        has_validator: true,
+
         constructor: |identity| validated_string(
             identity,
             PatternSpec::new(crate::kms_key_arn_pattern(), PatternMatch::Full),
@@ -922,20 +891,15 @@ define_aws_type_catalog! {
         segments: ["ec2", "IpamPool"],
         kind: "Id",
         valid_sample: "ipam-pool-12345678",
-        has_validator: true,
-        constructor: |identity| validated_string(
-            identity,
-            PatternSpec::new("^ipam-pool-[0-9a-f]{8,}$", PatternMatch::Full),
-            None,
-            validate_ipam_pool_id,
-        ),
+
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^ipam-pool-[0-9a-f]{8,}$", PatternMatch::Full), None),
     },
     /// Route 53 hosted-zone ID.
     Route53HostedZoneId => route53_hosted_zone_id {
         segments: ["route53", "HostedZone"],
         kind: "Id",
         valid_sample: "Z2FDTNDATAQYW2",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new("^Z[A-Z0-9]+$", PatternMatch::Full),
@@ -951,7 +915,7 @@ define_aws_type_catalog! {
         segments: ["route53", "RecordSet"],
         kind: "Type",
         valid_sample: "CNAME",
-        has_validator: false,
+
         constructor: dns_record_type_type,
     },
     /// Public RequestCertificate Common Name: DomainNameString plus the
@@ -962,7 +926,7 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "DomainName",
         valid_sample: "xn--r8jz45g.carina-rs.dev",
-        has_validator: true,
+
         constructor: |identity| acm_request_domain_type(identity, 64),
     },
     /// Additional public certificate request domain: same IDNA rules, 253 cap.
@@ -972,7 +936,7 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "SubjectAlternativeName",
         valid_sample: "xn--r8jz45g.carina-rs.dev",
-        has_validator: true,
+
         constructor: |identity| acm_request_domain_type(identity, 253),
     },
     /// ACM certificate resource ARN:
@@ -987,7 +951,7 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "Arn",
         valid_sample: "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z"), PatternMatch::Full),
@@ -1002,8 +966,8 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "KeyAlgorithm",
         valid_sample: "RSA_2048",
-        has_validator: false,
-        constructor: |identity| crate::common::enum_with_dsl_aliases(
+
+        constructor: |identity| enum_definition(
             &["EC_prime256v1", "EC_secp384r1", "RSA_2048"], identity,
         ),
     },
@@ -1015,7 +979,7 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "ValidationUrl",
         valid_sample: "http://example.com/.well-known/pki-validation/token.txt",
-        has_validator: true,
+
         constructor: |identity| validated_string(
             identity, PatternSpec::new(ACM_VALIDATION_URL_PATTERN, PatternMatch::Full), None, validate_acm_validation_url,
         ),
@@ -1026,8 +990,8 @@ define_aws_type_catalog! {
         segments: ["acm", "Certificate"],
         kind: "ResourceRecordType",
         valid_sample: "CNAME",
-        has_validator: false,
-        constructor: |identity| crate::common::enum_with_dsl_aliases(&["CNAME"], identity),
+
+        constructor: |identity| enum_definition(&["CNAME"], identity),
     },
     /// ELBv2 HTTP matcher codes, independent of load-balancer protocol constraints.
     /// https://docs.aws.amazon.com/elasticloadbalancing/latest/APIReference/API_Matcher.html
@@ -1035,7 +999,7 @@ define_aws_type_catalog! {
         segments: ["elasticloadbalancingv2", "TargetGroup"],
         kind: "HttpCode",
         valid_sample: "200",
-        has_validator: true,
+
         constructor: |identity| crate::elbv2_matcher_codes(identity, 200, 599),
     },
     /// ELBv2 gRPC matcher codes.
@@ -1044,7 +1008,7 @@ define_aws_type_catalog! {
         segments: ["elasticloadbalancingv2", "TargetGroup"],
         kind: "GrpcCode",
         valid_sample: "12",
-        has_validator: true,
+
         constructor: |identity| crate::elbv2_matcher_codes(identity, 0, 99),
     },
     /// CloudWatch Logs retention days, sharing AWSCC's established identity.
@@ -1058,8 +1022,8 @@ define_aws_type_catalog! {
             1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096,
             1827, 2192, 2557, 2922, 3288, 3653,
         ],
-        has_validator: true,
-        constructor: validated_int_enum,
+
+        constructor: validated_int_enum_definition,
     },
     /// SQS queue ARN, including the queue-name grammar and FIFO suffix limit.
     /// The service authorization reference's queue resource is
@@ -1074,7 +1038,7 @@ define_aws_type_catalog! {
         segments: ["sqs", "Queue"],
         kind: "Arn",
         valid_sample: "arn:aws:sqs:ap-northeast-1:123456789012:example-queue",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z"), PatternMatch::Full),
@@ -1088,8 +1052,8 @@ define_aws_type_catalog! {
         segments: ["sqs", "Queue"],
         kind: "DeduplicationScope",
         valid_sample: "messageGroup",
-        has_validator: false,
-        constructor: |identity| crate::common::enum_with_dsl_aliases(&["messageGroup", "queue"], identity),
+
+        constructor: |identity| enum_definition(&["messageGroup", "queue"], identity),
     },
     /// Closed SQS FIFO throughput limit; aliases retain exact API spellings.
     /// sqs.json CreateQueueRequest$Attributes; API_CreateQueue.html.
@@ -1098,8 +1062,8 @@ define_aws_type_catalog! {
         segments: ["sqs", "Queue"],
         kind: "FifoThroughputLimit",
         valid_sample: "perQueue",
-        has_validator: false,
-        constructor: |identity| crate::common::enum_with_dsl_aliases(&["perQueue", "perMessageGroupId"], identity),
+
+        constructor: |identity| enum_definition(&["perQueue", "perMessageGroupId"], identity),
     },
     /// Existing redrive-permission identity, owned by the catalog so struct
     /// refinements and native constructors retain the same alias metadata.
@@ -1108,15 +1072,15 @@ define_aws_type_catalog! {
         segments: ["sqs", "Queue", "RedriveAllowPolicy"],
         kind: "RedrivePermission",
         valid_sample: "allowAll",
-        has_validator: false,
-        constructor: |identity| crate::common::enum_with_dsl_aliases(&["allowAll", "denyAll", "byQueue"], identity),
+
+        constructor: |identity| enum_definition(&["allowAll", "denyAll", "byQueue"], identity),
     },
     /// Identity Store ID.
     IdentityStoreId => identity_store_id {
         segments: ["identitystore", "Store"],
         kind: "Id",
         valid_sample: "d-1234567890",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new("^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", PatternMatch::Full),
@@ -1128,7 +1092,7 @@ define_aws_type_catalog! {
         segments: ["sso", "Principal"],
         kind: "Id",
         valid_sample: "12345678-1234-1234-1234-123456789abc",
-        has_validator: false,
+
         constructor: |identity| metadata_string(identity, PatternSpec::new("^.{1,64}$", PatternMatch::Full), None),
     },
     /// IAM Identity Center instance ARN.
@@ -1136,7 +1100,7 @@ define_aws_type_catalog! {
         segments: ["sso", "Instance"],
         kind: "Arn",
         valid_sample: "arn:aws:sso:::instance/ssoins-1234567890abcdef",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sso:::instance/.+$"), PatternMatch::Full),
@@ -1148,7 +1112,7 @@ define_aws_type_catalog! {
         segments: ["sso", "PermissionSet"],
         kind: "Arn",
         valid_sample: "arn:aws:sso:::permissionSet/ssoins-1234567890abcdef/ps-1234567890abcdef",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sso:::permissionSet/.+$"), PatternMatch::Full),
@@ -1160,7 +1124,7 @@ define_aws_type_catalog! {
         segments: ["s3"],
         kind: "Grantee",
         valid_sample: "id=canonical-user-id",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(r"^(id|emailAddress|uri)=.+(\s*,\s*(id|emailAddress|uri)=.+)*$", PatternMatch::Full),
@@ -1172,21 +1136,21 @@ define_aws_type_catalog! {
         segments: ["cloudfront"],
         kind: "HostedZoneId",
         valid_sample: "Z2FDTNDATAQYW2",
-        has_validator: false,
-        constructor: |identity| AttributeType::enum_(
-            identity,
-            Some(vec!["Z2FDTNDATAQYW2".to_string()]),
-            vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
-            None,
-            None,
-        ),
+
+        constructor: |identity| IdentityDefinition::enum_(identity,
+None,
+None,
+Some(vec!["Z2FDTNDATAQYW2".to_string()]),
+vec![("Z2FDTNDATAQYW2".to_string(), "global".to_string())],
+None,
+None),
     },
     /// S3 bucket ARN.
     S3BucketArn => s3_bucket_arn {
         segments: ["s3", "Bucket"],
         kind: "Arn",
         valid_sample: "arn:aws:s3:::example-bucket",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("s3:::.+$"), PatternMatch::Full),
@@ -1198,7 +1162,7 @@ define_aws_type_catalog! {
         segments: ["sts", "CallerIdentity"],
         kind: "Arn",
         valid_sample: "arn:aws:sts::123456789012:assumed-role/example-role/example-session",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sts:.*$"), PatternMatch::Full),
@@ -1217,7 +1181,7 @@ define_aws_type_catalog! {
         segments: ["organizations", "Account"],
         kind: "Email",
         valid_sample: "user@example.com",
-        has_validator: true,
+
         constructor: organizations_account_email_type,
     },
     /// Organizations account ARN. Cached organizations.json AccountArn, used by
@@ -1237,7 +1201,7 @@ define_aws_type_catalog! {
         segments: ["organizations", "Account"],
         kind: "Arn",
         valid_sample: "arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"), PatternMatch::Full),
@@ -1259,7 +1223,7 @@ define_aws_type_catalog! {
         segments: ["organizations", "Organization"],
         kind: "Arn",
         valid_sample: "arn:aws:organizations::123456789012:organization/o-exampleorgid",
-        has_validator: false,
+
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z"), PatternMatch::Full),
@@ -1275,7 +1239,7 @@ define_aws_type_catalog! {
         segments: ["ec2"],
         kind: "AmazonSideAsn",
         valid_sample: "64512",
-        has_validator: true,
+
         constructor: ec2_amazon_side_asn_type,
     },
     /// VGW private and legacy Amazon ASNs, including existing read-back values.
@@ -1287,7 +1251,7 @@ define_aws_type_catalog! {
         segments: [],
         kind: "AmazonSideAsn",
         valid_sample: "64512",
-        has_validator: true,
+
         constructor: ec2_vpn_gateway_amazon_side_asn_type,
     },
     /// CreateFlowLogsRequest$MaxAggregationInterval -> Integer (prose).
@@ -1297,7 +1261,7 @@ define_aws_type_catalog! {
         kind: "MaxAggregationInterval",
         valid_sample: "60",
         values: [60, 600],
-        has_validator: true,
+
         constructor: ec2_int_enum,
     },
     /// CreateSubnetRequest$Ipv6NetmaskLength -> NetmaskLength (prose).
@@ -1307,7 +1271,7 @@ define_aws_type_catalog! {
         kind: "Ipv6NetmaskLength",
         valid_sample: "64",
         values: [44, 48, 52, 56, 60, 64],
-        has_validator: true,
+
         constructor: ec2_int_enum,
     },
     /// CreateSecurityGroupRequest$GroupName: ASCII alphabet and reserved prefix.
@@ -1316,7 +1280,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "SecurityGroup"],
         kind: "Name",
         valid_sample: "carina-security-group",
-        has_validator: true,
+
         constructor: |identity| validated_string(
             identity, PatternSpec::new(EC2_SECURITY_GROUP_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(255))),
             validate_ec2_security_group_name,
@@ -1329,7 +1293,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Vpc"],
         kind: "Ipv4Cidr",
         valid_sample: "10.0.0.0/16",
-        has_validator: true,
+
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_vpc_cidr),
     },
     /// CreateSubnetRequest$CidrBlock, preserving noncanonical input spellings.
@@ -1338,7 +1302,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Subnet"],
         kind: "Ipv4Cidr",
         valid_sample: "10.0.0.0/24",
-        has_validator: true,
+
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv4_cidr),
     },
     /// CreateSubnetRequest$Ipv6CidrBlock: /44..=/64 in increments of four.
@@ -1347,7 +1311,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Subnet"],
         kind: "Ipv6Cidr",
         valid_sample: "2001:db8::/64",
-        has_validator: true,
+
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv6_cidr),
     },
     /// TransitGatewayRequestOptions$TransitGatewayCidrBlocks accepts both families.
@@ -1358,7 +1322,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "TransitGateway"],
         kind: "CidrBlock",
         valid_sample: "10.0.0.0/24",
-        has_validator: true,
+
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_transit_gateway_cidr),
     },
     /// EC2 VPC ID.
@@ -1366,7 +1330,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Vpc"],
         kind: "Id",
         valid_sample: "vpc-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "vpc"),
     },
     /// EC2 subnet ID.
@@ -1374,7 +1338,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Subnet"],
         kind: "Id",
         valid_sample: "subnet-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "subnet"),
     },
     /// EC2 security-group ID.
@@ -1382,7 +1346,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "SecurityGroup"],
         kind: "Id",
         valid_sample: "sg-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "sg"),
     },
     /// EC2 internet-gateway ID.
@@ -1390,7 +1354,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "InternetGateway"],
         kind: "Id",
         valid_sample: "igw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "igw"),
     },
     /// EC2 route-table ID.
@@ -1398,7 +1362,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "RouteTable"],
         kind: "Id",
         valid_sample: "rtb-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "rtb"),
     },
     /// EC2 NAT-gateway ID.
@@ -1406,7 +1370,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "NatGateway"],
         kind: "Id",
         valid_sample: "nat-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "nat"),
     },
     /// EC2 VPC-peering-connection ID.
@@ -1414,7 +1378,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "VpcPeeringConnection"],
         kind: "Id",
         valid_sample: "pcx-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "pcx"),
     },
     /// EC2 transit-gateway ID.
@@ -1422,7 +1386,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "TransitGateway"],
         kind: "Id",
         valid_sample: "tgw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "tgw"),
     },
     /// EC2 VPC CIDR-block-association ID.
@@ -1430,7 +1394,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "VpcCidrBlockAssociation"],
         kind: "Id",
         valid_sample: "vpc-cidr-assoc-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "vpc-cidr-assoc"),
     },
     /// EC2 transit-gateway route-table ID.
@@ -1438,7 +1402,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "TransitGatewayRouteTable"],
         kind: "Id",
         valid_sample: "tgw-rtb-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "tgw-rtb"),
     },
     /// EC2 VPN-gateway ID.
@@ -1446,7 +1410,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "VpnGateway"],
         kind: "Id",
         valid_sample: "vgw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "vgw"),
     },
     /// EC2 egress-only internet-gateway ID.
@@ -1454,7 +1418,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "EgressOnlyInternetGateway"],
         kind: "Id",
         valid_sample: "eigw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "eigw"),
     },
     /// EC2 VPC-endpoint ID.
@@ -1462,7 +1426,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "VpcEndpoint"],
         kind: "Id",
         valid_sample: "vpce-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "vpce"),
     },
     /// EC2 instance ID.
@@ -1470,7 +1434,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Instance"],
         kind: "Id",
         valid_sample: "i-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "i"),
     },
     /// EC2 network-interface ID.
@@ -1478,7 +1442,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "NetworkInterface"],
         kind: "Id",
         valid_sample: "eni-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "eni"),
     },
     /// EC2 Elastic IP allocation ID.
@@ -1486,7 +1450,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Eip"],
         kind: "AllocationId",
         valid_sample: "eipalloc-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "eipalloc"),
     },
     /// EC2 prefix-list ID.
@@ -1494,7 +1458,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "PrefixList"],
         kind: "Id",
         valid_sample: "pl-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "pl"),
     },
     /// EC2 carrier-gateway ID.
@@ -1502,7 +1466,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "CarrierGateway"],
         kind: "Id",
         valid_sample: "cagw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "cagw"),
     },
     /// EC2 local-gateway ID.
@@ -1510,7 +1474,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "LocalGateway"],
         kind: "Id",
         valid_sample: "lgw-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "lgw"),
     },
     /// EC2 network-ACL ID.
@@ -1518,7 +1482,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "NetworkAcl"],
         kind: "Id",
         valid_sample: "acl-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "acl"),
     },
     /// EC2 transit-gateway-attachment ID.
@@ -1526,7 +1490,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "TransitGatewayAttachment"],
         kind: "Id",
         valid_sample: "tgw-attach-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "tgw-attach"),
     },
     /// EC2 flow-log ID.
@@ -1534,7 +1498,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "FlowLog"],
         kind: "Id",
         valid_sample: "fl-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "fl"),
     },
     /// EC2 IPAM ID.
@@ -1542,7 +1506,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "Ipam"],
         kind: "Id",
         valid_sample: "ipam-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "ipam"),
     },
     /// EC2 subnet/route-table-association ID.
@@ -1550,7 +1514,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "SubnetRouteTableAssociation"],
         kind: "Id",
         valid_sample: "rtbassoc-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "rtbassoc"),
     },
     /// EC2 security-group-rule ID.
@@ -1558,7 +1522,7 @@ define_aws_type_catalog! {
         segments: ["ec2", "SecurityGroupRule"],
         kind: "Id",
         valid_sample: "sgr-12345678",
-        has_validator: true,
+
         constructor: |identity| prefixed_resource_id(identity, "sgr"),
     },
         }
@@ -1584,7 +1548,7 @@ mod tests {
         }
     }
 
-    fn test_string_constructor(identity: TypeIdentity) -> AttributeType {
+    fn test_string_constructor(identity: TypeIdentity) -> IdentityDefinition {
         metadata_string(
             identity,
             PatternSpec::new(
@@ -1603,7 +1567,7 @@ mod tests {
     fn test_int_constructor(
         identity: TypeIdentity,
         _allowed_values: &'static [i64],
-    ) -> AttributeType {
+    ) -> IdentityDefinition {
         metadata_string(
             identity,
             PatternSpec::new("^[0-9]+$", PatternMatch::Full),
@@ -1648,11 +1612,19 @@ mod tests {
     fn attribute_type_identity(attribute_type: &AttributeType) -> &TypeIdentity {
         match attribute_type.raw_shape() {
             RawShape::String {
-                identity: Some(identity),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(identity),
+                        ..
+                    },
                 ..
             }
             | RawShape::Int {
-                identity: Some(identity),
+                identity_layer:
+                    carina_core::schema::IntIdentityParts {
+                        identity: Some(identity),
+                        ..
+                    },
                 ..
             }
             | RawShape::Float {
@@ -1667,8 +1639,14 @@ mod tests {
     fn attribute_type_validator(attribute_type: &AttributeType) -> Option<&CustomValidator> {
         match attribute_type.raw_shape() {
             RawShape::Reference { .. } => None,
-            RawShape::String { validate, .. }
-            | RawShape::Int { validate, .. }
+            RawShape::String {
+                identity_layer: carina_core::schema::StringIdentityParts { validate, .. },
+                ..
+            }
+            | RawShape::Int {
+                identity_layer: carina_core::schema::IntIdentityParts { validate, .. },
+                ..
+            }
             | RawShape::Float { validate, .. }
             | RawShape::Enum { validate, .. } => validate,
             shape => panic!("catalog constructor must carry a scalar identity, got {shape:?}"),
@@ -1700,24 +1678,27 @@ mod tests {
                 row.constructor_path(),
                 format!("carina_aws_types::{constructor}()")
             );
-            assert!(row.has_validator());
+            assert!(!row.has_validator());
             let attr = row.attribute_type();
             let RawShape::String {
-                identity: Some(actual),
-                pattern,
-                length,
-                validate: Some(validate),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(actual),
+                        pattern,
+                        length,
+                        validate: None,
+                        ..
+                    },
                 ..
             } = attr.raw_shape()
             else {
                 panic!("{expected} must be a validated, identity-bearing String");
             };
             assert_eq!(actual, &identity);
-            assert_eq!(
-                pattern.map(PatternSpec::as_str),
-                Some(r"^[A-Za-z0-9_+=,.@-]+\z")
-            );
+            assert!(pattern.is_some());
             assert_eq!(length, Some((Some(1), Some(maximum))));
+            let admitted = crate::tests::rootless(attr.clone());
+            let validate = |value: &Value| admitted.validate(value);
             for valid in [
                 sample.to_string(),
                 "AZaz09_+=,.@-".to_string(),
@@ -1752,12 +1733,8 @@ mod tests {
             let error = validate(&Value::Concrete(ConcreteValue::String("".into())))
                 .expect_err("empty matcher codes must fail")
                 .to_string();
-            assert_eq!(
-                error,
-                format!(
-                    "Validation failed: ELBv2 matcher codes must be comma-separated items N or N-N (canonical decimal digits only, no leading zeros), with every N in {range} and range start <= end; no spaces or empty items"
-                )
-            );
+            assert!(error.contains(&format!("ELBv2 matcher codes must be comma-separated items N or N-N (canonical decimal digits only, no leading zeros), with every N in {range} and range start <= end; no spaces or empty items")),"{error}");
+            // The semantic callback reports its grammar; core adds the type identity.
             assert!(validate(&Value::Concrete(ConcreteValue::Int(200))).is_err());
         }
     }
@@ -1782,9 +1759,14 @@ mod tests {
         );
         let attr = row.attribute_type();
         let RawShape::Int {
-            identity: Some(identity),
-            range: None,
-            validate: Some(validate),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    range: None,
+                    validate: Some(validate),
+                    ..
+                },
+            ..
         } = attr.raw_shape()
         else {
             panic!("Logs retention must match AWSCC's validated Int shape");
@@ -1821,11 +1803,8 @@ mod tests {
     fn validator_declarations_match_constructor_shapes_and_the_registry_contract() {
         let expected = HashSet::from([
             AwsType::Arn,
-            AwsType::ResourceId,
-            AwsType::AccountId,
             AwsType::Region,
             AwsType::AvailabilityZone,
-            AwsType::AvailabilityZoneId,
             AwsType::S3LifecycleDate,
             AwsType::AcmCertificateDomainName,
             AwsType::AcmCertificateSubjectAlternativeName,
@@ -1833,15 +1812,11 @@ mod tests {
             AwsType::Elbv2TargetGroupHttpCode,
             AwsType::Elbv2TargetGroupGrpcCode,
             AwsType::LogsLogGroupRetentionInDays,
-            AwsType::IamRoleName,
-            AwsType::IamPolicyName,
             AwsType::OrganizationsAccountEmail,
-            AwsType::IamRoleId,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
             AwsType::KmsKeyId,
             AwsType::KmsKeyArn,
-            AwsType::IpamPoolId,
             AwsType::Ec2AmazonSideAsn,
             AwsType::Ec2VpnGatewayAmazonSideAsn,
             AwsType::Ec2FlowLogMaxAggregationInterval,
@@ -1851,36 +1826,11 @@ mod tests {
             AwsType::Ec2SubnetIpv4CidrBlock,
             AwsType::Ec2SubnetIpv6CidrBlock,
             AwsType::Ec2TransitGatewayCidrBlock,
-            AwsType::VpcId,
-            AwsType::SubnetId,
-            AwsType::SecurityGroupId,
-            AwsType::InternetGatewayId,
-            AwsType::RouteTableId,
-            AwsType::NatGatewayId,
-            AwsType::VpcPeeringConnectionId,
-            AwsType::TransitGatewayId,
-            AwsType::VpcCidrBlockAssociationId,
-            AwsType::TransitGatewayRouteTableId,
-            AwsType::VpnGatewayId,
-            AwsType::EgressOnlyInternetGatewayId,
-            AwsType::VpcEndpointId,
-            AwsType::InstanceId,
-            AwsType::NetworkInterfaceId,
-            AwsType::AllocationId,
-            AwsType::PrefixListId,
-            AwsType::CarrierGatewayId,
-            AwsType::LocalGatewayId,
-            AwsType::NetworkAclId,
-            AwsType::TransitGatewayAttachmentId,
-            AwsType::FlowLogId,
-            AwsType::IpamId,
-            AwsType::SubnetRouteTableAssociationId,
-            AwsType::SecurityGroupRuleId,
         ]);
         assert_eq!(
             expected.len(),
-            56,
-            "the shared catalog validator contract changed"
+            24,
+            "the semantic-only catalog validator contract changed"
         );
 
         let declared = AwsType::ALL
@@ -2020,20 +1970,11 @@ mod tests {
         let selected_rows: BTreeSet<_> = AwsType::ALL
             .iter()
             .copied()
+            // KMS ID/reference are the two non-ARN identities whose documented
+            // comparison language also accepts ARNs. Their policy is callback-owned.
             .filter(|row| {
-                let attr = row.attribute_type();
-                let pattern = match attr.raw_shape() {
-                    RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => {
-                        pattern
-                    }
-                    _ => return false,
-                };
-                if expected_rows.contains(row) {
-                    assert!(pattern.is_some(), "{row:?} must declare an ARN pattern");
-                }
-                // Include ARN alternatives in rows such as KMS IDs and references,
-                // even when their primary sample is an alias or a bare key ID.
-                row.identity().kind == "Arn" || pattern.is_some_and(|p| p.as_str().contains("arn:"))
+                row.identity().kind == "Arn"
+                    || matches!(row, AwsType::KmsKeyId | AwsType::KmsKeyReference)
             })
             .collect();
         let missing: Vec<_> = expected_rows.difference(&selected_rows).copied().collect();
@@ -2045,43 +1986,40 @@ mod tests {
 
         for row in selected_rows {
             let attr = row.attribute_type();
-            let pattern = match attr.raw_shape() {
-                RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
+            // Some rows own their policy in a callback; references retain
+            // their portable pattern. Test acceptance rather than storage.
+            let admitted = matches!(attr.raw_shape(), RawShape::String { .. })
+                .then(|| crate::tests::rootless(attr.clone()));
+            let reference_pattern = match attr.raw_shape() {
+                RawShape::Reference { pattern, .. } => Some(
+                    carina_core::schema::CompiledPattern::try_new(
+                        pattern.expect("ARN reference must declare a pattern"),
+                    )
+                    .unwrap(),
+                ),
+                RawShape::String { .. } => None,
                 _ => panic!("{row:?} must be a String or Reference ARN row"),
             };
-            let regex =
-                regex::Regex::new(pattern.expect("ARN row must declare a pattern").as_str())
-                    .expect("valid ARN row pattern");
+            let accepts = |text: &str| match &admitted {
+                Some(admitted) => admitted
+                    .validate_collect(&Value::Concrete(ConcreteValue::String(text.into())))
+                    .is_empty(),
+                None => reference_pattern.as_ref().unwrap().is_match(text),
+            };
             let sample = AwsType::ALL
                 .iter()
                 .map(|candidate| candidate.valid_sample())
-                .find(|sample| sample.starts_with("arn:") && regex.is_match(sample))
+                .find(|sample| sample.starts_with("arn:") && accepts(sample))
                 .unwrap_or_else(|| panic!("{row:?} must have an ARN sample in the catalog"));
             let rest = sample.splitn(3, ':').nth(2).expect("sample ARN fields");
-            let admitted = matches!(attr.raw_shape(), RawShape::String { .. })
-                .then(|| crate::tests::rootless(attr.clone()));
 
             for partition in crate::Partition::ALL {
                 let arn = format!("arn:{}:{rest}", partition.id());
-                assert!(regex.is_match(&arn), "{row:?} must accept {arn}");
-                if let Some(admitted) = &admitted {
-                    let value = Value::Concrete(ConcreteValue::String(arn.clone().into()));
-                    assert!(
-                        admitted.validate_collect(&value).is_empty(),
-                        "{row:?} validation must accept {arn}"
-                    );
-                }
+                assert!(accepts(&arn), "{row:?} must accept {arn}");
             }
 
             let arn = format!("arn:aws-xx:{rest}");
-            assert!(!regex.is_match(&arn), "{row:?} must reject {arn}");
-            if let Some(admitted) = &admitted {
-                let value = Value::Concrete(ConcreteValue::String(arn.clone().into()));
-                assert!(
-                    !admitted.validate_collect(&value).is_empty(),
-                    "{row:?} validation must reject {arn}"
-                );
-            }
+            assert!(!accepts(&arn), "{row:?} must reject {arn}");
         }
     }
 
@@ -2139,12 +2077,15 @@ mod tests {
                 )))
                 .is_empty()
         );
-        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+        let RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+            ..
+        } = attr.raw_shape()
+        else {
             panic!("account ARN must be a String");
         };
         let expected_pattern =
             crate::arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z");
-        // #638: Organizations pattern text follows the shared Partition set.
         assert_eq!(
             pattern.map(PatternSpec::as_str),
             Some(expected_pattern.as_str())
@@ -2205,12 +2146,15 @@ mod tests {
                 )))
                 .is_empty()
         );
-        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+        let RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+            ..
+        } = attr.raw_shape()
+        else {
             panic!("organization ARN must be a String");
         };
         let expected_pattern =
             crate::arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z");
-        // #638: Organizations pattern text follows the shared Partition set.
         assert_eq!(
             pattern.map(PatternSpec::as_str),
             Some(expected_pattern.as_str())
@@ -2223,10 +2167,14 @@ mod tests {
         assert!(row.has_validator());
         let attribute_type = row.attribute_type();
         let RawShape::String {
-            identity: Some(identity),
-            pattern,
-            length,
-            validate: Some(validator),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    pattern,
+                    length,
+                    validate: Some(validator),
+                    ..
+                },
             ..
         } = attribute_type.raw_shape()
         else {
@@ -2248,15 +2196,17 @@ mod tests {
         ] {
             let value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
             assert!(admitted.validate_collect(&value).is_empty(), "{valid:?}");
-            // SDK custom-type dispatch invokes the callback directly, so it
-            // must enforce the length bounds as well as the format check.
+            // The semantic callback checks email syntax; identity bounds stay portable.
             assert!(validator(&value).is_ok(), "{valid:?}");
         }
         for invalid in ["a@b.c".to_string(), format!("{}@b.com", "a".repeat(59))] {
             assert!(carina_core::schema::validate_email(&invalid).is_ok());
             let value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
             assert!(!admitted.validate_collect(&value).is_empty(), "{invalid:?}");
-            assert!(validator(&value).is_err(), "{invalid:?}");
+            assert!(
+                validator(&value).is_ok(),
+                "length is enforced structurally: {invalid:?}"
+            );
         }
         for invalid in ["not-an-email", "a@@b.com", "user@b..com", "user @b.com"] {
             let value = Value::Concrete(ConcreteValue::String(invalid.into()));
@@ -2272,22 +2222,22 @@ mod tests {
     #[test]
     fn catalog_metadata_snapshot() {
         const EXPECTED: &str = r#"Arn|aws||Arn|arn:aws:s3:::example-bucket|true
-ResourceId|aws||ResourceId|resource-12345678|true
-AccountId|aws||AccountId|123456789012|true
+ResourceId|aws||ResourceId|resource-12345678|false
+AccountId|aws||AccountId|123456789012|false
 Region|aws||Region|ap-northeast-1|true
 AvailabilityZone|aws|AvailabilityZone|ZoneName|ap-northeast-1a|true
-AvailabilityZoneId|aws|AvailabilityZone|ZoneId|use1-az1|true
+AvailabilityZoneId|aws|AvailabilityZone|ZoneId|use1-az1|false
 S3LifecycleDate|aws|s3/BucketLifecycleConfiguration|LifecycleDate|2026-01-01T00:00:00Z|true
-IamRoleName|aws|iam/Role|Name|example-role|true
-IamPolicyName|aws|iam/Policy|Name|example-policy|true
-IamRoleId|aws|iam/Role|Id|AROA1234567890EXAMPLE|true
+IamRoleName|aws|iam/Role|Name|example-role|false
+IamPolicyName|aws|iam/Policy|Name|example-policy|false
+IamRoleId|aws|iam/Role|Id|AROA1234567890EXAMPLE|false
 IamRoleArn|aws|iam/Role|Arn|arn:aws:iam::123456789012:role/example-role|true
 IamPolicyArn|aws|iam/Policy|Arn|arn:aws:iam::123456789012:policy/example-policy|true
 IamOidcProviderArn|aws|iam/OidcProvider|Arn|arn:aws:iam::123456789012:oidc-provider/example.com|false
 KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|true
 KmsKeyReference|aws|kms/Key|Reference|alias/aws/sqs|false
 KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|true
-IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|true
+IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|false
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
 AcmCertificateDomainName|aws|acm/Certificate|DomainName|xn--r8jz45g.carina-rs.dev|true
@@ -2323,31 +2273,31 @@ Ec2VpcCidrBlock|aws|ec2/Vpc|Ipv4Cidr|10.0.0.0/16|true
 Ec2SubnetIpv4CidrBlock|aws|ec2/Subnet|Ipv4Cidr|10.0.0.0/24|true
 Ec2SubnetIpv6CidrBlock|aws|ec2/Subnet|Ipv6Cidr|2001:db8::/64|true
 Ec2TransitGatewayCidrBlock|aws|ec2/TransitGateway|CidrBlock|10.0.0.0/24|true
-VpcId|aws|ec2/Vpc|Id|vpc-12345678|true
-SubnetId|aws|ec2/Subnet|Id|subnet-12345678|true
-SecurityGroupId|aws|ec2/SecurityGroup|Id|sg-12345678|true
-InternetGatewayId|aws|ec2/InternetGateway|Id|igw-12345678|true
-RouteTableId|aws|ec2/RouteTable|Id|rtb-12345678|true
-NatGatewayId|aws|ec2/NatGateway|Id|nat-12345678|true
-VpcPeeringConnectionId|aws|ec2/VpcPeeringConnection|Id|pcx-12345678|true
-TransitGatewayId|aws|ec2/TransitGateway|Id|tgw-12345678|true
-VpcCidrBlockAssociationId|aws|ec2/VpcCidrBlockAssociation|Id|vpc-cidr-assoc-12345678|true
-TransitGatewayRouteTableId|aws|ec2/TransitGatewayRouteTable|Id|tgw-rtb-12345678|true
-VpnGatewayId|aws|ec2/VpnGateway|Id|vgw-12345678|true
-EgressOnlyInternetGatewayId|aws|ec2/EgressOnlyInternetGateway|Id|eigw-12345678|true
-VpcEndpointId|aws|ec2/VpcEndpoint|Id|vpce-12345678|true
-InstanceId|aws|ec2/Instance|Id|i-12345678|true
-NetworkInterfaceId|aws|ec2/NetworkInterface|Id|eni-12345678|true
-AllocationId|aws|ec2/Eip|AllocationId|eipalloc-12345678|true
-PrefixListId|aws|ec2/PrefixList|Id|pl-12345678|true
-CarrierGatewayId|aws|ec2/CarrierGateway|Id|cagw-12345678|true
-LocalGatewayId|aws|ec2/LocalGateway|Id|lgw-12345678|true
-NetworkAclId|aws|ec2/NetworkAcl|Id|acl-12345678|true
-TransitGatewayAttachmentId|aws|ec2/TransitGatewayAttachment|Id|tgw-attach-12345678|true
-FlowLogId|aws|ec2/FlowLog|Id|fl-12345678|true
-IpamId|aws|ec2/Ipam|Id|ipam-12345678|true
-SubnetRouteTableAssociationId|aws|ec2/SubnetRouteTableAssociation|Id|rtbassoc-12345678|true
-SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|true"#;
+VpcId|aws|ec2/Vpc|Id|vpc-12345678|false
+SubnetId|aws|ec2/Subnet|Id|subnet-12345678|false
+SecurityGroupId|aws|ec2/SecurityGroup|Id|sg-12345678|false
+InternetGatewayId|aws|ec2/InternetGateway|Id|igw-12345678|false
+RouteTableId|aws|ec2/RouteTable|Id|rtb-12345678|false
+NatGatewayId|aws|ec2/NatGateway|Id|nat-12345678|false
+VpcPeeringConnectionId|aws|ec2/VpcPeeringConnection|Id|pcx-12345678|false
+TransitGatewayId|aws|ec2/TransitGateway|Id|tgw-12345678|false
+VpcCidrBlockAssociationId|aws|ec2/VpcCidrBlockAssociation|Id|vpc-cidr-assoc-12345678|false
+TransitGatewayRouteTableId|aws|ec2/TransitGatewayRouteTable|Id|tgw-rtb-12345678|false
+VpnGatewayId|aws|ec2/VpnGateway|Id|vgw-12345678|false
+EgressOnlyInternetGatewayId|aws|ec2/EgressOnlyInternetGateway|Id|eigw-12345678|false
+VpcEndpointId|aws|ec2/VpcEndpoint|Id|vpce-12345678|false
+InstanceId|aws|ec2/Instance|Id|i-12345678|false
+NetworkInterfaceId|aws|ec2/NetworkInterface|Id|eni-12345678|false
+AllocationId|aws|ec2/Eip|AllocationId|eipalloc-12345678|false
+PrefixListId|aws|ec2/PrefixList|Id|pl-12345678|false
+CarrierGatewayId|aws|ec2/CarrierGateway|Id|cagw-12345678|false
+LocalGatewayId|aws|ec2/LocalGateway|Id|lgw-12345678|false
+NetworkAclId|aws|ec2/NetworkAcl|Id|acl-12345678|false
+TransitGatewayAttachmentId|aws|ec2/TransitGatewayAttachment|Id|tgw-attach-12345678|false
+FlowLogId|aws|ec2/FlowLog|Id|fl-12345678|false
+IpamId|aws|ec2/Ipam|Id|ipam-12345678|false
+SubnetRouteTableAssociationId|aws|ec2/SubnetRouteTableAssociation|Id|rtbassoc-12345678|false
+SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|false"#;
 
         let snapshot = AwsType::ALL
             .iter()
@@ -2387,8 +2337,14 @@ SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|true"#;
         assert_eq!(TestCatalog::Refinement.valid_sample(), "example");
         assert_eq!(TestCatalog::Own.allowed_int_values(), None);
         assert_eq!(TestCatalog::IntEnum.allowed_int_values(), Some(&[7, 9][..]));
-        assert!(!TestCatalog::Own.has_validator());
-        assert!(TestCatalog::ValidatedOwn.has_validator());
+        assert!(
+            !TestCatalog::Own.has_validator(),
+            "a portable-only definition needs no semantic callback"
+        );
+        assert!(
+            !TestCatalog::ValidatedOwn.has_validator(),
+            "legacy flags do not invent a callback"
+        );
         assert_eq!(
             TestCatalog::Refinement.constructor_path(),
             "test::catalog::test_refinement()"

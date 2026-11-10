@@ -1280,12 +1280,15 @@ dependencies = [
  "carina-aws-types",
  "carina-core",
  "carina-docgen",
+ "carina-plugin-sdk",
  "carina-provider-protocol",
  "carina-smithy",
  "clap",
  "heck",
  "html-escape",
  "regex",
+ "regex-syntax",
+ "serde_json",
  "syn 2.0.117",
  "tempfile",
 ]
@@ -1293,7 +1296,7 @@ dependencies = [
 [[package]]
 name = "carina-core"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "argon2",
  "carina-provider-protocol",
@@ -1323,6 +1326,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
+ "yoke",
 ]
 
 [[package]]
@@ -1344,7 +1348,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "carina-plugin-bindings-aws-credentials",
  "carina-plugin-bindings-diagnostics",
@@ -1355,7 +1359,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-aws-credentials"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -1363,7 +1367,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-diagnostics"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "wit-bindgen 0.54.0",
 ]
@@ -1371,7 +1375,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-http"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "carina-plugin-bindings-diagnostics",
  "wasi 0.14.7+wasi-0.2.4",
@@ -1381,7 +1385,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-bindings-provider"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "carina-plugin-bindings-diagnostics",
  "wit-bindgen 0.54.0",
@@ -1390,7 +1394,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-host"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "carina-core",
  "carina-provider-protocol",
@@ -1419,7 +1423,7 @@ dependencies = [
 [[package]]
 name = "carina-plugin-sdk"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-runtime-api",
@@ -1486,7 +1490,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-protocol"
 version = "0.3.0"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "psl",
  "serde",
@@ -1496,7 +1500,7 @@ dependencies = [
 [[package]]
 name = "carina-provider-resolver"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "base64 0.22.1",
  "carina-core",
@@ -1523,7 +1527,7 @@ dependencies = [
 [[package]]
 name = "carina-sigstore-tlog"
 version = "0.13.1"
-source = "git+https://github.com/carina-rs/carina?rev=93110feca9f244f0ce88ebf02038fe7e8616765b#93110feca9f244f0ce88ebf02038fe7e8616765b"
+source = "git+https://github.com/carina-rs/carina?rev=748ae72259f02ee619d869f474ce36f552dc0485#748ae72259f02ee619d869f474ce36f552dc0485"
 dependencies = [
  "base64 0.22.1",
  "p256",
@@ -3117,13 +3121,12 @@ dependencies = [
 
 [[package]]
 name = "icu_collections"
-version = "2.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2984d1cd16c883d7935b9e07e44071dca8d917fd52ecc02c04d5fa0b5a3f191c"
+checksum = "4c6b649701667bbe825c3b7e6388cb521c23d88644678e83c0c4d0a621a34b43"
 dependencies = [
  "displaydoc",
  "potential_utf",
- "utf8_iter",
  "yoke",
  "zerofrom",
  "zerovec",
@@ -3131,9 +3134,9 @@ dependencies = [
 
 [[package]]
 name = "icu_locale_core"
-version = "2.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29"
+checksum = "edba7861004dd3714265b4db54a3c390e880ab658fec5f7db895fae2046b5bb6"
 dependencies = [
  "displaydoc",
  "litemap",
@@ -3144,9 +3147,9 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer"
-version = "2.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c56e5ee99d6e3d33bd91c5d85458b6005a22140021cc324cea84dd0e72cff3b4"
+checksum = "5f6c8828b67bf8908d82127b2054ea1b4427ff0230ee9141c54251934ab1b599"
 dependencies = [
  "icu_collections",
  "icu_normalizer_data",
@@ -3158,15 +3161,15 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer_data"
-version = "2.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38"
+checksum = "7aedcccd01fc5fe81e6b489c15b247b8b0690feb23304303a9e560f37efc560a"
 
 [[package]]
 name = "icu_properties"
-version = "2.2.0"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee3b67d0ea5c2cca5003417989af8996f8604e34fb9ddf96208a033901e70de"
+checksum = "020bfc02fe870ec3a66d93e677ccca0562506e5872c650f893269e08615d74ec"
 dependencies = [
  "icu_collections",
  "icu_locale_core",
@@ -3178,15 +3181,15 @@ dependencies = [
 
 [[package]]
 name = "icu_properties_data"
-version = "2.2.0"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14"
+checksum = "616c294cf8d725c6afcd8f55abc17c56464ef6211f9ed59cccffe534129c77af"
 
 [[package]]
 name = "icu_provider"
-version = "2.2.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
+checksum = "85962cf0ce02e1e0a629cc34e7ca3e373ce20dda4c4d7294bbd0bf1fdb59e614"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
@@ -4361,9 +4364,9 @@ dependencies = [
 
 [[package]]
 name = "potential_utf"
-version = "0.1.5"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
+checksum = "b73949432f5e2a09657003c25bca5e19a0e9c84f8058ca374f49e0ebe605af77"
 dependencies = [
  "zerovec",
 ]
@@ -5818,9 +5821,9 @@ dependencies = [
 
 [[package]]
 name = "tinystr"
-version = "0.8.3"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
+checksum = "42d3e9c45c09de15d06dd8acf5f4e0e399e85927b7f00711024eb7ae10fa4869"
 dependencies = [
  "displaydoc",
  "zerovec",
@@ -7463,9 +7466,9 @@ dependencies = [
 
 [[package]]
 name = "yoke"
-version = "0.8.2"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abe8c5fda708d9ca3df187cae8bfb9ceda00dd96231bed36e445a1a48e66f9ca"
+checksum = "72d6e5c6afb84d73944e5cedb052c4680d5657337201555f9f2a16b7406d4954"
 dependencies = [
  "stable_deref_trait",
  "yoke-derive",
@@ -7547,9 +7550,9 @@ dependencies = [
 
 [[package]]
 name = "zerotrie"
-version = "0.2.4"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f9152d31db0792fa83f70fb2f83148effb5c1f5b8c7686c3459e361d9bc20bf"
+checksum = "2a59c17a5562d507e4b54960e8569ebee33bee890c70aa3fe7b97e85a9fd7851"
 dependencies = [
  "displaydoc",
  "yoke",
@@ -7558,9 +7561,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec"
-version = "0.11.6"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239"
+checksum = "6c28719294829477f525be0186d13efa9a3c602f7ec202ca9e353d310fb9a002"
 dependencies = [
  "yoke",
  "zerofrom",

@@ -21,20 +21,14 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("address", types::ipv4_address())
+            AttributeSchema::optional("address", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_address()))
                 .create_only()
                 .with_description("The Elastic IP address to recover or an IPv4 address from an address pool.")
                 .with_provider_name("Address")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("domain", AttributeType::enum_(
-    carina_core::schema::enum_identity("Domain", Some("aws.ec2.Eip")),
-    Some(vec!["standard".to_string(), "vpc".to_string()]),
-    vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("domain", AttributeType::enum_(carina_core::schema::enum_identity("Domain", Some("aws.ec2.Eip")), Some(vec!["standard".to_string(), "vpc".to_string()]), vec![("standard".to_string(), "standard".to_string()), ("vpc".to_string(), "vpc".to_string())], None, None))
                 .create_only()
                 .with_description("The network (vpc).")
                 .with_provider_name("Domain")
@@ -48,13 +42,13 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("allocation_id", super::allocation_id())
+            AttributeSchema::provider_populated("allocation_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AllocationId.attribute_type()))
                 .with_description("The ID representing the allocation of the address. (read-only)")
                 .with_provider_name("AllocationId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("public_ip", types::ipv4_address())
+            AttributeSchema::provider_populated("public_ip", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_address()))
                 .with_description("The Elastic IP address. (read-only)")
                 .with_provider_name("PublicIp")
                 .build(),

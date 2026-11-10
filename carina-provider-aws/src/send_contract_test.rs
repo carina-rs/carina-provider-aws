@@ -482,18 +482,21 @@ fn sample_typed_string(
     pattern: Option<&carina_core::schema::PatternSpec>,
     length: Option<(Option<u64>, Option<u64>)>,
     validate: Option<&CustomValidator>,
+    member_pattern: Option<&carina_core::schema::PatternSpec>,
 ) -> Value {
-    let pattern = pattern.map(|pattern| {
-        CompiledPattern::try_new(pattern).expect("sample type's pattern was already admitted")
-    });
+    let patterns = [pattern, member_pattern]
+        .into_iter()
+        .flatten()
+        .map(|pattern| {
+            CompiledPattern::try_new(pattern).expect("sample type's pattern was already admitted")
+        })
+        .collect::<Vec<_>>();
     let accepts = |sample: &&str| {
         let size = sample.chars().count() as u64;
         let (minimum, maximum) = length.unwrap_or_default();
         minimum.is_none_or(|minimum| size >= minimum)
             && maximum.is_none_or(|maximum| size <= maximum)
-            && pattern
-                .as_ref()
-                .is_none_or(|pattern| pattern.is_match(sample))
+            && patterns.iter().all(|pattern| pattern.is_match(sample))
             && validate.is_none_or(|validate| validate(&string(*sample)).is_ok())
     };
     let row = identity.and_then(|identity| {
@@ -513,7 +516,7 @@ fn sample_typed_string(
         .find(accepts)
         .unwrap_or_else(|| {
             panic!(
-                "no valid string sample for {resource_type}.{}: identity={identity:?}, pattern={pattern:?}, length={length:?}",
+                "no valid string sample for {resource_type}.{}: identity={identity:?}, patterns={patterns:?}, length={length:?}",
                 path.join("."),
             )
         });
@@ -534,18 +537,35 @@ fn sample_value(
             path.join("."),
         ),
         Shape::String {
-            identity,
-            pattern,
-            length,
-            validate,
-            ..
-        } => sample_typed_string(resource_type, path, identity, pattern, length, validate),
+            identity_layer: i,
+            member_layer: m,
+        } => sample_typed_string(
+            resource_type,
+            path,
+            i.identity,
+            i.pattern,
+            carina_core::schema::intersect_bounds(i.length, m.length),
+            i.validate,
+            m.pattern,
+        ),
         Shape::Reference {
             identity,
             pattern,
             length,
-        } => sample_typed_string(resource_type, path, Some(identity), pattern, length, None),
-        Shape::Int { range, .. } => {
+        } => sample_typed_string(
+            resource_type,
+            path,
+            Some(identity),
+            pattern,
+            length,
+            None,
+            None,
+        ),
+        Shape::Int {
+            identity_layer: i,
+            member_layer: m,
+        } => {
+            let range = carina_core::schema::intersect_bounds(i.range, m.range);
             let minimum = range.and_then(|(minimum, _)| minimum).unwrap_or(1);
             let maximum = range.and_then(|(_, maximum)| maximum).unwrap_or(i64::MAX);
             let preferred = match path.last().map(String::as_str) {

@@ -8,7 +8,54 @@ use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
 use carina_provider_protocol::types::ValidatorType;
 
+const NESTED_ENUM_0: &[&str] = &["CNAME"];
+
+const NESTED_ENUM_1: &[&str] = &["DNS", "EMAIL", "HTTP"];
+
+const NESTED_ENUM_2: &[&str] = &["FAILED", "PENDING_VALIDATION", "SUCCESS"];
+
+const VALID_KEY_ALGORITHM: &[&str] = &["EC_prime256v1", "EC_secp384r1", "RSA_2048"];
+
+const NESTED_ENUM_4: &[&str] = &["DISABLED", "ENABLED"];
+
+const NESTED_ENUM_5: &[&str] = &["DISABLED", "ENABLED"];
+
+const NESTED_ENUM_6: &[&str] = &["DNS", "EMAIL", "HTTP"];
+
 const VALID_RENEWAL_ELIGIBILITY: &[&str] = &["ELIGIBLE", "INELIGIBLE"];
+
+const NESTED_ENUM_8: &[&str] = &["CNAME"];
+
+const NESTED_ENUM_9: &[&str] = &["DNS", "EMAIL", "HTTP"];
+
+const NESTED_ENUM_10: &[&str] = &["FAILED", "PENDING_VALIDATION", "SUCCESS"];
+
+const NESTED_ENUM_11: &[&str] = &[
+    "FAILED",
+    "PENDING_AUTO_RENEWAL",
+    "PENDING_VALIDATION",
+    "SUCCESS",
+];
+
+const NESTED_ENUM_12: &[&str] = &[
+    "ADDITIONAL_VERIFICATION_REQUIRED",
+    "CAA_ERROR",
+    "DOMAIN_NOT_ALLOWED",
+    "DOMAIN_VALIDATION_DENIED",
+    "INVALID_PUBLIC_DOMAIN",
+    "NO_AVAILABLE_CONTACTS",
+    "OTHER",
+    "PCA_ACCESS_DENIED",
+    "PCA_INVALID_ARGS",
+    "PCA_INVALID_ARN",
+    "PCA_INVALID_DURATION",
+    "PCA_INVALID_STATE",
+    "PCA_LIMIT_EXCEEDED",
+    "PCA_NAME_CONSTRAINTS_VALIDATION",
+    "PCA_REQUEST_FAILED",
+    "PCA_RESOURCE_NOT_FOUND",
+    "SLR_NOT_FOUND",
+];
 
 const VALID_STATUS: &[&str] = &[
     "EXPIRED",
@@ -20,7 +67,7 @@ const VALID_STATUS: &[&str] = &[
     "VALIDATION_TIMED_OUT",
 ];
 
-const VALID_TYPE: &[&str] = &["CNAME"];
+const VALID_TYPE: &[&str] = &["AMAZON_ISSUED", "IMPORTED", "PRIVATE"];
 
 const VALID_VALIDATION_METHOD: &[&str] = &["DNS", "EMAIL", "HTTP"];
 
@@ -38,14 +85,14 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
         .with_operation_config(carina_provider_protocol::types::OperationConfig { delete_timeout_secs: None, delete_max_retries: None, create_timeout_secs: None, create_max_retries: None, update_timeout_secs: None, read_back: carina_provider_protocol::types::ReadBackBudget::from_secs(300) })
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::required("domain_name", carina_aws_types::acm_certificate_domain_name())
+            AttributeSchema::required("domain_name", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))))), carina_aws_types::AwsType::AcmCertificateDomainName.attribute_type()))
                 .create_only()
                 .with_description("Fully qualified domain name (FQDN), such as www.example.com, that you want to secure with an ACM certificate. Use an asterisk (*) to create a wildcard...")
                 .with_provider_name("DomainName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("key_algorithm", carina_aws_types::acm_certificate_key_algorithm())
+            AttributeSchema::optional("key_algorithm", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.identity(), Some(vec!["EC_prime256v1".to_string(), "EC_secp384r1".to_string(), "RSA_2048".to_string()]), vec![("EC_prime256v1".to_string(), "ec_prime256v1".to_string()), ("EC_secp384r1".to_string(), "ec_secp384r1".to_string()), ("RSA_2048".to_string(), "rsa_2048".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.attribute_type()))
                 .create_only()
                 .with_description("Specifies the algorithm of the public and private key pair that your certificate uses to encrypt data. RSA is the default key algorithm for ACM certif...")
                 .with_provider_name("KeyAlgorithm")
@@ -55,27 +102,9 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
             AttributeSchema::optional("options", AttributeType::struct_(
                     "CertificateOptions".to_string(),
                     vec![
-                    StructField::optional("certificate_transparency_logging_preference", AttributeType::enum_(
-    carina_core::schema::enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate.CertificateOptions")),
-    Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
-    vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
-    None,
-    None,
-)).with_description("This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...").with_provider_name("CertificateTransparencyLoggingPreference").build(),
-                    StructField::optional("export", AttributeType::enum_(
-    carina_core::schema::enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions")),
-    Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]),
-    vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())],
-    None,
-    None,
-)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export").build(),
-                    StructField::optional("validation_method", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.CertificateOptions")),
-    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
-    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
-    None,
-    None,
-)).write_only().with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod").build()
+                    StructField::optional("certificate_transparency_logging_preference", AttributeType::enum_(carina_core::schema::enum_identity("CertificateTransparencyLoggingPreference", Some("aws.acm.Certificate.CertificateOptions")), Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]), vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())], None, None)).with_description("This parameter has been deprecated. Certificate transparency logging opt-out is no longer available. All public certificates are recorded in a certifi...").with_provider_name("CertificateTransparencyLoggingPreference").build(),
+                    StructField::optional("export", AttributeType::enum_(carina_core::schema::enum_identity("Export", Some("aws.acm.Certificate.CertificateOptions")), Some(vec!["DISABLED".to_string(), "ENABLED".to_string()]), vec![("DISABLED".to_string(), "disabled".to_string()), ("ENABLED".to_string(), "enabled".to_string())], None, None)).with_description("You can opt in to allow the export of your certificates by specifying ENABLED. You cannot update the value of Export after the the certificate is crea...").with_provider_name("Export").build(),
+                    StructField::optional("validation_method", AttributeType::enum_(carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.CertificateOptions")), Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]), vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())], None, None)).write_only().with_description("The domain validation method for the certificate. To migrate from email to DNS validation, specify DNS.").with_provider_name("ValidationMethod").build()
                     ],
                 ))
                 .create_only()
@@ -84,87 +113,57 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("subject_alternative_names", AttributeType::unordered_list(carina_aws_types::acm_certificate_subject_alternative_name()))
+            AttributeSchema::optional("subject_alternative_names", AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))))), carina_aws_types::AwsType::AcmCertificateSubjectAlternativeName.attribute_type()), false, Some((Some(1), Some(100))), carina_core::schema::ListElements::AllowDuplicates))
                 .create_only()
                 .with_description("Additional FQDNs to be included in the Subject Alternative Name extension of the ACM certificate. For example, add the name www.example.net to a certi...")
                 .with_provider_name("SubjectAlternativeNames")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("validation_method", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate")),
-    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
-    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("validation_method", AttributeType::enum_(carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate")), Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]), vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())], None, None))
                 .create_only()
                 .with_description("The method you want to use if you are requesting a public certificate to validate that you own or control domain. You can validate with DNS or validat...")
                 .with_provider_name("ValidationMethod")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("certificate_arn", carina_aws_types::acm_certificate_arn())
+            AttributeSchema::provider_populated("certificate_arn", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^arn:[A-Za-z0-9_+=/,.@\\-]+:acm:[A-Za-z0-9_+=/,.@\\-]*:[0-9]+:[A-Za-z0-9_+=,.@\\-]+(/[A-Za-z0-9_+=,.@\\-]+)*$", carina_core::schema::PatternMatch::Full)), Some((Some(20), Some(2048))))), carina_aws_types::AwsType::AcmCertificateArn.attribute_type()))
                 .with_description("The Amazon Resource Name (ARN) of the certificate. For more information about ARNs, see Amazon Resource Names (ARNs) in the Amazon Web Services Genera... (read-only)")
                 .with_provider_name("CertificateArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("domain_validation_options", AttributeType::list(AttributeType::struct_(
+            AttributeSchema::provider_populated("domain_validation_options", AttributeType::refined_list(AttributeType::struct_(
                     "DomainValidation".to_string(),
                     vec![
-                    StructField::required("domain_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
+                    StructField::required("domain_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253)))))).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
                     StructField::optional("http_redirect", AttributeType::struct_(
                     "HttpRedirect".to_string(),
                     vec![
-                    StructField::optional("redirect_from", carina_aws_types::acm_certificate_validation_url()).with_description("The URL including the domain to be validated. The certificate authority sends GET requests here during validation.").with_provider_name("RedirectFrom").build(),
-                    StructField::optional("redirect_to", carina_aws_types::acm_certificate_validation_url()).with_description("The URL hosting the validation token. RedirectFrom must return this content or redirect here.").with_provider_name("RedirectTo").build()
+                    StructField::optional("redirect_from", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type())).with_description("The URL including the domain to be validated. The certificate authority sends GET requests here during validation.").with_provider_name("RedirectFrom").build(),
+                    StructField::optional("redirect_to", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type())).with_description("The URL hosting the validation token. RedirectFrom must return this content or redirect here.").with_provider_name("RedirectTo").build()
                     ],
                 )).with_description("Contains information for HTTP-based domain validation of certificates requested through Amazon CloudFront and issued by ACM. This field exists only wh...").with_provider_name("HttpRedirect").build(),
                     StructField::optional("resource_record", AttributeType::struct_(
                     "ResourceRecord".to_string(),
                     vec![
-                    StructField::required("name", carina_aws_types::route53_dns_name()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
-                    StructField::required("type", AttributeType::enum_(
-    carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(),
-    Some(vec!["CNAME".to_string()]),
-    vec![("CNAME".to_string(), "cname".to_string())],
-    None,
-    None,
-)).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
-                    StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
+                    StructField::required("name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
+                    StructField::required("type", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(), Some(vec!["CNAME".to_string()]), vec![("CNAME".to_string(), "cname".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateResourceRecordType.attribute_type())).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
+                    StructField::required("value", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).deferred_populate().with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
-                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
-                    StructField::optional("validation_emails", AttributeType::list(types::email())).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
-                    StructField::optional("validation_method", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.DomainValidation")),
-    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
-    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
-    None,
-    None,
-)).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod").build(),
-                    StructField::optional("validation_status", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationStatus", Some("aws.acm.Certificate.DomainValidation")),
-    Some(vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]),
-    vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
-    None,
-    None,
-)).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus").build()
+                    StructField::optional("validation_domain", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253)))))).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
+                    StructField::optional("validation_emails", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), types::email()))).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
+                    StructField::optional("validation_method", AttributeType::enum_(carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.DomainValidation")), Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]), vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())], None, None)).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod").build(),
+                    StructField::optional("validation_status", AttributeType::enum_(carina_core::schema::enum_identity("ValidationStatus", Some("aws.acm.Certificate.DomainValidation")), Some(vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]), vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())], None, None)).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus").build()
                     ],
-                )))
+                ), true, Some((Some(1), Some(1000))), carina_core::schema::ListElements::AllowDuplicates))
                 .with_description("Contains information about the initial validation of each domain name that occurs as a result of the RequestCertificate request. This field exists onl... (read-only)")
                 .with_provider_name("DomainValidationOptions")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("renewal_eligibility", AttributeType::enum_(
-    carina_core::schema::enum_identity("RenewalEligibility", Some("aws.acm.Certificate")),
-    Some(vec!["ELIGIBLE".to_string(), "INELIGIBLE".to_string()]),
-    vec![("ELIGIBLE".to_string(), "eligible".to_string()), ("INELIGIBLE".to_string(), "ineligible".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::provider_populated("renewal_eligibility", AttributeType::enum_(carina_core::schema::enum_identity("RenewalEligibility", Some("aws.acm.Certificate")), Some(vec!["ELIGIBLE".to_string(), "INELIGIBLE".to_string()]), vec![("ELIGIBLE".to_string(), "eligible".to_string()), ("INELIGIBLE".to_string(), "ineligible".to_string())], None, None))
                 .with_description("Specifies whether the certificate is eligible for renewal. At this time, only exported private certificates can be renewed with the RenewCertificate c... (read-only)")
                 .with_provider_name("RenewalEligibility")
                 .build(),
@@ -173,63 +172,33 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
             AttributeSchema::provider_populated("renewal_summary", AttributeType::struct_(
                     "RenewalSummary".to_string(),
                     vec![
-                    StructField::required("domain_validation_options", AttributeType::list(AttributeType::struct_(
+                    StructField::required("domain_validation_options", AttributeType::refined_list(AttributeType::struct_(
                     "DomainValidation".to_string(),
                     vec![
-                    StructField::required("domain_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
+                    StructField::required("domain_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253)))))).with_description("A fully qualified domain name (FQDN) in the certificate. For example, www.example.com or example.com.").with_provider_name("DomainName").build(),
                     StructField::optional("http_redirect", AttributeType::struct_(
                     "HttpRedirect".to_string(),
                     vec![
-                    StructField::optional("redirect_from", carina_aws_types::acm_certificate_validation_url()).with_description("The URL including the domain to be validated. The certificate authority sends GET requests here during validation.").with_provider_name("RedirectFrom").build(),
-                    StructField::optional("redirect_to", carina_aws_types::acm_certificate_validation_url()).with_description("The URL hosting the validation token. RedirectFrom must return this content or redirect here.").with_provider_name("RedirectTo").build()
+                    StructField::optional("redirect_from", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type())).with_description("The URL including the domain to be validated. The certificate authority sends GET requests here during validation.").with_provider_name("RedirectFrom").build(),
+                    StructField::optional("redirect_to", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type())).with_description("The URL hosting the validation token. RedirectFrom must return this content or redirect here.").with_provider_name("RedirectTo").build()
                     ],
                 )).with_description("Contains information for HTTP-based domain validation of certificates requested through Amazon CloudFront and issued by ACM. This field exists only wh...").with_provider_name("HttpRedirect").build(),
                     StructField::optional("resource_record", AttributeType::struct_(
                     "ResourceRecord".to_string(),
                     vec![
-                    StructField::required("name", carina_aws_types::route53_dns_name()).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
-                    StructField::required("type", AttributeType::enum_(
-    carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(),
-    Some(vec!["CNAME".to_string()]),
-    vec![("CNAME".to_string(), "cname".to_string())],
-    None,
-    None,
-)).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
-                    StructField::required("value", carina_aws_types::route53_dns_name()).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
+                    StructField::required("name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
+                    StructField::required("type", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(), Some(vec!["CNAME".to_string()]), vec![("CNAME".to_string(), "cname".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateResourceRecordType.attribute_type())).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
+                    StructField::required("value", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
-                    StructField::optional("validation_domain", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253))), None)).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
-                    StructField::optional("validation_emails", AttributeType::list(types::email())).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
-                    StructField::optional("validation_method", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.RenewalSummary.DomainValidation")),
-    Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]),
-    vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())],
-    None,
-    None,
-)).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod").build(),
-                    StructField::optional("validation_status", AttributeType::enum_(
-    carina_core::schema::enum_identity("ValidationStatus", Some("aws.acm.Certificate.RenewalSummary.DomainValidation")),
-    Some(vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]),
-    vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
-    None,
-    None,
-)).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus").build()
+                    StructField::optional("validation_domain", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^(\\*\\.)?(((?:[\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61})?[A-Za-z0-9])\\.)+([\\x{30}-\\x{39}\\x{41}-\\x{5a}\\x{61}-\\x{7a}][A-Za-z0-9\\-]{0,61}[A-Za-z0-9])$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(253)))))).with_description("The domain name that ACM used to send domain validation emails.").with_provider_name("ValidationDomain").build(),
+                    StructField::optional("validation_emails", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), types::email()))).with_description("A list of email addresses that ACM used to send domain validation emails.").with_provider_name("ValidationEmails").build(),
+                    StructField::optional("validation_method", AttributeType::enum_(carina_core::schema::enum_identity("ValidationMethod", Some("aws.acm.Certificate.RenewalSummary.DomainValidation")), Some(vec!["DNS".to_string(), "EMAIL".to_string(), "HTTP".to_string()]), vec![("DNS".to_string(), "dns".to_string()), ("EMAIL".to_string(), "email".to_string()), ("HTTP".to_string(), "http".to_string())], None, None)).with_description("Specifies the domain validation method.").with_provider_name("ValidationMethod").build(),
+                    StructField::optional("validation_status", AttributeType::enum_(carina_core::schema::enum_identity("ValidationStatus", Some("aws.acm.Certificate.RenewalSummary.DomainValidation")), Some(vec!["FAILED".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]), vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())], None, None)).with_description("The validation status of the domain name. This can be one of the following values: PENDING_VALIDATION SUCCESS FAILED").with_provider_name("ValidationStatus").build()
                     ],
-                ))).with_description("Contains information about the validation of each domain name in the certificate, as it pertains to ACM's managed renewal. This is different from the ...").with_provider_name("DomainValidationOptions").build(),
-                    StructField::required("renewal_status", AttributeType::enum_(
-    carina_core::schema::enum_identity("RenewalStatus", Some("aws.acm.Certificate.RenewalSummary")),
-    Some(vec!["FAILED".to_string(), "PENDING_AUTO_RENEWAL".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]),
-    vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_AUTO_RENEWAL".to_string(), "pending_auto_renewal".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())],
-    None,
-    None,
-)).with_description("The status of ACM's managed renewal of the certificate.").with_provider_name("RenewalStatus").build(),
-                    StructField::optional("renewal_status_reason", AttributeType::enum_(
-    carina_core::schema::enum_identity("RenewalStatusReason", Some("aws.acm.Certificate.RenewalSummary")),
-    Some(vec!["ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "CAA_ERROR".to_string(), "DOMAIN_NOT_ALLOWED".to_string(), "DOMAIN_VALIDATION_DENIED".to_string(), "INVALID_PUBLIC_DOMAIN".to_string(), "NO_AVAILABLE_CONTACTS".to_string(), "OTHER".to_string(), "PCA_ACCESS_DENIED".to_string(), "PCA_INVALID_ARGS".to_string(), "PCA_INVALID_ARN".to_string(), "PCA_INVALID_DURATION".to_string(), "PCA_INVALID_STATE".to_string(), "PCA_LIMIT_EXCEEDED".to_string(), "PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "PCA_REQUEST_FAILED".to_string(), "PCA_RESOURCE_NOT_FOUND".to_string(), "SLR_NOT_FOUND".to_string()]),
-    vec![("ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "additional_verification_required".to_string()), ("CAA_ERROR".to_string(), "caa_error".to_string()), ("DOMAIN_NOT_ALLOWED".to_string(), "domain_not_allowed".to_string()), ("DOMAIN_VALIDATION_DENIED".to_string(), "domain_validation_denied".to_string()), ("INVALID_PUBLIC_DOMAIN".to_string(), "invalid_public_domain".to_string()), ("NO_AVAILABLE_CONTACTS".to_string(), "no_available_contacts".to_string()), ("OTHER".to_string(), "other".to_string()), ("PCA_ACCESS_DENIED".to_string(), "pca_access_denied".to_string()), ("PCA_INVALID_ARGS".to_string(), "pca_invalid_args".to_string()), ("PCA_INVALID_ARN".to_string(), "pca_invalid_arn".to_string()), ("PCA_INVALID_DURATION".to_string(), "pca_invalid_duration".to_string()), ("PCA_INVALID_STATE".to_string(), "pca_invalid_state".to_string()), ("PCA_LIMIT_EXCEEDED".to_string(), "pca_limit_exceeded".to_string()), ("PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "pca_name_constraints_validation".to_string()), ("PCA_REQUEST_FAILED".to_string(), "pca_request_failed".to_string()), ("PCA_RESOURCE_NOT_FOUND".to_string(), "pca_resource_not_found".to_string()), ("SLR_NOT_FOUND".to_string(), "slr_not_found".to_string())],
-    None,
-    None,
-)).with_description("The reason that a renewal request was unsuccessful.").with_provider_name("RenewalStatusReason").build(),
+                ), true, Some((Some(1), Some(1000))), carina_core::schema::ListElements::AllowDuplicates)).with_description("Contains information about the validation of each domain name in the certificate, as it pertains to ACM's managed renewal. This is different from the ...").with_provider_name("DomainValidationOptions").build(),
+                    StructField::required("renewal_status", AttributeType::enum_(carina_core::schema::enum_identity("RenewalStatus", Some("aws.acm.Certificate.RenewalSummary")), Some(vec!["FAILED".to_string(), "PENDING_AUTO_RENEWAL".to_string(), "PENDING_VALIDATION".to_string(), "SUCCESS".to_string()]), vec![("FAILED".to_string(), "failed".to_string()), ("PENDING_AUTO_RENEWAL".to_string(), "pending_auto_renewal".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("SUCCESS".to_string(), "success".to_string())], None, None)).with_description("The status of ACM's managed renewal of the certificate.").with_provider_name("RenewalStatus").build(),
+                    StructField::optional("renewal_status_reason", AttributeType::enum_(carina_core::schema::enum_identity("RenewalStatusReason", Some("aws.acm.Certificate.RenewalSummary")), Some(vec!["ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "CAA_ERROR".to_string(), "DOMAIN_NOT_ALLOWED".to_string(), "DOMAIN_VALIDATION_DENIED".to_string(), "INVALID_PUBLIC_DOMAIN".to_string(), "NO_AVAILABLE_CONTACTS".to_string(), "OTHER".to_string(), "PCA_ACCESS_DENIED".to_string(), "PCA_INVALID_ARGS".to_string(), "PCA_INVALID_ARN".to_string(), "PCA_INVALID_DURATION".to_string(), "PCA_INVALID_STATE".to_string(), "PCA_LIMIT_EXCEEDED".to_string(), "PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "PCA_REQUEST_FAILED".to_string(), "PCA_RESOURCE_NOT_FOUND".to_string(), "SLR_NOT_FOUND".to_string()]), vec![("ADDITIONAL_VERIFICATION_REQUIRED".to_string(), "additional_verification_required".to_string()), ("CAA_ERROR".to_string(), "caa_error".to_string()), ("DOMAIN_NOT_ALLOWED".to_string(), "domain_not_allowed".to_string()), ("DOMAIN_VALIDATION_DENIED".to_string(), "domain_validation_denied".to_string()), ("INVALID_PUBLIC_DOMAIN".to_string(), "invalid_public_domain".to_string()), ("NO_AVAILABLE_CONTACTS".to_string(), "no_available_contacts".to_string()), ("OTHER".to_string(), "other".to_string()), ("PCA_ACCESS_DENIED".to_string(), "pca_access_denied".to_string()), ("PCA_INVALID_ARGS".to_string(), "pca_invalid_args".to_string()), ("PCA_INVALID_ARN".to_string(), "pca_invalid_arn".to_string()), ("PCA_INVALID_DURATION".to_string(), "pca_invalid_duration".to_string()), ("PCA_INVALID_STATE".to_string(), "pca_invalid_state".to_string()), ("PCA_LIMIT_EXCEEDED".to_string(), "pca_limit_exceeded".to_string()), ("PCA_NAME_CONSTRAINTS_VALIDATION".to_string(), "pca_name_constraints_validation".to_string()), ("PCA_REQUEST_FAILED".to_string(), "pca_request_failed".to_string()), ("PCA_RESOURCE_NOT_FOUND".to_string(), "pca_resource_not_found".to_string()), ("SLR_NOT_FOUND".to_string(), "slr_not_found".to_string())], None, None)).with_description("The reason that a renewal request was unsuccessful.").with_provider_name("RenewalStatusReason").build(),
                     StructField::required("updated_at", AttributeType::string()).with_description("The time at which the renewal summary was last updated.").with_provider_name("UpdatedAt").build()
                     ],
                 ))
@@ -238,32 +207,20 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("status", AttributeType::enum_(
-    carina_core::schema::enum_identity("Status", Some("aws.acm.Certificate")),
-    Some(vec!["EXPIRED".to_string(), "FAILED".to_string(), "INACTIVE".to_string(), "ISSUED".to_string(), "PENDING_VALIDATION".to_string(), "REVOKED".to_string(), "VALIDATION_TIMED_OUT".to_string()]),
-    vec![("EXPIRED".to_string(), "expired".to_string()), ("FAILED".to_string(), "failed".to_string()), ("INACTIVE".to_string(), "inactive".to_string()), ("ISSUED".to_string(), "issued".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("REVOKED".to_string(), "revoked".to_string()), ("VALIDATION_TIMED_OUT".to_string(), "validation_timed_out".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::provider_populated("status", AttributeType::enum_(carina_core::schema::enum_identity("Status", Some("aws.acm.Certificate")), Some(vec!["EXPIRED".to_string(), "FAILED".to_string(), "INACTIVE".to_string(), "ISSUED".to_string(), "PENDING_VALIDATION".to_string(), "REVOKED".to_string(), "VALIDATION_TIMED_OUT".to_string()]), vec![("EXPIRED".to_string(), "expired".to_string()), ("FAILED".to_string(), "failed".to_string()), ("INACTIVE".to_string(), "inactive".to_string()), ("ISSUED".to_string(), "issued".to_string()), ("PENDING_VALIDATION".to_string(), "pending_validation".to_string()), ("REVOKED".to_string(), "revoked".to_string()), ("VALIDATION_TIMED_OUT".to_string(), "validation_timed_out".to_string())], None, None))
                 .deferred_populate()
                 .with_description("The status of the certificate. A certificate enters status PENDING_VALIDATION upon being requested, unless it fails for any of the reasons given in th... (read-only)")
                 .with_provider_name("Status")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("type", AttributeType::enum_(
-    carina_core::schema::enum_identity("Type", Some("aws.acm.Certificate")),
-    Some(vec!["AMAZON_ISSUED".to_string(), "IMPORTED".to_string(), "PRIVATE".to_string()]),
-    vec![("AMAZON_ISSUED".to_string(), "amazon_issued".to_string()), ("IMPORTED".to_string(), "imported".to_string()), ("PRIVATE".to_string(), "private".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::provider_populated("type", AttributeType::enum_(carina_core::schema::enum_identity("Type", Some("aws.acm.Certificate")), Some(vec!["AMAZON_ISSUED".to_string(), "IMPORTED".to_string(), "PRIVATE".to_string()]), vec![("AMAZON_ISSUED".to_string(), "amazon_issued".to_string()), ("IMPORTED".to_string(), "imported".to_string()), ("PRIVATE".to_string(), "private".to_string())], None, None))
                 .with_description("The source of the certificate. For certificates provided by ACM, this value is AMAZON_ISSUED. For certificates that you imported with ImportCertificat... (read-only)")
                 .with_provider_name("Type")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((None, Some(256))), None), Some((Some(1), Some(50)))))
+            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(128))))), AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Full)), Some((None, Some(256))))), Some((Some(1), Some(50)))))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),
@@ -280,7 +237,40 @@ pub fn enum_valid_values() -> (
     (
         "acm.Certificate",
         &[
+            (
+                "domain_validation_options[].resource_record.type",
+                NESTED_ENUM_0,
+            ),
+            (
+                "domain_validation_options[].validation_method",
+                NESTED_ENUM_1,
+            ),
+            (
+                "domain_validation_options[].validation_status",
+                NESTED_ENUM_2,
+            ),
+            ("key_algorithm", VALID_KEY_ALGORITHM),
+            (
+                "options.certificate_transparency_logging_preference",
+                NESTED_ENUM_4,
+            ),
+            ("options.export", NESTED_ENUM_5),
+            ("options.validation_method", NESTED_ENUM_6),
             ("renewal_eligibility", VALID_RENEWAL_ELIGIBILITY),
+            (
+                "renewal_summary.domain_validation_options[].resource_record.type",
+                NESTED_ENUM_8,
+            ),
+            (
+                "renewal_summary.domain_validation_options[].validation_method",
+                NESTED_ENUM_9,
+            ),
+            (
+                "renewal_summary.domain_validation_options[].validation_status",
+                NESTED_ENUM_10,
+            ),
+            ("renewal_summary.renewal_status", NESTED_ENUM_11),
+            ("renewal_summary.renewal_status_reason", NESTED_ENUM_12),
             ("status", VALID_STATUS),
             ("type", VALID_TYPE),
             ("validation_method", VALID_VALIDATION_METHOD),

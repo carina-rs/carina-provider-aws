@@ -6,7 +6,11 @@ fn catalog_patterns_preserve_accepted_and_rejected_values() {
     for row in AwsType::ALL {
         let attribute = row.attribute_type();
         let pattern = match attribute.raw_shape() {
-            RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
+            RawShape::String {
+                identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+                ..
+            }
+            | RawShape::Reference { pattern, .. } => pattern,
             _ => None,
         };
         let Some(pattern) = pattern else { continue };

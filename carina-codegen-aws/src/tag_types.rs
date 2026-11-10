@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
-use carina_core::schema::{AttributeType, PatternMatch, PatternReason, PatternSpec};
+use carina_core::schema::{AttributeType, PatternSpec};
 use carina_smithy::{Shape, ShapeRef, SmithyModel};
 
 use super::{
@@ -17,34 +17,31 @@ struct TagString {
 }
 
 impl TagString {
-    fn from_member(model: &SmithyModel, member: &ShapeRef) -> Result<Self> {
-        let traits = match model.get_shape(&member.target) {
-            Some(Shape::String(shape)) => &shape.traits,
-            None if member.target == "smithy.api#String" => &member.traits,
-            other => anyhow::bail!(
-                "Tag member {} must target a string, got {other:?}",
-                member.target
-            ),
+    fn from_member(
+        model: &SmithyModel,
+        member: &ShapeRef,
+        resource: &str,
+        path: &str,
+    ) -> Result<Self> {
+        anyhow::ensure!(
+            matches!(model.get_shape(&member.target), Some(Shape::String(_)))
+                || member.target == "smithy.api#String",
+            "{resource}.{path}: tag member must target a String"
+        );
+        let value = super::string_members::derive(model, member, resource, path, &[])?;
+        let carina_core::schema::RawShape::String {
+            member_layer:
+                carina_core::schema::StringMemberParts {
+                    pattern, length, ..
+                },
+            ..
+        } = value.attribute_type.raw_shape()
+        else {
+            unreachable!("derived String")
         };
-        let pattern = member
-            .traits
-            .get("smithy.api#pattern")
-            .or_else(|| traits.get("smithy.api#pattern"))
-            .and_then(|pattern| pattern.as_str())
-            .map(|pattern| {
-                PatternSpec::new(
-                    pattern,
-                    PatternMatch::Substring {
-                        reason: PatternReason::new(
-                            "Smithy tag patterns retain their authored search semantics.",
-                        )
-                        .expect("visible pattern reason"),
-                    },
-                )
-            });
         Ok(Self {
-            pattern,
-            length: length_from_traits(&member.traits).or_else(|| length_from_traits(traits)),
+            pattern: pattern.cloned(),
+            length,
         })
     }
 
@@ -63,7 +60,12 @@ pub struct TagMapType {
 impl TagMapType {
     /// Lists retain their entry-count constraint when converted to a map.
     /// A standalone Tag structure has only its Key/Value refinements.
-    pub fn from_shape(model: &SmithyModel, target: &str) -> Result<Option<Self>> {
+    pub fn from_shape(
+        model: &SmithyModel,
+        target: &str,
+        resource: &str,
+        path: &str,
+    ) -> Result<Option<Self>> {
         let (key, value, length) = if let Some(Shape::Map(shape)) = model.get_shape(target) {
             (&shape.key, &shape.value, length_from_traits(&shape.traits))
         } else if let Some(Shape::List(shape)) = model.get_shape(target) {
@@ -85,8 +87,8 @@ impl TagMapType {
             return Ok(None);
         };
         Ok(Some(Self {
-            key: TagString::from_member(model, key)?,
-            value: TagString::from_member(model, value)?,
+            key: TagString::from_member(model, key, resource, &format!("{path}{{key}}"))?,
+            value: TagString::from_member(model, value, resource, &format!("{path}{{}}"))?,
             length,
         }))
     }
@@ -111,24 +113,25 @@ impl TagMapType {
 fn collect_sources(
     model: &SmithyModel,
     target: &str,
+    resource: &str,
     sources: &mut BTreeMap<String, TagMapType>,
     visiting: &mut HashSet<String>,
 ) -> Result<()> {
     if !visiting.insert(target.to_string()) {
         anyhow::bail!("Recursive tag source {target}");
     }
-    if let Some(tags) = TagMapType::from_shape(model, target)? {
+    if let Some(tags) = TagMapType::from_shape(model, target, resource, "tags")? {
         sources.insert(target.to_string(), tags);
     } else if let Some(Shape::Structure(shape)) = model.get_shape(target) {
         for (name, member) in &shape.members {
             if ["tags", "tagset", "tagging", "tagspecifications"]
                 .contains(&name.to_ascii_lowercase().as_str())
             {
-                collect_sources(model, &member.target, sources, visiting)?;
+                collect_sources(model, &member.target, resource, sources, visiting)?;
             }
         }
     } else if let Some(Shape::List(shape)) = model.get_shape(target) {
-        collect_sources(model, &shape.member.target, sources, visiting)?;
+        collect_sources(model, &shape.member.target, resource, sources, visiting)?;
     }
     visiting.remove(target);
     Ok(())
@@ -142,6 +145,7 @@ pub fn resource_tag_type(res: &ResourceDef, model: &SmithyModel) -> Result<TagMa
         collect_sources(
             model,
             &format!("{}#{structure}", res.service_namespace),
+            res.name,
             &mut sources,
             &mut visiting,
         )?;
@@ -159,7 +163,7 @@ pub fn resource_tag_type(res: &ResourceDef, model: &SmithyModel) -> Result<TagMa
         let id = format!("{}#{operation}", res.service_namespace);
         if let Some(Shape::Operation(op)) = model.get_shape(&id) {
             for member in op.input.iter().chain(op.output.iter()) {
-                collect_sources(model, &member.target, &mut sources, &mut visiting)?;
+                collect_sources(model, &member.target, res.name, &mut sources, &mut visiting)?;
             }
         }
     }
@@ -196,7 +200,7 @@ pub fn resource_tag_type(res: &ResourceDef, model: &SmithyModel) -> Result<TagMa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use carina_core::schema::CompiledPattern;
+    use carina_core::schema::{CompiledPattern, PatternMatch};
 
     #[test]
     fn smithy_prefix_pattern_keeps_search_matching() {
@@ -212,7 +216,7 @@ mod tests {
             target: "test#Value".into(),
             traits: Default::default(),
         };
-        let tag = TagString::from_member(&model, &member).unwrap();
+        let tag = TagString::from_member(&model, &member, "test.Tags", "tags{}").unwrap();
         let pattern = tag.pattern.as_ref().unwrap();
         assert!(matches!(pattern.mode(), PatternMatch::Substring { .. }));
         let compiled = CompiledPattern::try_new(pattern).unwrap();

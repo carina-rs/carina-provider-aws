@@ -26,9 +26,9 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
             AttributeSchema::optional("alias_target", AttributeType::struct_(
                     "AliasTarget".to_string(),
                     vec![
-                    StructField::required("dns_name", carina_aws_types::route53_dns_name()).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
+                    StructField::required("dns_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("Alias resource record sets only: The value that you specify depends on where you want to route queries: Amazon API Gateway custom regional APIs and ed...").with_provider_name("DNSName").build(),
                     StructField::required("evaluate_target_health", AttributeType::bool()).with_description("Applies only to alias, failover alias, geolocation alias, latency alias, and weighted alias resource record sets: When EvaluateTargetHealth is true, a...").with_provider_name("EvaluateTargetHealth").build(),
-                    StructField::required("hosted_zone_id", AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])).with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId").build()
+                    StructField::required("hosted_zone_id", AttributeType::union(vec![carina_aws_types::with_member_values(carina_aws_types::AwsType::CloudFrontHostedZoneId.attribute_type(), &["Z2FDTNDATAQYW2"]), carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(32))))), carina_aws_types::AwsType::Route53HostedZoneId.attribute_type())])).with_description("Alias resource records sets only: The value used depends on where you want to route traffic: Amazon API Gateway custom regional APIs and edge-optimize...").with_provider_name("HostedZoneId").build()
                     ],
                 ))
                 .with_description("Alias resource record sets only: Information about the Amazon Web Services resource, such as a CloudFront distribution or an Amazon S3 bucket, that yo...")
@@ -36,7 +36,7 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("name", carina_aws_types::route53_dns_name())
+            AttributeSchema::required("name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024))))))
                 .create_only()
                 .identity()
                 .with_description("For ChangeResourceRecordSets requests, the name of the record that you want to create, update, or delete. For ListResourceRecordSets responses, the na...")
@@ -44,28 +44,19 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("resource_records", AttributeType::refined_list(AttributeType::refined_string(None, None, Some((Some(0), Some(4000))), None), true, Some((Some(1), None)), carina_core::schema::ListElements::AllowDuplicates))
+            AttributeSchema::optional("resource_records", AttributeType::refined_list(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(4000))))), true, Some((Some(1), None)), carina_core::schema::ListElements::AllowDuplicates))
                 .with_description("Information about the resource records to act upon. If you're creating an alias resource record set, omit ResourceRecords.")
                 .with_provider_name("ResourceRecords")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ttl", AttributeType::refined_int(
-                None,
-                Some((Some(0), Some(2147483647))),
-            ))
+            AttributeSchema::optional("ttl", AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(0), Some(2147483647))))))
                 .with_description("The resource record cache time to live (TTL), in seconds. Note the following: If you're creating or updating an alias resource record set, omit TTL. A...")
                 .with_provider_name("TTL")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("type", AttributeType::enum_(
-    carina_aws_types::AwsType::DnsRecordType.identity(),
-    Some(vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()]),
-    vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::required("type", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::DnsRecordType.identity(), Some(vec!["A".to_string(), "AAAA".to_string(), "CAA".to_string(), "CNAME".to_string(), "DS".to_string(), "HTTPS".to_string(), "MX".to_string(), "NAPTR".to_string(), "NS".to_string(), "PTR".to_string(), "SOA".to_string(), "SPF".to_string(), "SRV".to_string(), "SSHFP".to_string(), "SVCB".to_string(), "TLSA".to_string(), "TXT".to_string()]), vec![("A".to_string(), "a".to_string()), ("AAAA".to_string(), "aaaa".to_string()), ("CAA".to_string(), "caa".to_string()), ("CNAME".to_string(), "cname".to_string()), ("DS".to_string(), "ds".to_string()), ("HTTPS".to_string(), "https".to_string()), ("MX".to_string(), "mx".to_string()), ("NAPTR".to_string(), "naptr".to_string()), ("NS".to_string(), "ns".to_string()), ("PTR".to_string(), "ptr".to_string()), ("SOA".to_string(), "soa".to_string()), ("SPF".to_string(), "spf".to_string()), ("SRV".to_string(), "srv".to_string()), ("SSHFP".to_string(), "sshfp".to_string()), ("SVCB".to_string(), "svcb".to_string()), ("TLSA".to_string(), "tlsa".to_string()), ("TXT".to_string(), "txt".to_string())], None, None), carina_aws_types::AwsType::DnsRecordType.attribute_type()))
                 .create_only()
                 .identity()
                 .with_description("The DNS record type. For information about different record types and how data is encoded for them, see Supported DNS Resource Record Types in the Ama...")
@@ -73,13 +64,15 @@ pub fn route53_record_set_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("hosted_zone_id", carina_aws_types::route53_hosted_zone_id())
+            AttributeSchema::required("hosted_zone_id", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(32))))), carina_aws_types::AwsType::Route53HostedZoneId.attribute_type()))
                 .create_only()
                 .identity()
                 .with_description("The ID of the hosted zone that contains this record set.")
                 .with_provider_name("HostedZoneId")
                 .build(),
         )
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::EveryWrite, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("alias_target.dns_name").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63}(?:\\.(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63})*\\.?\\z", carina_core::schema::PatternMatch::Full))))
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("name").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63}(?:\\.(?:[\\x21-\\x2D\\x2F-\\x5B\\x5D-\\x7E]|\\\\[0-3][0-7]{2}){1,63})*\\.?\\z", carina_core::schema::PatternMatch::Full))))
     }
 }
 
