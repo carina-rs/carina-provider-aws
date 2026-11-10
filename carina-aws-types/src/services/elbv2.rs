@@ -77,10 +77,14 @@ mod tests {
     fn elbv2_health_check_port_is_anonymous_and_validates_whole_strings() {
         let attr = elbv2_health_check_port();
         let RawShape::String {
-            identity,
-            pattern: Some(pattern),
-            length,
-            validate,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern: Some(pattern),
+                    length,
+                    validate,
+                    ..
+                },
             ..
         } = attr.raw_shape()
         else {
@@ -141,7 +145,11 @@ mod tests {
     fn elbv2_health_check_port_pattern_covers_every_port() {
         let attr = elbv2_health_check_port();
         let RawShape::String {
-            pattern: Some(pattern),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    pattern: Some(pattern),
+                    ..
+                },
             ..
         } = attr.raw_shape()
         else {

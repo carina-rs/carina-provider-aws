@@ -30,9 +30,13 @@ fn iam_role_refinements_use_named_name_and_anonymous_path() {
             ("path", None, r"^(?:/|/[\x21-\x7E]+/)\z", 512),
         ] {
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {

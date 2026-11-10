@@ -33,9 +33,13 @@ fn organizations_account_refinements_use_iam_role_identity_and_anonymous_account
             ("account_name", None, r"^[ -;=?-~]+\z", 50),
         ] {
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {
@@ -65,9 +69,13 @@ fn organizations_account_id_and_arn_use_shared_catalog_types_after_protocol_roun
         ] {
             let expected = row.attribute_type();
             let RawShape::String {
-                identity: expected_identity,
-                pattern: expected_pattern,
-                length: expected_length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: expected_identity,
+                        pattern: expected_pattern,
+                        length: expected_length,
+                        ..
+                    },
                 ..
             } = expected.raw_shape()
             else {
@@ -76,9 +84,13 @@ fn organizations_account_id_and_arn_use_shared_catalog_types_after_protocol_roun
             let attribute = schema.effective_attribute(field).unwrap();
             assert!(attribute.is_read_only());
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = attribute.field_type().raw_shape()
             else {
@@ -142,9 +154,13 @@ fn organizations_account_email_has_named_bounds_and_timestamp_stays_string() {
     for schema in organizations_account_schemas() {
         let email = schema.effective_attribute("email").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = email.field_type().raw_shape()
         else {
@@ -166,9 +182,13 @@ fn organizations_account_email_has_named_bounds_and_timestamp_stays_string() {
             assert!(email.validate(&value).is_ok(), "plus addressing: {valid}");
         }
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = schema.parts().attributes["joined_timestamp"]
             .attr_type()

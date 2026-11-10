@@ -36,7 +36,11 @@ macro_rules! bound_test {
                 let path: Vec<String> = $path.split('.').map(str::to_string).collect();
                 let field = schema.effective_type_at_attribute_path(&path).unwrap();
                 let RawShape::Int {
-                    identity, range, ..
+                    identity_layer:
+                        carina_core::schema::IntIdentityParts {
+                            identity, range, ..
+                        },
+                    ..
                 } = field.as_type().raw_shape()
                 else {
                     panic!("{} must keep its Int carrier", $path);
@@ -108,9 +112,13 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
     for schema in sqs_schemas() {
         let name = schema.effective_attribute("queue_name").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = name.field_type().raw_shape()
         else {
@@ -210,9 +218,13 @@ fn sqs_closed_enums_have_snake_case_dsl_values_and_exact_aws_wire_values() {
 fn sqs_queue_arn_identity_and_grammar_apply_to_all_three_paths() {
     let catalog = carina_aws_types::sqs_queue_arn();
     let RawShape::String {
-        identity: Some(expected_identity),
-        pattern: expected_pattern,
-        length: expected_length,
+        identity_layer:
+            carina_core::schema::StringIdentityParts {
+                identity: Some(expected_identity),
+                pattern: expected_pattern,
+                length: expected_length,
+                ..
+            },
         ..
     } = catalog.raw_shape()
     else {
@@ -250,11 +262,15 @@ fn sqs_queue_arn_identity_and_grammar_apply_to_all_three_paths() {
                 leaf
             };
             let RawShape::String {
-                identity,
-                pattern,
-                length,
-                validate,
-                to_dsl,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        validate,
+                        to_dsl,
+                    },
+                ..
             } = leaf.as_type().raw_shape()
             else {
                 panic!("{path} must be a String ARN leaf");

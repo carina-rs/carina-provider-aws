@@ -1648,11 +1648,19 @@ mod tests {
     fn attribute_type_identity(attribute_type: &AttributeType) -> &TypeIdentity {
         match attribute_type.raw_shape() {
             RawShape::String {
-                identity: Some(identity),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(identity),
+                        ..
+                    },
                 ..
             }
             | RawShape::Int {
-                identity: Some(identity),
+                identity_layer:
+                    carina_core::schema::IntIdentityParts {
+                        identity: Some(identity),
+                        ..
+                    },
                 ..
             }
             | RawShape::Float {
@@ -1667,8 +1675,14 @@ mod tests {
     fn attribute_type_validator(attribute_type: &AttributeType) -> Option<&CustomValidator> {
         match attribute_type.raw_shape() {
             RawShape::Reference { .. } => None,
-            RawShape::String { validate, .. }
-            | RawShape::Int { validate, .. }
+            RawShape::String {
+                identity_layer: carina_core::schema::StringIdentityParts { validate, .. },
+                ..
+            }
+            | RawShape::Int {
+                identity_layer: carina_core::schema::IntIdentityParts { validate, .. },
+                ..
+            }
             | RawShape::Float { validate, .. }
             | RawShape::Enum { validate, .. } => validate,
             shape => panic!("catalog constructor must carry a scalar identity, got {shape:?}"),
@@ -1703,10 +1717,14 @@ mod tests {
             assert!(row.has_validator());
             let attr = row.attribute_type();
             let RawShape::String {
-                identity: Some(actual),
-                pattern,
-                length,
-                validate: Some(validate),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(actual),
+                        pattern,
+                        length,
+                        validate: Some(validate),
+                        ..
+                    },
                 ..
             } = attr.raw_shape()
             else {
@@ -1782,9 +1800,13 @@ mod tests {
         );
         let attr = row.attribute_type();
         let RawShape::Int {
-            identity: Some(identity),
-            range: None,
-            validate: Some(validate),
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    range: None,
+                    validate: Some(validate),
+                },
+            ..
         } = attr.raw_shape()
         else {
             panic!("Logs retention must match AWSCC's validated Int shape");
@@ -2023,9 +2045,11 @@ mod tests {
             .filter(|row| {
                 let attr = row.attribute_type();
                 let pattern = match attr.raw_shape() {
-                    RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => {
-                        pattern
+                    RawShape::String {
+                        identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+                        ..
                     }
+                    | RawShape::Reference { pattern, .. } => pattern,
                     _ => return false,
                 };
                 if expected_rows.contains(row) {
@@ -2046,7 +2070,11 @@ mod tests {
         for row in selected_rows {
             let attr = row.attribute_type();
             let pattern = match attr.raw_shape() {
-                RawShape::String { pattern, .. } | RawShape::Reference { pattern, .. } => pattern,
+                RawShape::String {
+                    identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+                    ..
+                }
+                | RawShape::Reference { pattern, .. } => pattern,
                 _ => panic!("{row:?} must be a String or Reference ARN row"),
             };
             let regex =
@@ -2139,7 +2167,11 @@ mod tests {
                 )))
                 .is_empty()
         );
-        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+        let RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+            ..
+        } = attr.raw_shape()
+        else {
             panic!("account ARN must be a String");
         };
         let expected_pattern =
@@ -2205,7 +2237,11 @@ mod tests {
                 )))
                 .is_empty()
         );
-        let RawShape::String { pattern, .. } = attr.raw_shape() else {
+        let RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
+            ..
+        } = attr.raw_shape()
+        else {
             panic!("organization ARN must be a String");
         };
         let expected_pattern =
@@ -2223,10 +2259,14 @@ mod tests {
         assert!(row.has_validator());
         let attribute_type = row.attribute_type();
         let RawShape::String {
-            identity: Some(identity),
-            pattern,
-            length,
-            validate: Some(validator),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    pattern,
+                    length,
+                    validate: Some(validator),
+                    ..
+                },
             ..
         } = attribute_type.raw_shape()
         else {

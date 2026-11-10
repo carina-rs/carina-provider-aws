@@ -349,6 +349,43 @@ fn pattern_constraints_use_core_display_and_preserve_modes_in_table_cells() {
 }
 
 #[test]
+fn scalars_render_identity_and_member_constraints_in_order() {
+    let string = AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::with_validator(
+            TypeIdentity::bare("Name"),
+            Some(PatternSpec::new("[a-z]+", PatternMatch::Full)),
+            Some((Some(1), Some(64))),
+            Arc::new(|_| Ok(())),
+            Some(DslTransform::Identity),
+        ),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new("a.*", PatternMatch::Full)),
+            Some((Some(3), Some(16))),
+        ),
+    );
+    let int = AttributeType::int_member(
+        carina_core::schema::IntIdentityLayer::new(
+            Some(TypeIdentity::bare("Count")),
+            Some((Some(0), Some(100))),
+        ),
+        carina_core::schema::IntMemberConstraints::new(Some((Some(2), Some(8)))),
+    );
+    for (ty, expected) in [
+        (
+            string,
+            "identity constraints: pattern: /[a-z]+/ (Full), len: 1..=64, member constraints: pattern: /a.*/ (Full), len: 3..=16",
+        ),
+        (
+            int,
+            "identity constraints: range: 0..=100, member constraints: range: 2..=8",
+        ),
+    ] {
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        assert_eq!(markdown.matches(expected).count(), 2, "{markdown}");
+    }
+}
+
+#[test]
 fn scalars_render_all_refinements_in_github_order() {
     let validator = Arc::new(|_: &carina_core::resource::Value| Ok(()));
     let cases = [

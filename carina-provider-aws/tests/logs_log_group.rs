@@ -95,9 +95,13 @@ fn logs_log_group_name_typed_references_pass_in_both_provider_directions() {
 fn logs_log_group_name_validates_length_and_whole_string_pattern() {
     let draft = logs_log_group_config().schema;
     let RawShape::String {
-        identity,
-        pattern,
-        length,
+        identity_layer:
+            carina_core::schema::StringIdentityParts {
+                identity,
+                pattern,
+                length,
+                ..
+            },
         ..
     } = draft.attributes()["log_group_name"].attr_type().raw_shape()
     else {
@@ -187,8 +191,12 @@ fn logs_log_group_retention_schema_reports_allowed_values() {
     for schema in logs_schemas() {
         let attr = &schema.parts().attributes["retention_in_days"];
         let RawShape::Int {
-            identity: Some(identity),
-            range: None,
+            identity_layer:
+                carina_core::schema::IntIdentityParts {
+                    identity: Some(identity),
+                    range: None,
+                    ..
+                },
             ..
         } = attr.attr_type().raw_shape()
         else {

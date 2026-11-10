@@ -62,7 +62,11 @@ fn id_accepts_kms_key_identifier_forms() {
 #[test]
 fn arn_identity_is_provider_scoped() {
     let t = carina_provider_aws::schemas::generated::kms::key::arn();
-    let carina_core::schema::RawShape::String { identity, .. } = t.raw_shape() else {
+    let carina_core::schema::RawShape::String {
+        identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+        ..
+    } = t.raw_shape()
+    else {
         panic!("kms::key::arn() should be refined String");
     };
     assert_eq!(
