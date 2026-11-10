@@ -27,27 +27,21 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_key_id", carina_aws_types::kms_key_arn_reference())
+            AttributeSchema::optional("kms_key_id", carina_aws_types::with_member_reference(AttributeType::string(), carina_aws_types::AwsType::KmsKeyReference.definition()))
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
                 .with_provider_name("kmsKeyId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_group_class", AttributeType::enum_(
-    carina_core::schema::enum_identity("LogGroupClass", Some("aws.logs.LogGroup")),
-    Some(vec!["DELIVERY".to_string(), "ESSENTIALS".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]),
-    vec![("DELIVERY".to_string(), "delivery".to_string()), ("ESSENTIALS".to_string(), "essentials".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("log_group_class", AttributeType::enum_(carina_core::schema::enum_identity("LogGroupClass", Some("aws.logs.LogGroup")), Some(vec!["DELIVERY".to_string(), "ESSENTIALS".to_string(), "INFREQUENT_ACCESS".to_string(), "STANDARD".to_string()]), vec![("DELIVERY".to_string(), "delivery".to_string()), ("ESSENTIALS".to_string(), "essentials".to_string()), ("INFREQUENT_ACCESS".to_string(), "infrequent_access".to_string()), ("STANDARD".to_string(), "standard".to_string())], None, None))
                 .create_only()
                 .with_description("Use this parameter to specify the log group class for this log group. There are four classes: The Standard log class supports all CloudWatch Logs feat...")
                 .with_provider_name("logGroupClass")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("log_group_name", AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]{1,512}\\z", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(512))), None))
+            AttributeSchema::required("log_group_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\.\\-_/#A-Za-z0-9]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(512))))))
                 .create_only()
                 .identity()
                 .with_description("A name for the log group.")
@@ -55,17 +49,19 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("retention_in_days", carina_aws_types::logs_log_group_retention_in_days())
+            AttributeSchema::optional("retention_in_days", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.definition()))
                 .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
                 .with_provider_name("retentionInDays")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(1), Some(128))), None), AttributeType::refined_string(None, Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Substring { reason: carina_core::schema::PatternReason::new("Smithy tag patterns retain their authored search semantics.").expect("visible pattern reason") })), Some((Some(0), Some(256))), None), Some((Some(1), Some(50)))))
+            AttributeSchema::optional("tags", AttributeType::refined_map(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+)$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(128))))), AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$", carina_core::schema::PatternMatch::Full)), Some((Some(0), Some(256))))), Some((Some(1), Some(50)))))
                 .with_description("The tags for the resource.")
                 .with_provider_name("Tags")
                 .build(),
         )
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("kms_key_id").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.member_length.length_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Length { min: Some(0), max: Some(256) }))
+        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("kms_key_id").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_1").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})$", carina_core::schema::PatternMatch::Full))))
         .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }

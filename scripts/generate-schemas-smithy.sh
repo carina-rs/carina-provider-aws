@@ -20,8 +20,8 @@ cargo run -p carina-codegen-aws --bin smithy-codegen -- \
   --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
   --output-dir "$SCRIPT_DIR/../carina-provider-aws/src/schemas/generated"
 
-# Format
-cargo fmt -p carina-provider-aws
+# Format only generated schemas; other provider work may be in progress.
+find "$PROJECT_ROOT/carina-provider-aws/src/schemas/generated" -name '*.rs' -exec rustfmt --edition 2024 {} +
 
 echo ""
 echo "Done! Generated schemas in carina-provider-aws/src/schemas/generated/"

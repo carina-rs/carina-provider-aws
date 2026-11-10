@@ -1,0 +1,676 @@
+{
+  "AccountId": {
+    "kind": "string",
+    "length": [
+      12,
+      12
+    ],
+    "mode": "Full",
+    "pattern": "^\\d{12}$"
+  },
+  "AcmCertificateArn": {
+    "kind": "string",
+    "length": [
+      20,
+      2048
+    ],
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\\z"
+  },
+  "AcmCertificateDomainName": {
+    "kind": "string",
+    "length": [
+      1,
+      64
+    ],
+    "mode": "Full",
+    "pattern": "^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z"
+  },
+  "AcmCertificateKeyAlgorithm": {
+    "aliases": [
+      [
+        "EC_prime256v1",
+        "ec_prime256v1"
+      ],
+      [
+        "EC_secp384r1",
+        "ec_secp384r1"
+      ],
+      [
+        "RSA_2048",
+        "rsa_2048"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "EC_prime256v1",
+      "EC_secp384r1",
+      "RSA_2048"
+    ]
+  },
+  "AcmCertificateResourceRecordType": {
+    "aliases": [
+      [
+        "CNAME",
+        "cname"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "CNAME"
+    ]
+  },
+  "AcmCertificateSubjectAlternativeName": {
+    "kind": "string",
+    "length": [
+      1,
+      253
+    ],
+    "mode": "Full",
+    "pattern": "^(?:\\*\\.)?(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z0-9][A-Za-z0-9-]{0,61}[A-Za-z0-9]\\z"
+  },
+  "AcmCertificateValidationUrl": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^[A-Za-z][A-Za-z0-9+.-]*://[^\\s\\x00-\\x1F\\x7F/?#]+(?:[/?#][^\\s\\x00-\\x1F\\x7F]*)?\\z"
+  },
+  "AllocationId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^eipalloc-[0-9a-f]{8,}$"
+  },
+  "Arn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$"
+  },
+  "AvailabilityZone": {
+    "aliases": [],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": null
+  },
+  "AvailabilityZoneId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^[a-z]+[0-9]+-az[0-9]+$"
+  },
+  "CarrierGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^cagw-[0-9a-f]{8,}$"
+  },
+  "CloudFrontHostedZoneId": {
+    "aliases": [
+      [
+        "Z2FDTNDATAQYW2",
+        "global"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "Z2FDTNDATAQYW2"
+    ]
+  },
+  "DnsRecordType": {
+    "aliases": [
+      [
+        "A",
+        "a"
+      ],
+      [
+        "AAAA",
+        "aaaa"
+      ],
+      [
+        "CAA",
+        "caa"
+      ],
+      [
+        "CNAME",
+        "cname"
+      ],
+      [
+        "DS",
+        "ds"
+      ],
+      [
+        "HTTPS",
+        "https"
+      ],
+      [
+        "MX",
+        "mx"
+      ],
+      [
+        "NAPTR",
+        "naptr"
+      ],
+      [
+        "NS",
+        "ns"
+      ],
+      [
+        "PTR",
+        "ptr"
+      ],
+      [
+        "SOA",
+        "soa"
+      ],
+      [
+        "SPF",
+        "spf"
+      ],
+      [
+        "SRV",
+        "srv"
+      ],
+      [
+        "SSHFP",
+        "sshfp"
+      ],
+      [
+        "SVCB",
+        "svcb"
+      ],
+      [
+        "TLSA",
+        "tlsa"
+      ],
+      [
+        "TXT",
+        "txt"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "A",
+      "AAAA",
+      "CAA",
+      "CNAME",
+      "DS",
+      "HTTPS",
+      "MX",
+      "NAPTR",
+      "NS",
+      "PTR",
+      "SOA",
+      "SPF",
+      "SRV",
+      "SSHFP",
+      "SVCB",
+      "TLSA",
+      "TXT"
+    ]
+  },
+  "Ec2AmazonSideAsn": {
+    "kind": "int",
+    "range": [
+      64512,
+      4294967294
+    ]
+  },
+  "Ec2FlowLogMaxAggregationInterval": {
+    "kind": "int",
+    "range": [
+      60,
+      600
+    ]
+  },
+  "Ec2SecurityGroupName": {
+    "kind": "string",
+    "length": [
+      1,
+      255
+    ],
+    "mode": "Full",
+    "pattern": "^[A-Za-z0-9 ._:/()#,@\\[\\]+=\\&;{}!$*\\-]+\\z"
+  },
+  "Ec2SubnetIpv4CidrBlock": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "Ec2SubnetIpv6CidrBlock": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "Ec2SubnetIpv6NetmaskLength": {
+    "kind": "int",
+    "range": [
+      44,
+      64
+    ]
+  },
+  "Ec2TransitGatewayCidrBlock": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "Ec2VpcCidrBlock": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "Ec2VpnGatewayAmazonSideAsn": {
+    "kind": "int",
+    "range": [
+      7224,
+      4294967294
+    ]
+  },
+  "EgressOnlyInternetGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^eigw-[0-9a-f]{8,}$"
+  },
+  "Elbv2TargetGroupGrpcCode": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "Elbv2TargetGroupHttpCode": {
+    "kind": "string",
+    "length": null,
+    "mode": null,
+    "pattern": null
+  },
+  "FlowLogId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^fl-[0-9a-f]{8,}$"
+  },
+  "IamOidcProviderArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:oidc-provider/.+$"
+  },
+  "IamPolicyArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:policy/.+$"
+  },
+  "IamPolicyName": {
+    "kind": "string",
+    "length": [
+      1,
+      128
+    ],
+    "mode": "Full",
+    "pattern": "^[A-Za-z0-9_+=,.@-]+\\z"
+  },
+  "IamRoleArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):iam::[^:]*:role/.+$"
+  },
+  "IamRoleId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^AROA[A-Z0-9]+$"
+  },
+  "IamRoleName": {
+    "kind": "string",
+    "length": [
+      1,
+      64
+    ],
+    "mode": "Full",
+    "pattern": "^[A-Za-z0-9_+=,.@-]+\\z"
+  },
+  "IdentityStoreId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+  },
+  "InstanceId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^i-[0-9a-f]{8,}$"
+  },
+  "InternetGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^igw-[0-9a-f]{8,}$"
+  },
+  "IpamId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^ipam-[0-9a-f]{8,}$"
+  },
+  "IpamPoolId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^ipam-pool-[0-9a-f]{8,}$"
+  },
+  "KmsKeyArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})$"
+  },
+  "KmsKeyId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^((arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$"
+  },
+  "KmsKeyReference": {
+    "kind": "reference",
+    "length": [
+      1,
+      2048
+    ],
+    "mode": "Full",
+    "pattern": "^((arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):kms:[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+:[0-9]{12}:(key/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|mrk-[0-9a-fA-F]{32})|alias/[a-zA-Z0-9:/_-]+))|(alias/[a-zA-Z0-9:/_-]+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|(mrk-[0-9a-fA-F]{32}))$"
+  },
+  "LocalGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^lgw-[0-9a-f]{8,}$"
+  },
+  "LogsLogGroupRetentionInDays": {
+    "kind": "int",
+    "range": null
+  },
+  "NatGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^nat-[0-9a-f]{8,}$"
+  },
+  "NetworkAclId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^acl-[0-9a-f]{8,}$"
+  },
+  "NetworkInterfaceId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^eni-[0-9a-f]{8,}$"
+  },
+  "OrganizationsAccountArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\\z"
+  },
+  "OrganizationsAccountEmail": {
+    "kind": "string",
+    "length": [
+      6,
+      64
+    ],
+    "mode": null,
+    "pattern": null
+  },
+  "OrganizationsOrganizationArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\\z"
+  },
+  "PrefixListId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^pl-[0-9a-f]{8,}$"
+  },
+  "Region": {
+    "aliases": [],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": null
+  },
+  "ResourceId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^[a-z-]+-[0-9a-f]{8,}$"
+  },
+  "Route53HostedZoneId": {
+    "kind": "string",
+    "length": [
+      null,
+      32
+    ],
+    "mode": "Full",
+    "pattern": "^Z[A-Z0-9]+$"
+  },
+  "RouteTableId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^rtb-[0-9a-f]{8,}$"
+  },
+  "S3BucketArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):s3:::.+$"
+  },
+  "S3Grantee": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^(id|emailAddress|uri)=.+(\\s*,\\s*(id|emailAddress|uri)=.+)*$"
+  },
+  "S3LifecycleDate": {
+    "kind": "string",
+    "length": [
+      20,
+      20
+    ],
+    "mode": "Full",
+    "pattern": "^(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)T00:00:00Z\\z"
+  },
+  "SecurityGroupId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^sg-[0-9a-f]{8,}$"
+  },
+  "SecurityGroupRuleId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^sgr-[0-9a-f]{8,}$"
+  },
+  "SqsQueueArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z"
+  },
+  "SqsQueueDeduplicationScope": {
+    "aliases": [
+      [
+        "messageGroup",
+        "message_group"
+      ],
+      [
+        "queue",
+        "queue"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "messageGroup",
+      "queue"
+    ]
+  },
+  "SqsQueueFifoThroughputLimit": {
+    "aliases": [
+      [
+        "perQueue",
+        "per_queue"
+      ],
+      [
+        "perMessageGroupId",
+        "per_message_group_id"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "perQueue",
+      "perMessageGroupId"
+    ]
+  },
+  "SqsQueueRedrivePermission": {
+    "aliases": [
+      [
+        "allowAll",
+        "allow_all"
+      ],
+      [
+        "denyAll",
+        "deny_all"
+      ],
+      [
+        "byQueue",
+        "by_queue"
+      ]
+    ],
+    "kind": "enum",
+    "length": null,
+    "mode": null,
+    "pattern": null,
+    "values": [
+      "allowAll",
+      "denyAll",
+      "byQueue"
+    ]
+  },
+  "SsoInstanceArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):sso:::instance/.+$"
+  },
+  "SsoPermissionSetArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):sso:::permissionSet/.+$"
+  },
+  "SsoPrincipalId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^.{1,64}$"
+  },
+  "StsCallerIdentityArn": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):sts:.*$"
+  },
+  "SubnetId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^subnet-[0-9a-f]{8,}$"
+  },
+  "SubnetRouteTableAssociationId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^rtbassoc-[0-9a-f]{8,}$"
+  },
+  "TransitGatewayAttachmentId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^tgw-attach-[0-9a-f]{8,}$"
+  },
+  "TransitGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^tgw-[0-9a-f]{8,}$"
+  },
+  "TransitGatewayRouteTableId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^tgw-rtb-[0-9a-f]{8,}$"
+  },
+  "VpcCidrBlockAssociationId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^vpc-cidr-assoc-[0-9a-f]{8,}$"
+  },
+  "VpcEndpointId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^vpce-[0-9a-f]{8,}$"
+  },
+  "VpcId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^vpc-[0-9a-f]{8,}$"
+  },
+  "VpcPeeringConnectionId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^pcx-[0-9a-f]{8,}$"
+  },
+  "VpnGatewayId": {
+    "kind": "string",
+    "length": null,
+    "mode": "Full",
+    "pattern": "^vgw-[0-9a-f]{8,}$"
+  }
+}

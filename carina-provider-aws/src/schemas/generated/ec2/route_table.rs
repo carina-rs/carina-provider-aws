@@ -19,17 +19,29 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
             .with_description("Describes a route table.")
             .with_coexisting_replacement()
             .attribute(
-                AttributeSchema::required("vpc_id", super::vpc_id())
-                    .create_only()
-                    .with_description("The ID of the VPC.")
-                    .with_provider_name("VpcId")
-                    .build(),
+                AttributeSchema::required(
+                    "vpc_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::VpcId.definition(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the VPC.")
+                .with_provider_name("VpcId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::provider_populated("route_table_id", super::route_table_id())
-                    .with_description("The ID of the route table. (read-only)")
-                    .with_provider_name("RouteTableId")
-                    .build(),
+                AttributeSchema::provider_populated(
+                    "route_table_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::RouteTableId.definition(),
+                    ),
+                )
+                .with_description("The ID of the route table. (read-only)")
+                .with_provider_name("RouteTableId")
+                .build(),
             )
             .attribute(
                 AttributeSchema::optional("tags", AttributeType::map(AttributeType::string()))

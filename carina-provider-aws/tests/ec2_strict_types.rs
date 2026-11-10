@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use carina_core::protocol_convert::{protocol_to_resource_schema, resource_schema_to_protocol};
 use carina_core::resource::{ConcreteValue, Value};
 use carina_core::schema::{EffectiveType, RawShape, ValidatedResourceSchema};
@@ -48,7 +51,7 @@ fn strings(resource: &str, path: &str, valid: &[&str], invalid: &[&str]) {
     for (values, expected) in [(valid, true), (invalid, false)] {
         for value in values {
             assert_eq!(
-                ty.validate(&string(value)).is_ok(),
+                ty.validate(&string(value)).is_ok() && input_patterns::accept(&schema, path, value),
                 expected,
                 "{resource}.{path} = {value:?}"
             );
@@ -287,12 +290,10 @@ fn ec2_vpc_and_subnet_ipv4_netmasks_are_anonymous_16_through_28() {
             assert!(matches!(
                 ty.as_type().raw_shape(),
                 RawShape::Int {
-                    identity_layer: carina_core::schema::IntIdentityParts {
-                        identity: None,
-                        range: Some((Some(16), Some(28))),
-                        ..
-                    },
-                    ..
+                    identity_layer: carina_core::schema::IntIdentityParts { identity: None, .. },
+                    member_layer: carina_core::schema::IntMemberParts {
+                        range: Some((Some(16), Some(28)))
+                    }
                 }
             ));
             for value in [0, 15, 16, 24, 28, 29, 32] {

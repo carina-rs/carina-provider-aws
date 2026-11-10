@@ -25,28 +25,30 @@ fn s3_cors_rule() -> AttributeType {
             .build(),
             StructField::required(
                 "allowed_origins",
-                super::nonempty_list(AttributeType::refined_string(
-                    None,
-                    Some(PatternSpec::new(
-                        r"^[^*]*(?:\*[^*]*)?\z",
-                        PatternMatch::Full,
-                    )),
-                    None,
-                    None,
+                super::nonempty_list(AttributeType::string_member(
+                    carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+                    carina_core::schema::StringMemberConstraints::new(
+                        Some(PatternSpec::new(
+                            r"^[^*]*(?:\*[^*]*)?\z",
+                            PatternMatch::Full,
+                        )),
+                        None,
+                    ),
                 )),
             )
             .with_provider_name("AllowedOrigins")
             .build(),
             StructField::optional(
                 "allowed_headers",
-                AttributeType::list(AttributeType::refined_string(
-                    None,
-                    Some(PatternSpec::new(
-                        r"^[^*]*(?:\*[^*]*)?\z",
-                        PatternMatch::Full,
-                    )),
-                    None,
-                    None,
+                AttributeType::list(AttributeType::string_member(
+                    carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+                    carina_core::schema::StringMemberConstraints::new(
+                        Some(PatternSpec::new(
+                            r"^[^*]*(?:\*[^*]*)?\z",
+                            PatternMatch::Full,
+                        )),
+                        None,
+                    ),
                 )),
             )
             .with_provider_name("AllowedHeaders")

@@ -409,10 +409,32 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             identity_layer
                 .identity
                 .map_or_else(|| "String".into(), |identity| hooks.scalar_name(identity)),
-            refinement_layers(
-                string_constraints(identity_layer.pattern, identity_layer.length),
-                string_constraints(member_layer.pattern, member_layer.length),
-            ),
+            if identity_layer.identity.is_some() {
+                refinement_layers(
+                    string_constraints(identity_layer.pattern, identity_layer.length),
+                    string_constraints(member_layer.pattern, member_layer.length),
+                )
+            } else {
+                let mut constraints = Vec::new();
+                for pattern in [identity_layer.pattern, member_layer.pattern]
+                    .into_iter()
+                    .flatten()
+                {
+                    for constraint in string_constraints(Some(pattern), None) {
+                        if !constraints.contains(&constraint) {
+                            constraints.push(constraint);
+                        }
+                    }
+                }
+                constraints.extend(string_constraints(
+                    None,
+                    carina_core::schema::intersect_bounds(
+                        identity_layer.length,
+                        member_layer.length,
+                    ),
+                ));
+                constraints
+            },
             identity_layer.validate.is_some(),
             identity_layer.to_dsl,
             None,
@@ -424,10 +446,17 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             identity_layer
                 .identity
                 .map_or_else(|| "Int".into(), |identity| hooks.scalar_name(identity)),
-            refinement_layers(
-                number_constraints(identity_layer.range),
-                number_constraints(member_layer.range),
-            ),
+            if identity_layer.identity.is_some() {
+                refinement_layers(
+                    number_constraints(identity_layer.range),
+                    number_constraints(member_layer.range),
+                )
+            } else {
+                number_constraints(carina_core::schema::intersect_bounds(
+                    identity_layer.range,
+                    member_layer.range,
+                ))
+            },
             identity_layer.validate.is_some(),
             None,
             None,

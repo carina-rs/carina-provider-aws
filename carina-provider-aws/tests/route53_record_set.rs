@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -93,23 +96,29 @@ async fn route53_dns_fields_refine_grammar_without_introducing_nominal_sinks() {
         for path in ["name", "alias_target.dns_name"] {
             let dns = field(&schema, path);
             let RawShape::String {
-                identity_layer:
-                    carina_core::schema::StringIdentityParts {
-                        identity,
-                        pattern,
-                        length,
-                        ..
-                    },
-                ..
+                identity_layer,
+                member_layer,
             } = dns.as_type().raw_shape()
             else {
                 panic!("DNS name String");
             };
+            let identity = identity_layer.identity;
+            let pattern = member_layer.pattern.or(identity_layer.pattern);
+            let length =
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
             assert!(
                 identity.is_none(),
                 "keep ACM/CloudFront/ALB and module references assignable"
             );
-            assert!(pattern.is_some());
+            assert!(pattern.is_none());
+            assert!(
+                schema.parts().input_rules.iter().any(|r| r
+                    .path()
+                    .segments()
+                    .collect::<Vec<_>>()
+                    .join(".")
+                    == path)
+            );
             assert_eq!(length, Some((Some(1), Some(1024))));
             for valid in [
                 "carina-rs.dev",
@@ -130,7 +139,11 @@ async fn route53_dns_fields_refine_grammar_without_introducing_nominal_sinks() {
                 "d123.cloudfront.net.",
                 "dualstack.name-123.ap-northeast-1.elb.amazonaws.com.",
             ] {
-                assert!(dns.validate(&string(valid)).is_ok(), "{path}: {valid:?}");
+                assert!(
+                    dns.validate(&string(valid)).is_ok()
+                        && input_patterns::accept(&schema, path, valid),
+                    "{path}: {valid:?}"
+                );
                 normalize(dns_record(valid, path == "alias_target.dns_name"))
                     .await
                     .unwrap();
@@ -150,18 +163,21 @@ async fn route53_dns_fields_refine_grammar_without_introducing_nominal_sinks() {
                 r"a\x.dev",
             ] {
                 assert!(
-                    dns.validate(&string(invalid)).is_err(),
+                    dns.validate(&string(invalid)).is_err()
+                        || !input_patterns::accept(&schema, path, invalid),
                     "{path}: {invalid:?}"
                 );
             }
-            assert!(
-                dns.validate(&string(&format!("{}.dev", r"\141".repeat(63))))
-                    .is_ok()
-            );
-            assert!(
-                dns.validate(&string(&format!("{}.dev", r"\141".repeat(64))))
-                    .is_err()
-            );
+            assert!(input_patterns::accept(
+                &schema,
+                path,
+                &format!("{}.dev", r"\141".repeat(63))
+            ));
+            assert!(!input_patterns::accept(
+                &schema,
+                path,
+                &format!("{}.dev", r"\141".repeat(64))
+            ));
         }
     }
 }
@@ -325,11 +341,8 @@ fn route53_record_values_are_bounded_strings_in_a_nonempty_list() {
         let records = field(&schema, "resource_records");
         let item = records.list_element().unwrap();
         let RawShape::String {
-            identity_layer:
-                carina_core::schema::StringIdentityParts {
-                    identity, length, ..
-                },
-            ..
+            identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+            member_layer: carina_core::schema::StringMemberParts { length, .. },
         } = item.as_type().raw_shape()
         else {
             panic!("String value");

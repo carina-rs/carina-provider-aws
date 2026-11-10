@@ -13,14 +13,15 @@ use carina_core::schema::{PatternMatch, PatternSpec};
 /// ACM supplies a DNS name and CNAME target, rather than arbitrary record data:
 /// <https://docs.aws.amazon.com/acm/latest/APIReference/API_ResourceRecord.html>
 pub fn route53_dns_name() -> AttributeType {
-    AttributeType::refined_string(
-        None,
-        Some(PatternSpec::new(
-            r"^(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63}(?:\.(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63})*\.?\z",
-            PatternMatch::Full,
-        )),
-        Some((Some(1), Some(1024))),
-        None,
+    AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new(
+                r"^(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63}(?:\.(?:[\x21-\x2D\x2F-\x5B\x5D-\x7E]|\\[0-3][0-7]{2}){1,63})*\.?\z",
+                PatternMatch::Full,
+            )),
+            Some((Some(1), Some(1024))),
+        ),
     )
 }
 
@@ -36,13 +37,9 @@ mod tests {
         let RawShape::String {
             identity_layer:
                 carina_core::schema::StringIdentityParts {
-                    identity,
-                    pattern,
-                    length,
-                    validate,
-                    ..
+                    identity, validate, ..
                 },
-            ..
+            member_layer: carina_core::schema::StringMemberParts { pattern, length },
         } = attr.raw_shape()
         else {
             panic!("DNS String");

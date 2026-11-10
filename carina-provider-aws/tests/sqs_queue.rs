@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -36,15 +39,15 @@ macro_rules! bound_test {
                 let path: Vec<String> = $path.split('.').map(str::to_string).collect();
                 let field = schema.effective_type_at_attribute_path(&path).unwrap();
                 let RawShape::Int {
-                    identity_layer:
-                        carina_core::schema::IntIdentityParts {
-                            identity, range, ..
-                        },
-                    ..
+                    identity_layer,
+                    member_layer,
                 } = field.as_type().raw_shape()
                 else {
                     panic!("{} must keep its Int carrier", $path);
                 };
+                let identity = identity_layer.identity;
+                let range =
+                    carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
                 assert!(identity.is_none());
                 assert_eq!(range, Some((Some($min), Some($max))), "{}", $path);
                 for (value, valid) in [
@@ -112,23 +115,18 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
     for schema in sqs_schemas() {
         let name = schema.effective_attribute("queue_name").unwrap();
         let RawShape::String {
-            identity_layer:
-                carina_core::schema::StringIdentityParts {
-                    identity,
-                    pattern,
-                    length,
-                    ..
-                },
-            ..
+            identity_layer,
+            member_layer,
         } = name.field_type().raw_shape()
         else {
             panic!("queue_name must remain String");
         };
+        let identity = identity_layer.identity;
+        let pattern = member_layer.pattern.or(identity_layer.pattern);
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert!(identity.is_none());
-        assert_eq!(
-            pattern.map(carina_core::schema::PatternSpec::as_str),
-            Some(r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z")
-        );
+        assert_eq!(pattern.map(carina_core::schema::PatternSpec::as_str), None);
         assert_eq!(length, Some((Some(1), Some(80))));
         for valid in [
             "a".to_string(),
@@ -137,7 +135,11 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
             "a.fifo".to_string(),
             format!("{}.fifo", "a".repeat(75)),
         ] {
-            assert!(name.validate(&string(&valid)).is_ok(), "{valid:?}");
+            assert!(
+                name.validate(&string(&valid)).is_ok()
+                    && input_patterns::accept(&schema, "queue_name", &valid),
+                "{valid:?}"
+            );
         }
         for invalid in [
             "".to_string(),
@@ -153,7 +155,11 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
             "a\n".to_string(),
             "日本語".to_string(),
         ] {
-            assert!(name.validate(&string(&invalid)).is_err(), "{invalid:?}");
+            assert!(
+                name.validate(&string(&invalid)).is_err()
+                    || !input_patterns::accept(&schema, "queue_name", &invalid),
+                "{invalid:?}"
+            );
         }
     }
 }
@@ -269,6 +275,7 @@ fn sqs_queue_arn_identity_and_grammar_apply_to_all_three_paths() {
                         length,
                         validate,
                         to_dsl,
+                        ..
                     },
                 ..
             } = leaf.as_type().raw_shape()

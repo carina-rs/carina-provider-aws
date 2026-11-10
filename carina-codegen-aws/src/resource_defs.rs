@@ -4,6 +4,8 @@
 //! Each `DataSourceDef` describes a read-only data source with optional user-supplied lookup inputs.
 //! These definitions are consumed by the `smithy-codegen` binary.
 
+use crate::overrides::{CoreIdentity, DataSourceType, Representation, TypeOverride};
+use carina_aws_types::AwsType;
 use carina_core::schema::{
     CharSet, InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope, NonEmptyString,
 };
@@ -297,8 +299,10 @@ pub struct ResourceDef {
     pub identifier: &'static str,
     /// Whether this resource supports tags
     pub has_tags: bool,
-    /// Type overrides: (field_name, type_code)
-    pub type_overrides: Vec<(&'static str, &'static str)>,
+    /// Member decorations: (field_name, identity or tightening).
+    pub type_overrides: Vec<(&'static str, TypeOverride)>,
+    /// Closed DSL/wire representation declarations, separate from refinements.
+    pub representations: Vec<(&'static str, Representation)>,
     /// Fields to exclude from the schema
     pub exclude_fields: Vec<&'static str>,
     /// Fields to force as create-only even if they appear in update ops
@@ -354,15 +358,14 @@ pub struct ResourceDef {
     /// in each context.
     ///
     /// Each tuple is `(parent_struct_pascal_name, member_pascal_name,
-    /// type_code)`. `type_code` is a Rust expression that evaluates to
-    /// an `AttributeType` — typically a call into `super::config::…`.
+    /// decoration)`. Decorations retain the member's Smithy constraints.
     ///
     /// Example: route53 `AliasTarget.HostedZoneId` is a union that accepts
     /// both the `aws.cloudfront.HostedZoneId.global` namespaced constant
     /// (resolving to `Z2FDTNDATAQYW2`) and identified Route 53 hosted-zone
     /// IDs, while the top-level `RecordSet.HostedZoneId` is the user's own
     /// Route 53 zone ID and stays plain String (aws#302, aws#505).
-    pub struct_field_type_overrides: Vec<(&'static str, &'static str, &'static str)>,
+    pub struct_field_type_overrides: Vec<(&'static str, &'static str, TypeOverride)>,
     /// Fields whose schema type should come from the *read structure*
     /// rather than the create input — for attributes where the AWS
     /// API's request shape differs from its response shape and only
@@ -1144,8 +1147,9 @@ pub struct DataSourceInput {
     pub description: &'static str,
     /// Whether this input is required
     pub required: bool,
-    /// Type override (e.g., "AttributeType::string()"). None = infer from Smithy.
-    pub type_override: Option<&'static str>,
+    /// Optional identity or tightening applied to the Smithy-derived input.
+    pub type_override: Option<TypeOverride>,
+    pub representation: Representation,
 }
 
 /// One declared output attribute on a `DataSourceDef`.
@@ -1160,9 +1164,8 @@ pub struct DataSourceOutput {
     pub provider_name: Option<&'static str>,
     /// Human-readable description for docs
     pub description: &'static str,
-    /// Rust type expression for codegen, e.g. `"AttributeType::string()"` or
-    /// `"super::aws_account_id()"`. Required: codegen does not infer.
-    pub type_code: &'static str,
+    /// Closed representation declaration with an optional member decoration.
+    pub type_code: DataSourceType,
 }
 
 /// One aggregated output attribute on a `DataSourceShape::ListAggregated`.
@@ -1176,10 +1179,9 @@ pub struct DataSourceListOutput {
     pub name: &'static str,
     /// Human-readable description for docs
     pub description: &'static str,
-    /// Rust type expression for the *element* type, e.g.
-    /// `"AttributeType::string()"` or `"super::arn()"`. Codegen wraps it in
-    /// `AttributeType::List { inner: <item_type>, ordered: false }`.
-    pub item_type: &'static str,
+    /// Closed representation and decoration for the Smithy-derived element.
+    /// Codegen wraps the result in an unordered list.
+    pub item_type: DataSourceType,
 }
 
 /// Returns EC2 resource definitions.
@@ -1209,7 +1211,11 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             }],
             identifier: "VpcId",
             has_tags: true,
-            type_overrides: vec![("CidrBlock", "types::ipv4_cidr()")],
+            type_overrides: vec![(
+                "CidrBlock",
+                TypeOverride::CoreIdentity(CoreIdentity::Ipv4Cidr),
+            )],
+            representations: vec![],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1264,6 +1270,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "SubnetId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1315,6 +1322,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "InternetGatewayId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1356,6 +1364,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "RouteTableId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications", "ClientToken"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1394,6 +1403,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "RouteTableId",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![
                 "DryRun",
                 "OdbNetworkArn",
@@ -1444,6 +1454,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "GroupId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1479,6 +1490,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "SecurityGroupRuleId",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1542,6 +1554,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "SecurityGroupRuleId",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1605,6 +1618,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "EgressOnlyInternetGatewayId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications", "ClientToken"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1650,6 +1664,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "AllocationId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1701,10 +1716,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             // TagKeys=[Name, Environment] read back in the same order. AWS
             // rejected three keys and a specification without matching tag
             // fields in LogFormat.
-            type_overrides: vec![(
-                "ResourceIds",
-                "AttributeType::unordered_list(AttributeType::string())",
-            )],
+            type_overrides: vec![],
+            representations: vec![("ResourceIds", Representation::UnorderedStrings)],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1746,9 +1759,10 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "NatGatewayId",
             has_tags: true,
-            type_overrides: vec![(
+            type_overrides: vec![],
+            representations: vec![(
                 "AvailabilityZoneAddresses",
-                "carina_aws_types::nat_gateway_availability_zone_addresses()",
+                Representation::NatGatewayAddresses,
             )],
             exclude_fields: vec![
                 "DryRun",
@@ -1801,6 +1815,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "AssociationId",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "GatewayId"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1839,6 +1854,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "TransitGatewayId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1894,6 +1910,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "TransitGatewayAttachmentId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -1942,7 +1959,8 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             }],
             identifier: "VpcEndpointId",
             has_tags: true,
-            type_overrides: vec![("PolicyDocument", "super::iam_policy_document()")],
+            type_overrides: vec![],
+            representations: vec![("PolicyDocument", Representation::IamPolicyDocument)],
             exclude_fields: vec![
                 "DryRun",
                 "TagSpecifications",
@@ -1995,6 +2013,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "VpcId",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -2042,6 +2061,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "VpcPeeringConnectionId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications", "PeerRegion"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -2104,6 +2124,7 @@ pub fn ec2_resources() -> Vec<ResourceDef> {
             identifier: "VpnGatewayId",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["DryRun", "TagSpecifications"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -2140,19 +2161,22 @@ pub fn sts_data_sources() -> Vec<DataSourceDef> {
                     name: "account_id",
                     provider_name: Some("Account"),
                     description: "The Amazon Web Services account ID number of the account that owns or contains the calling entity.",
-                    type_code: "super::aws_account_id()",
+                    type_code: DataSourceType::named(AwsType::AccountId),
                 },
                 DataSourceOutput {
                     name: "arn",
                     provider_name: Some("Arn"),
                     description: "The Amazon Web Services ARN associated with the calling entity.",
-                    type_code: "super::arn()",
+                    type_code: DataSourceType::named(
+                        crate::overrides::resource_arn_identity("sts.CallerIdentity")
+                            .expect("resource ARN identity"),
+                    ),
                 },
                 DataSourceOutput {
                     name: "user_id",
                     provider_name: Some("UserId"),
                     description: "The unique identifier of the calling entity.",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
             ],
         },
@@ -2171,6 +2195,7 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 description: "The globally unique identifier for the identity store.",
                 required: true,
                 type_override: None,
+                representation: Representation::String,
             },
             DataSourceInput {
                 name: "user_id",
@@ -2178,6 +2203,7 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 description: "The identifier for the user. Provide either user_id or user_name.",
                 required: false,
                 type_override: None,
+                representation: Representation::String,
             },
             DataSourceInput {
                 name: "user_name",
@@ -2185,6 +2211,7 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 description: "The user's user name. Provide either user_id or user_name.",
                 required: false,
                 type_override: None,
+                representation: Representation::String,
             },
         ],
         shape: DataSourceShape::Single {
@@ -2193,19 +2220,19 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                     name: "display_name",
                     provider_name: Some("DisplayName"),
                     description: "Display name of the user.",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
                 DataSourceOutput {
                     name: "name",
                     provider_name: Some("Name"),
                     description: "Structured components of the user's name.",
-                    type_code: "super::identitystore_user_name()",
+                    type_code: DataSourceType::plain(Representation::IdentityStoreName),
                 },
                 DataSourceOutput {
                     name: "emails",
                     provider_name: Some("Emails"),
                     description: "Email addresses associated with the user.",
-                    type_code: "AttributeType::unordered_list(types::email())",
+                    type_code: DataSourceType::plain(Representation::EmailValues),
                 },
             ],
         },
@@ -2234,6 +2261,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             identifier: "Id",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["AvailablePolicyTypes"],
             create_only_overrides: vec![],
             enum_aliases: vec![],
@@ -2280,6 +2308,7 @@ pub fn organizations_resources() -> Vec<ResourceDef> {
             identifier: "Id",
             has_tags: true,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec!["Paths", "State"],
             create_only_overrides: vec!["Email", "IamUserAccessToBilling", "RoleName"],
             enum_aliases: vec![],
@@ -2397,9 +2426,13 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             // Keep Region plain: GetBucketLocation returns a provider-populated
             // region code, and refining that output risks validation and phantom diffs.
             type_overrides: vec![
-                ("Region", "AttributeType::string()"),
-                ("HostedZoneId", "super::route53_hosted_zone_id()"),
+                ("Region", TypeOverride::NoIdentity),
+                (
+                    "HostedZoneId",
+                    TypeOverride::Identity(AwsType::Route53HostedZoneId),
+                ),
             ],
+            representations: vec![],
             exclude_fields: vec![
                 "CreateBucketConfiguration",
                 "ContentMD5",
@@ -2497,7 +2530,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("Policy", "super::iam_policy_document()")],
+            type_overrides: vec![],
+            representations: vec![("Policy", Representation::IamPolicyDocument)],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2551,9 +2585,24 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identifier: "Bucket",
             has_tags: false,
             type_overrides: vec![
-                ("Status", "carina_aws_types::s3_versioning_status()"),
-                ("MFADelete", "carina_aws_types::s3_mfa_delete()"),
+                (
+                    "Status",
+                    TypeOverride::LocalEnum {
+                        namespace: "aws.s3.BucketVersioning",
+                        name: "VersioningStatus",
+                        values: &["Enabled", "Suspended"],
+                    },
+                ),
+                (
+                    "MFADelete",
+                    TypeOverride::LocalEnum {
+                        namespace: "aws.s3.BucketVersioning",
+                        name: "MFADelete",
+                        values: &["Enabled", "Disabled"],
+                    },
+                ),
             ],
+            representations: vec![],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2620,10 +2669,15 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![
-                ("ObjectLockEnabled", "super::s3_object_lock_enabled()"),
-                ("Rule", "super::bucket_object_lock_rule()"),
-            ],
+            type_overrides: vec![(
+                "ObjectLockEnabled",
+                TypeOverride::LocalEnum {
+                    namespace: "aws.s3.BucketObjectLockConfiguration",
+                    name: "ObjectLockEnabled",
+                    values: &["Enabled"],
+                },
+            )],
+            representations: vec![("Rule", Representation::BucketObjectLockRule)],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2689,6 +2743,7 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             identifier: "Bucket",
             has_tags: false,
             type_overrides: vec![],
+            representations: vec![],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2747,7 +2802,19 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("ObjectOwnership", "carina_aws_types::s3_object_ownership()")],
+            type_overrides: vec![(
+                "ObjectOwnership",
+                TypeOverride::LocalEnum {
+                    namespace: "aws.s3.BucketOwnershipControls",
+                    name: "ObjectOwnership",
+                    values: &[
+                        "BucketOwnerPreferred",
+                        "ObjectWriter",
+                        "BucketOwnerEnforced",
+                    ],
+                },
+            )],
+            representations: vec![],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2807,7 +2874,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("Rules", "super::bucket_encryption_rules()")],
+            type_overrides: vec![],
+            representations: vec![("Rules", Representation::BucketEncryptionRules)],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2859,7 +2927,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("Rules", "super::bucket_replication_rules()")],
+            type_overrides: vec![],
+            representations: vec![("Rules", Representation::BucketReplicationRules)],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -2920,7 +2989,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("Rules", "super::bucket_lifecycle_rules()")],
+            type_overrides: vec![],
+            representations: vec![("Rules", Representation::BucketLifecycleRules)],
             exclude_fields: vec![
                 "ChecksumAlgorithm",
                 "ExpectedBucketOwner",
@@ -2971,13 +3041,11 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![
-                ("IndexDocument", "super::s3_index_document()"),
-                ("ErrorDocument", "super::s3_error_document()"),
-                (
-                    "RedirectAllRequestsTo",
-                    "super::s3_redirect_all_requests_to()",
-                ),
+            type_overrides: vec![],
+            representations: vec![
+                ("IndexDocument", Representation::IndexDocument),
+                ("ErrorDocument", Representation::ErrorDocument),
+                ("RedirectAllRequestsTo", Representation::RedirectAllRequests),
             ],
             exclude_fields: vec![
                 "ContentMD5",
@@ -3043,7 +3111,8 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![("CORSRules", "super::bucket_cors_rules()")],
+            type_overrides: vec![],
+            representations: vec![("CORSRules", Representation::BucketCorsRules)],
             exclude_fields: vec![
                 "ContentMD5",
                 "ChecksumAlgorithm",
@@ -3105,22 +3174,17 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![
-                (
-                    "TopicConfigurations",
-                    "super::bucket_topic_configurations()",
-                ),
-                (
-                    "QueueConfigurations",
-                    "super::bucket_queue_configurations()",
-                ),
+            type_overrides: vec![],
+            representations: vec![
+                ("TopicConfigurations", Representation::TopicConfigurations),
+                ("QueueConfigurations", Representation::QueueConfigurations),
                 (
                     "LambdaFunctionConfigurations",
-                    "super::bucket_lambda_function_configurations()",
+                    Representation::LambdaConfigurations,
                 ),
                 (
                     "EventBridgeConfiguration",
-                    "super::bucket_event_bridge_configuration()",
+                    Representation::EventBridgeConfiguration,
                 ),
             ],
             exclude_fields: vec![
@@ -3192,9 +3256,10 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![(
+            type_overrides: vec![],
+            representations: vec![(
                 "TargetObjectKeyFormat",
-                "super::bucket_target_object_key_format()",
+                Representation::TargetObjectKeyFormat,
             )],
             exclude_fields: vec![
                 "ContentMD5",
@@ -3274,11 +3339,12 @@ pub fn s3_resources() -> Vec<ResourceDef> {
             }],
             identifier: "Bucket",
             has_tags: false,
-            type_overrides: vec![
-                ("BlockPublicAcls", "AttributeType::bool()"),
-                ("IgnorePublicAcls", "AttributeType::bool()"),
-                ("BlockPublicPolicy", "AttributeType::bool()"),
-                ("RestrictPublicBuckets", "AttributeType::bool()"),
+            type_overrides: vec![],
+            representations: vec![
+                ("BlockPublicAcls", Representation::Bool),
+                ("IgnorePublicAcls", Representation::Bool),
+                ("BlockPublicPolicy", Representation::Bool),
+                ("RestrictPublicBuckets", Representation::Bool),
             ],
             exclude_fields: vec![
                 "ContentMD5",
@@ -3338,6 +3404,7 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
             description: "Name of the S3 bucket to look up.",
             required: true,
             type_override: None,
+            representation: Representation::String,
         }],
         shape: DataSourceShape::Single {
             output_attributes: vec![
@@ -3345,37 +3412,40 @@ pub fn s3_data_sources() -> Vec<DataSourceDef> {
                     name: "bucket",
                     provider_name: None,
                     description: "The bucket name (echo of the input).",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
                 DataSourceOutput {
                     name: "arn",
                     provider_name: None,
                     description: "ARN of the bucket.",
-                    type_code: "super::arn()",
+                    type_code: DataSourceType::named(
+                        crate::overrides::resource_arn_identity("s3.Bucket")
+                            .expect("resource ARN identity"),
+                    ),
                 },
                 DataSourceOutput {
                     name: "region",
                     provider_name: Some("LocationConstraint"),
                     description: "AWS region the bucket is in.",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
                 DataSourceOutput {
                     name: "bucket_domain_name",
                     provider_name: None,
                     description: "Bucket domain name (`<bucket>.s3.amazonaws.com`).",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
                 DataSourceOutput {
                     name: "bucket_regional_domain_name",
                     provider_name: None,
                     description: "Region-specific bucket domain name (`<bucket>.s3.<region>.amazonaws.com`).",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 },
                 DataSourceOutput {
                     name: "hosted_zone_id",
                     provider_name: None,
                     description: "Route 53 Hosted Zone ID for the bucket's region.",
-                    type_code: "super::route53_hosted_zone_id()",
+                    type_code: DataSourceType::named(AwsType::Route53HostedZoneId),
                 },
             ],
         },
@@ -3417,10 +3487,8 @@ pub fn acm_resources() -> Vec<ResourceDef> {
         update_ops: vec![],
         identifier: "CertificateArn",
         has_tags: true,
-        type_overrides: vec![(
-            "SubjectAlternativeNames",
-            "AttributeType::unordered_list(AttributeType::string())",
-        )],
+        type_overrides: vec![],
+        representations: vec![("SubjectAlternativeNames", Representation::UnorderedStrings)],
         exclude_fields: vec![
             // Imported / private-CA flows are out of scope for the
             // initial cut. The wait construct is the validation path,
@@ -3527,15 +3595,8 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             update_ops: vec![],
             identifier: "Name",
             has_tags: false,
-            type_overrides: vec![
-                // Smithy has ResourceRecords as List<Struct{Value}>, but for DSL
-                // simplicity we flatten to List<String> since each record is a
-                // single value string.
-                (
-                    "ResourceRecords",
-                    "AttributeType::list(AttributeType::string())",
-                ),
-            ],
+            type_overrides: vec![],
+            representations: vec![("ResourceRecords", Representation::RecordValues)],
             exclude_fields: vec![
                 // Routing policy fields — out of scope for initial version
                 "SetIdentifier",
@@ -3571,7 +3632,10 @@ pub fn route53_resources() -> Vec<ResourceDef> {
             struct_field_type_overrides: vec![(
                 "AliasTarget",
                 "HostedZoneId",
-                "AttributeType::union(vec![super::cloudfront_hosted_zone_id(), super::route53_hosted_zone_id()])",
+                TypeOverride::Identities(&[
+                    AwsType::CloudFrontHostedZoneId,
+                    AwsType::Route53HostedZoneId,
+                ]),
             )],
             nested_update_field_enums: &[],
             read_shape_overrides: vec![],
@@ -3592,6 +3656,7 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
                 description: "Path prefix for filtering the results. If it is not included, it defaults to `/`, listing all roles.",
                 required: false,
                 type_override: None,
+                representation: Representation::String,
             },
             DataSourceInput {
                 name: "name_regex",
@@ -3599,6 +3664,7 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
                 description: "Regular expression string applied client-side to filter results by role name.",
                 required: false,
                 type_override: None,
+                representation: Representation::String,
             },
         ],
         shape: DataSourceShape::ListAggregated {
@@ -3606,12 +3672,12 @@ pub fn iam_data_sources() -> Vec<DataSourceDef> {
                 DataSourceListOutput {
                     name: "arns",
                     description: "Set of ARNs of the matched IAM roles.",
-                    item_type: "super::super::iam::role::arn()",
+                    item_type: DataSourceType::named(AwsType::IamRoleArn),
                 },
                 DataSourceListOutput {
                     name: "names",
                     description: "Set of names of the matched IAM roles.",
-                    item_type: "AttributeType::string()",
+                    item_type: DataSourceType::plain(Representation::String),
                 },
             ],
         },
@@ -3638,10 +3704,13 @@ pub fn iam_resources() -> Vec<ResourceDef> {
         identifier: "RoleName",
         has_tags: true,
         type_overrides: vec![
-            ("AssumeRolePolicyDocument", "super::iam_policy_document()"),
-            ("Arn", "super::super::iam::role::arn()"),
-            ("RoleId", "super::iam_role_id()"),
+            ("Arn", TypeOverride::Identity(AwsType::IamRoleArn)),
+            ("RoleId", TypeOverride::Identity(AwsType::IamRoleId)),
         ],
+        representations: vec![(
+            "AssumeRolePolicyDocument",
+            Representation::IamPolicyDocument,
+        )],
         exclude_fields: vec![
             // Managed policies and inline policies are separate resources
             "PermissionsBoundary",
@@ -3696,7 +3765,8 @@ pub fn logs_resources() -> Vec<ResourceDef> {
         ],
         identifier: "LogGroupName",
         has_tags: true,
-        type_overrides: vec![("Arn", "super::arn()")],
+        type_overrides: vec![("Arn", TypeOverride::Identity(AwsType::Arn))],
+        representations: vec![],
         exclude_fields: vec![
             "CreationTime",
             "StoredBytes",
@@ -3783,28 +3853,25 @@ pub fn sqs_resources() -> Vec<ResourceDef> {
         }],
         identifier: "QueueUrl",
         has_tags: true,
-        type_overrides: vec![
-            ("QueueArn", "super::arn()"),
-            ("Policy", "super::iam_policy_document()"),
-            ("RedrivePolicy", "super::sqs_redrive_policy()"),
-            ("RedriveAllowPolicy", "super::sqs_redrive_allow_policy()"),
-            ("VisibilityTimeout", "AttributeType::int()"),
-            ("MaximumMessageSize", "AttributeType::int()"),
-            ("MessageRetentionPeriod", "AttributeType::int()"),
-            ("DelaySeconds", "AttributeType::int()"),
-            ("ReceiveMessageWaitTimeSeconds", "AttributeType::int()"),
-            ("KmsDataKeyReusePeriodSeconds", "AttributeType::int()"),
-            ("FifoQueue", "AttributeType::bool()"),
-            ("ContentBasedDeduplication", "AttributeType::bool()"),
-            ("SqsManagedSseEnabled", "AttributeType::bool()"),
-            ("ApproximateNumberOfMessages", "AttributeType::int()"),
-            ("ApproximateNumberOfMessagesDelayed", "AttributeType::int()"),
-            (
-                "ApproximateNumberOfMessagesNotVisible",
-                "AttributeType::int()",
-            ),
-            ("CreatedTimestamp", "AttributeType::int()"),
-            ("LastModifiedTimestamp", "AttributeType::int()"),
+        type_overrides: vec![("QueueArn", TypeOverride::Identity(AwsType::Arn))],
+        representations: vec![
+            ("Policy", Representation::IamPolicyDocument),
+            ("RedrivePolicy", Representation::SqsRedrivePolicy),
+            ("RedriveAllowPolicy", Representation::SqsRedriveAllowPolicy),
+            ("VisibilityTimeout", Representation::Int),
+            ("MaximumMessageSize", Representation::Int),
+            ("MessageRetentionPeriod", Representation::Int),
+            ("DelaySeconds", Representation::Int),
+            ("ReceiveMessageWaitTimeSeconds", Representation::Int),
+            ("KmsDataKeyReusePeriodSeconds", Representation::Int),
+            ("FifoQueue", Representation::Bool),
+            ("ContentBasedDeduplication", Representation::Bool),
+            ("SqsManagedSseEnabled", Representation::Bool),
+            ("ApproximateNumberOfMessages", Representation::Int),
+            ("ApproximateNumberOfMessagesDelayed", Representation::Int),
+            ("ApproximateNumberOfMessagesNotVisible", Representation::Int),
+            ("CreatedTimestamp", Representation::Int),
+            ("LastModifiedTimestamp", Representation::Int),
         ],
         // Keep the raw `Attributes` map out of the schema; the synthetic
         // entries below project every QueueAttributeName key.
@@ -4000,11 +4067,11 @@ mod tests {
             name: "arn",
             provider_name: None,
             description: "Bucket ARN",
-            type_code: "AttributeType::string()",
+            type_code: DataSourceType::plain(Representation::String),
         };
         assert_eq!(o.name, "arn");
         assert!(o.provider_name.is_none());
-        assert_eq!(o.type_code, "AttributeType::string()");
+        assert_eq!(o.type_code, DataSourceType::plain(Representation::String));
     }
 
     #[test]
@@ -4015,8 +4082,11 @@ mod tests {
         let names: Vec<&str> = outs.iter().map(|o| o.name).collect();
         assert_eq!(names, vec!["account_id", "arn", "user_id"]);
         assert_eq!(outs[0].provider_name, Some("Account"));
-        assert_eq!(outs[0].type_code, "super::aws_account_id()");
-        assert_eq!(outs[1].type_code, "super::arn()");
+        assert_eq!(outs[0].type_code, DataSourceType::named(AwsType::AccountId));
+        assert_eq!(
+            outs[1].type_code,
+            DataSourceType::named(AwsType::StsCallerIdentityArn)
+        );
     }
 
     #[test]
@@ -4080,9 +4150,12 @@ mod tests {
         assert_eq!(names, vec!["arns", "names"]);
         assert_eq!(
             aggregated_outputs[0].item_type,
-            "super::super::iam::role::arn()"
+            DataSourceType::named(AwsType::IamRoleArn)
         );
-        assert_eq!(aggregated_outputs[1].item_type, "AttributeType::string()");
+        assert_eq!(
+            aggregated_outputs[1].item_type,
+            DataSourceType::plain(Representation::String)
+        );
     }
 
     #[test]
@@ -4096,7 +4169,7 @@ mod tests {
                     name: "arn",
                     provider_name: None,
                     description: "",
-                    type_code: "AttributeType::string()",
+                    type_code: DataSourceType::plain(Representation::String),
                 }],
             },
         };

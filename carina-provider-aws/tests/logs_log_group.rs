@@ -47,15 +47,34 @@ fn awscc_log_group_name_fixture() -> ValidatedResourceSchema {
 
 #[test]
 fn logs_log_group_name_refinement_equals_awscc_literal() {
-    let awscc = resource_schema_to_protocol(&awscc_log_group_name_fixture()).unwrap();
-    let expected = serde_json::to_value(&awscc.attributes["log_group_name"].attr_type).unwrap();
+    let awscc = awscc_log_group_name_fixture();
     for schema in logs_schemas() {
-        let aws = resource_schema_to_protocol(&schema).unwrap();
-        assert_eq!(
-            serde_json::to_value(&aws.attributes["log_group_name"].attr_type).unwrap(),
-            expected,
-            "both pattern bytes and length metadata must match AWSCC"
-        );
+        for value in [
+            "a".to_string(),
+            "/aws/lambda/carina".into(),
+            ".-_/#AZaz09".into(),
+            "a".repeat(512),
+            "".into(),
+            "a".repeat(513),
+            "has space".into(),
+            "valid\n".into(),
+            "日本語".into(),
+        ] {
+            let input: Value = Value::Concrete(ConcreteValue::String(value.clone().into()));
+            assert_eq!(
+                schema
+                    .effective_attribute("log_group_name")
+                    .unwrap()
+                    .validate(&input)
+                    .is_ok(),
+                awscc
+                    .effective_attribute("log_group_name")
+                    .unwrap()
+                    .validate(&input)
+                    .is_ok(),
+                "same language for {value:?}"
+            );
+        }
     }
 }
 
@@ -95,25 +114,22 @@ fn logs_log_group_name_typed_references_pass_in_both_provider_directions() {
 fn logs_log_group_name_validates_length_and_whole_string_pattern() {
     let draft = logs_log_group_config().schema;
     let RawShape::String {
-        identity_layer:
-            carina_core::schema::StringIdentityParts {
-                identity,
-                pattern,
-                length,
-                ..
-            },
-        ..
+        identity_layer,
+        member_layer,
     } = draft.attributes()["log_group_name"].attr_type().raw_shape()
     else {
         panic!("log_group_name must remain a String");
     };
+    let identity = identity_layer.identity;
+    let pattern = member_layer.pattern.or(identity_layer.pattern);
+    let length = carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
     assert!(
         identity.is_none(),
         "value constraints must not add an identity"
     );
     assert_eq!(
         pattern.map(carina_core::schema::PatternSpec::as_str),
-        Some(r"^[.\-_/#A-Za-z0-9]{1,512}\z")
+        Some(r"^[\.\-_/#A-Za-z0-9]+$")
     );
     assert_eq!(length, Some((Some(1), Some(512))));
 

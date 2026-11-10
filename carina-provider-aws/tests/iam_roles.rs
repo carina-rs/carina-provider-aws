@@ -79,24 +79,22 @@ fn iam_roles_path_prefix_accepts_infra_prefixes_without_requiring_a_trailing_sla
     // because it does not begin with '/'. pathPrefixType differs from pathType.
     for schema in iam_roles_schemas() {
         let RawShape::String {
-            identity_layer:
-                carina_core::schema::StringIdentityParts {
-                    identity,
-                    pattern,
-                    length,
-                    ..
-                },
-            ..
+            identity_layer,
+            member_layer,
         } = schema.parts().attributes["path_prefix"]
             .attr_type()
             .raw_shape()
         else {
             panic!("path_prefix must remain a String");
         };
+        let identity = identity_layer.identity;
+        let pattern = member_layer.pattern.or(identity_layer.pattern);
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert!(identity.is_none());
         assert_eq!(
             pattern.map(carina_core::schema::PatternSpec::as_str),
-            Some(r"^/[\x21-\x7F]*\z")
+            Some(r"^\u002F[\u0021-\u007F]*$")
         );
         assert_eq!(length, Some((Some(1), Some(512))));
         let prefix = schema.effective_attribute("path_prefix").unwrap();

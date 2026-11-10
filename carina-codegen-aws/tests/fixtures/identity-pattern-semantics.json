@@ -1,0 +1,530 @@
+[
+  {
+    "resource": "iam.Role",
+    "path": "path",
+    "smithy_pattern": "^(\\u002F)|(\\u002F[\\u0021-\\u007E]+\\u002F)$",
+    "smithy_length": [
+      1,
+      512
+    ],
+    "old_pattern": "^(?:/|/[\\x21-\\x7E]+/)\\z",
+    "old_length": [
+      1,
+      512
+    ],
+    "translated_mode": "Substring",
+    "cases": [
+      {
+        "value": "",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/a/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a/\n",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/a/\r",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/a/ ",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/no-trailing",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "//",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "/é/",
+        "smithy": true,
+        "old": false
+      },
+      {
+        "value": "a b",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aws/example",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "good\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaa\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "x/a/",
+        "smithy": true,
+        "old": false
+      }
+    ]
+  },
+  {
+    "resource": "iam.Roles",
+    "path": "path_prefix",
+    "smithy_pattern": "^\\u002F[\\u0021-\\u007F]*$",
+    "smithy_length": [
+      1,
+      512
+    ],
+    "old_pattern": "^/[\\x21-\\x7F]*\\z",
+    "old_length": [
+      1,
+      512
+    ],
+    "translated_mode": "Full",
+    "cases": [
+      {
+        "value": "",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a/\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/\r",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/ ",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/no-trailing",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "//",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/é/",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "a b",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aws/example",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "good\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaa\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "x/a/",
+        "smithy": false,
+        "old": false
+      }
+    ]
+  },
+  {
+    "resource": "organizations.Organization",
+    "path": "id",
+    "smithy_pattern": "^o-[a-z0-9]{10,32}$",
+    "smithy_length": [
+      null,
+      null
+    ],
+    "old_pattern": "^o-[a-z0-9]{10,32}\\z",
+    "old_length": [
+      12,
+      34
+    ],
+    "translated_mode": "Full",
+    "cases": [
+      {
+        "value": "",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/\r",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/ ",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/no-trailing",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "//",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/é/",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "a b",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aws/example",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "good\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "o-aaaaaaaaaa\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "x/a/",
+        "smithy": false,
+        "old": false
+      }
+    ]
+  },
+  {
+    "resource": "logs.LogGroup",
+    "path": "log_group_name",
+    "smithy_pattern": "^[\\.\\-_/#A-Za-z0-9]+$",
+    "smithy_length": [
+      1,
+      512
+    ],
+    "old_pattern": "^[.\\-_/#A-Za-z0-9]{1,512}\\z",
+    "old_length": [
+      1,
+      512
+    ],
+    "translated_mode": "Full",
+    "cases": [
+      {
+        "value": "",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a/",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/a/\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/\r",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/a/ ",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/no-trailing",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "//",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "/é/",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "a b",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "aws/example",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "good\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "o-aaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "o-aaaaaaaaaa\n",
+        "smithy": false,
+        "old": false
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "o-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "smithy": true,
+        "old": true
+      },
+      {
+        "value": "x/a/",
+        "smithy": true,
+        "old": true
+      }
+    ]
+  }
+]

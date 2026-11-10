@@ -26,21 +26,21 @@ pub fn ec2_security_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("group_name", carina_aws_types::ec2_security_group_name())
+            AttributeSchema::required("group_name", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2SecurityGroupName.definition()))
                 .create_only()
                 .with_description("The name of the security group. Names are case-insensitive and must be unique within the VPC. Constraints: Up to 255 characters in length. Can't start...")
                 .with_provider_name("GroupName")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("vpc_id", super::vpc_id())
+            AttributeSchema::optional("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the VPC. Required for a nondefault VPC.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("group_id", super::security_group_id())
+            AttributeSchema::provider_populated("group_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.definition()))
                 .with_description("The ID of the security group. (read-only)")
                 .with_provider_name("GroupId")
                 .build(),

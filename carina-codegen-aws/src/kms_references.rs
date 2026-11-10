@@ -107,15 +107,16 @@ pub fn classify_string(
     Ok(decision)
 }
 
-/// Constructor selection uses only the classified resource/path pair.
-pub fn reference_type_code(resource: &str, path: &str) -> Option<&'static str> {
+/// Typed constructor and emitted expression come from the same classification.
+pub fn member_definition(
+    resource: &str,
+    path: &str,
+) -> Option<(carina_aws_types::IdentityDefinition, &'static str)> {
     match classification(resource, path) {
-        Some(Classification::Reference { arn_only: true }) => {
-            Some("carina_aws_types::kms_key_arn_reference()")
-        }
-        Some(Classification::Reference { arn_only: false }) => {
-            Some("carina_aws_types::kms_key_reference()")
-        }
+        Some(Classification::Reference { .. }) => Some((
+            carina_aws_types::AwsType::KmsKeyReference.definition(),
+            "carina_aws_types::AwsType::KmsKeyReference.definition()",
+        )),
         _ => None,
     }
 }

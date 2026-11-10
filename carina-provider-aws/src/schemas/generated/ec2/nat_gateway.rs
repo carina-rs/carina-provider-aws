@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
 const VALID_AVAILABILITY_MODE: &[&str] = &["regional", "zonal"];
@@ -23,20 +23,14 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes a NAT gateway.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("allocation_id", super::allocation_id())
+            AttributeSchema::optional("allocation_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AllocationId.definition()))
                 .create_only()
                 .with_description("[Public NAT gateways only] The allocation ID of an Elastic IP address to associate with the NAT gateway. You cannot specify an Elastic IP address with...")
                 .with_provider_name("AllocationId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_mode", AttributeType::enum_(
-    carina_core::schema::enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway")),
-    Some(vec!["regional".to_string(), "zonal".to_string()]),
-    vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("availability_mode", AttributeType::enum_(carina_core::schema::enum_identity("AvailabilityMode", Some("aws.ec2.NatGateway")), Some(vec!["regional".to_string(), "zonal".to_string()]), vec![("regional".to_string(), "regional".to_string()), ("zonal".to_string(), "zonal".to_string())], None, None))
                 .create_only()
                 .with_description("Specifies whether to create a zonal (single-AZ) or regional (multi-AZ) NAT gateway. Defaults to zonal. A zonal NAT gateway is a NAT Gateway that provi...")
                 .with_provider_name("AvailabilityMode")
@@ -50,41 +44,35 @@ pub fn ec2_nat_gateway_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("connectivity_type", AttributeType::enum_(
-    carina_core::schema::enum_identity("ConnectivityType", Some("aws.ec2.NatGateway")),
-    Some(vec!["private".to_string(), "public".to_string()]),
-    vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("connectivity_type", AttributeType::enum_(carina_core::schema::enum_identity("ConnectivityType", Some("aws.ec2.NatGateway")), Some(vec!["private".to_string(), "public".to_string()]), vec![("private".to_string(), "private".to_string()), ("public".to_string(), "public".to_string())], None, None))
                 .create_only()
                 .with_description("Indicates whether the NAT gateway supports public or private connectivity. The default is public connectivity.")
                 .with_provider_name("ConnectivityType")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("private_ip_address", types::ipv4_address())
+            AttributeSchema::optional("private_ip_address", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Ipv4Address.definition()))
                 .create_only()
                 .with_description("The private IPv4 address to assign to the NAT gateway. If you don't provide an address, a private IPv4 address will be automatically assigned.")
                 .with_provider_name("PrivateIpAddress")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("subnet_id", super::subnet_id())
+            AttributeSchema::optional("subnet_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.definition()))
                 .create_only()
                 .with_description("The ID of the subnet in which to create the NAT gateway.")
                 .with_provider_name("SubnetId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("vpc_id", super::vpc_id())
+            AttributeSchema::optional("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the VPC where you want to create a regional NAT gateway.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("nat_gateway_id", super::nat_gateway_id())
+            AttributeSchema::provider_populated("nat_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::NatGatewayId.definition()))
                 .with_description("The ID of the NAT gateway. (read-only)")
                 .with_provider_name("NatGatewayId")
                 .build(),

@@ -24,7 +24,7 @@ pub fn s3_bucket_object_lock_configuration_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("object_lock_enabled", super::s3_object_lock_enabled())
+            AttributeSchema::required("object_lock_enabled", carina_aws_types::try_with_member_enum_values(AttributeType::string(), carina_core::schema::enum_identity("ObjectLockEnabled", Some("aws.s3.BucketObjectLockConfiguration")), &["Enabled"], &[("Enabled", "enabled")]).expect("invalid generated local enum aws.s3.BucketObjectLockConfiguration.ObjectLockEnabled"))
                 .with_description("Whether S3 Object Lock is enabled for the bucket.")
                 .with_provider_name("ObjectLockEnabled")
                 .build(),

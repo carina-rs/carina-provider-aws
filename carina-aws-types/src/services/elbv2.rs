@@ -9,29 +9,34 @@ use carina_core::schema::{PatternMatch, PatternSpec};
 
 /// Shared anonymous ELBv2 health-check port: `traffic-port` or canonical decimal 1..=65535.
 pub fn elbv2_health_check_port() -> AttributeType {
-    AttributeType::refined_string(
-        None,
-        Some(PatternSpec::new(
-            r"^(?:traffic-port|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\z",
-            PatternMatch::Full,
-        )),
-        None,
-        None,
+    AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new(
+                r"^(?:traffic-port|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\z",
+                PatternMatch::Full,
+            )),
+            None,
+        ),
     )
 }
 
-pub(crate) fn elbv2_matcher_codes(identity: TypeIdentity, min: u16, max: u16) -> AttributeType {
-    AttributeType::refined_string_with_validator(
+pub(crate) fn elbv2_matcher_codes(
+    identity: TypeIdentity,
+    min: u16,
+    max: u16,
+) -> crate::IdentityDefinition {
+    crate::IdentityDefinition::string(
         identity,
         None,
         None,
-        legacy_validator(move |value| {
+        Some(legacy_validator(move |value| {
             if let Value::Concrete(ConcreteValue::String(value)) = value {
                 validate_matcher_codes(value.expose_plaintext(), min, max).map_err(Into::into)
             } else {
                 Err("Expected string".into())
             }
-        }),
+        })),
         None,
     )
 }
@@ -80,12 +85,15 @@ mod tests {
             identity_layer:
                 carina_core::schema::StringIdentityParts {
                     identity,
-                    pattern: Some(pattern),
                     length,
                     validate,
                     ..
                 },
-            ..
+            member_layer:
+                carina_core::schema::StringMemberParts {
+                    pattern: Some(pattern),
+                    ..
+                },
         } = attr.raw_shape()
         else {
             panic!("ELBv2 health-check port must be a patterned String");
@@ -145,8 +153,8 @@ mod tests {
     fn elbv2_health_check_port_pattern_covers_every_port() {
         let attr = elbv2_health_check_port();
         let RawShape::String {
-            identity_layer:
-                carina_core::schema::StringIdentityParts {
+            member_layer:
+                carina_core::schema::StringMemberParts {
                     pattern: Some(pattern),
                     ..
                 },

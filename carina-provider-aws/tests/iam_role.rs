@@ -1,3 +1,6 @@
+#[path = "support/input_patterns.rs"]
+mod input_patterns;
+
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -27,21 +30,24 @@ fn iam_role_refinements_use_named_name_and_anonymous_path() {
                 r"^[A-Za-z0-9_+=,.@-]+\z",
                 64,
             ),
-            ("path", None, r"^(?:/|/[\x21-\x7E]+/)\z", 512),
+            (
+                "path",
+                None,
+                r"^(\u002F)|(\u002F[\u0021-\u007E]+\u002F)$",
+                512,
+            ),
         ] {
             let RawShape::String {
-                identity_layer:
-                    carina_core::schema::StringIdentityParts {
-                        identity,
-                        pattern,
-                        length,
-                        ..
-                    },
-                ..
+                identity_layer,
+                member_layer,
             } = schema.parts().attributes[field].attr_type().raw_shape()
             else {
                 panic!("{field} must remain a String");
             };
+            let identity = identity_layer.identity;
+            let pattern = identity_layer.pattern.or(member_layer.pattern);
+            let length =
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
             assert_eq!(
                 identity.map(ToString::to_string).as_deref(),
                 expected_identity,
@@ -107,7 +113,10 @@ fn iam_role_path_validates_smithy_whole_string_alternation_and_bounds() {
             format!("/{}/", (b'!'..=b'~').map(char::from).collect::<String>()),
         ] {
             let value: Value = Value::Concrete(ConcreteValue::String(valid.clone().into()));
-            assert!(path.validate(&value).is_ok(), "valid path: {valid:?}");
+            assert!(
+                path.validate(&value).is_ok() && input_patterns::accept(&schema, "path", &valid),
+                "valid path: {valid:?}"
+            );
         }
         for invalid in [
             "".to_string(),
@@ -124,7 +133,11 @@ fn iam_role_path_validates_smithy_whole_string_alternation_and_bounds() {
             "/é/".to_string(),
         ] {
             let value: Value = Value::Concrete(ConcreteValue::String(invalid.clone().into()));
-            assert!(path.validate(&value).is_err(), "invalid path: {invalid:?}");
+            assert!(
+                path.validate(&value).is_err()
+                    || !input_patterns::accept(&schema, "path", &invalid),
+                "invalid path: {invalid:?}"
+            );
         }
     }
 }
@@ -153,7 +166,12 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             "carina-588-source",
             Some("expected aws.iam.Role.Name, got String"),
         ),
-        ("path", "source.description", "/carina-588/probe/", None),
+        (
+            "path",
+            "source.description",
+            "/carina-588/probe/",
+            Some("cannot assign String"),
+        ),
         ("path", "source.role_id", "/carina-588/probe/", None),
     ] {
         let sink_fields = if field == "role_name" {

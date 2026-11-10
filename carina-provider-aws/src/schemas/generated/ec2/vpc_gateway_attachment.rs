@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, ResourceSchema};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 /// Returns the schema config for ec2.VpcGatewayAttachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
@@ -17,25 +17,43 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
         schema: ResourceSchema::new("ec2.VpcGatewayAttachment")
             .with_conflicting_replacement()
             .attribute(
-                AttributeSchema::optional("internet_gateway_id", super::internet_gateway_id())
-                    .create_only()
-                    .with_description("The ID of the internet gateway.")
-                    .with_provider_name("InternetGatewayId")
-                    .build(),
+                AttributeSchema::optional(
+                    "internet_gateway_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::InternetGatewayId.definition(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the internet gateway.")
+                .with_provider_name("InternetGatewayId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::required("vpc_id", super::vpc_id())
-                    .create_only()
-                    .with_description("The ID of the VPC.")
-                    .with_provider_name("VpcId")
-                    .build(),
+                AttributeSchema::required(
+                    "vpc_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::VpcId.definition(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the VPC.")
+                .with_provider_name("VpcId")
+                .build(),
             )
             .attribute(
-                AttributeSchema::optional("vpn_gateway_id", super::vpn_gateway_id())
-                    .create_only()
-                    .with_description("The ID of the VPN gateway.")
-                    .with_provider_name("VpnGatewayId")
-                    .build(),
+                AttributeSchema::optional(
+                    "vpn_gateway_id",
+                    carina_aws_types::with_member_identity(
+                        AttributeType::string(),
+                        carina_aws_types::AwsType::VpnGatewayId.definition(),
+                    ),
+                )
+                .create_only()
+                .with_description("The ID of the VPN gateway.")
+                .with_provider_name("VpnGatewayId")
+                .build(),
             ),
     }
 }

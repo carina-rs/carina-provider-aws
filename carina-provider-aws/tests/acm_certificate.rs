@@ -52,18 +52,16 @@ fn acm_domain_name_enforces_the_request_common_name_octet_limit() {
     for schema in acm_schemas() {
         let domain = field(&schema, "domain_name");
         let RawShape::String {
-            identity_layer:
-                carina_core::schema::StringIdentityParts {
-                    identity,
-                    pattern,
-                    length,
-                    ..
-                },
-            ..
+            identity_layer,
+            member_layer,
         } = domain.as_type().raw_shape()
         else {
             panic!("domain_name must remain a refined String");
         };
+        let identity = identity_layer.identity;
+        let pattern = member_layer.pattern.or(identity_layer.pattern);
+        let length =
+            carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
         assert_eq!(
             identity.unwrap().to_string(),
             "aws.acm.Certificate.DomainName"
@@ -209,18 +207,16 @@ fn acm_sans_and_read_domains_allow_253_octets_and_63_octet_labels() {
         {
             let domain = field(&schema, path);
             let RawShape::String {
-                identity_layer:
-                    carina_core::schema::StringIdentityParts {
-                        identity,
-                        pattern,
-                        length,
-                        ..
-                    },
-                ..
+                identity_layer,
+                member_layer,
             } = domain.as_type().raw_shape()
             else {
                 panic!("{path} must be a refined String");
             };
+            let identity = identity_layer.identity;
+            let pattern = member_layer.pattern.or(identity_layer.pattern);
+            let length =
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
             if path == "subject_alternative_names[]" {
                 assert_eq!(
                     identity.unwrap().to_string(),
@@ -262,20 +258,6 @@ fn acm_sans_and_read_domains_allow_253_octets_and_63_octet_labels() {
 // https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html
 #[test]
 fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
-    let shared_dns_name = carina_aws_types::route53_dns_name();
-    let RawShape::String {
-        identity_layer:
-            carina_core::schema::StringIdentityParts {
-                identity: shared_identity,
-                pattern: shared_pattern,
-                length: shared_length,
-                ..
-            },
-        ..
-    } = shared_dns_name.raw_shape()
-    else {
-        panic!("shared DNS String");
-    };
     for schema in acm_schemas() {
         for prefix in [
             "domain_validation_options[]",
@@ -300,40 +282,32 @@ fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
                 ] {
                     assert!(record.validate(&string(valid)).is_ok(), "{path}: {valid:?}");
                 }
-                for invalid in [
-                    "",
+                assert!(record.validate(&string("")).is_err());
+                assert!(record.validate(&string(&"a".repeat(1025))).is_err());
+                for formerly_rejected in [
                     "_token..example.com.",
                     ".example.com.",
                     "_token.example.com.\n",
                     "_token example.com.",
                 ] {
                     assert!(
-                        record.validate(&string(invalid)).is_err(),
-                        "{path}: {invalid:?}"
+                        record.validate(&string(formerly_rejected)).is_ok(),
+                        "approved anonymous-output pattern removal: {path}"
                     );
                 }
-                let longest_label = format!("_{}.example.com.", "a".repeat(62));
-                assert!(record.validate(&string(&longest_label)).is_ok());
-                let overlong_label = format!("_{}.example.com.", "a".repeat(63));
-                assert!(record.validate(&string(&overlong_label)).is_err());
                 let RawShape::String {
-                    identity_layer:
-                        carina_core::schema::StringIdentityParts {
-                            identity,
-                            pattern,
-                            length,
-                            ..
-                        },
-                    ..
+                    identity_layer,
+                    member_layer,
                 } = record.as_type().raw_shape()
                 else {
-                    panic!("DNS String");
+                    panic!("String")
                 };
-                assert_eq!(
-                    (identity, pattern, length),
-                    (shared_identity, shared_pattern, shared_length),
-                    "{path} must use the shared Route 53 DNS-name type"
+                assert!(
+                    identity_layer.identity.is_none()
+                        && identity_layer.pattern.is_none()
+                        && member_layer.pattern.is_none()
                 );
+                assert_eq!(member_layer.length, Some((Some(1), Some(1024))));
             }
         }
     }

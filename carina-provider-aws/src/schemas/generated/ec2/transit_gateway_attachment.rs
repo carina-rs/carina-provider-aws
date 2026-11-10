@@ -8,6 +8,14 @@ use super::AwsSchemaConfig;
 use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 use carina_provider_protocol::types::ValidatorType;
 
+const NESTED_ENUM_0: &[&str] = &["disable", "enable"];
+
+const NESTED_ENUM_1: &[&str] = &["disable", "enable"];
+
+const NESTED_ENUM_2: &[&str] = &["disable", "enable"];
+
+const NESTED_ENUM_3: &[&str] = &["disable", "enable"];
+
 /// Returns the schema config for ec2.TransitGatewayAttachment (Smithy: com.amazonaws.ec2)
 pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
     AwsSchemaConfig {
@@ -22,34 +30,10 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
             AttributeSchema::optional("options", AttributeType::struct_(
                     "CreateTransitGatewayVpcAttachmentRequestOptions".to_string(),
                     vec![
-                    StructField::optional("appliance_mode_support", AttributeType::enum_(
-    carina_core::schema::enum_identity("ApplianceModeSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
-    Some(vec!["disable".to_string(), "enable".to_string()]),
-    vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-    None,
-    None,
-)).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport").build(),
-                    StructField::optional("dns_support", AttributeType::enum_(
-    carina_core::schema::enum_identity("DnsSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
-    Some(vec!["disable".to_string(), "enable".to_string()]),
-    vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-    None,
-    None,
-)).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport").build(),
-                    StructField::optional("ipv6_support", AttributeType::enum_(
-    carina_core::schema::enum_identity("Ipv6Support", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
-    Some(vec!["disable".to_string(), "enable".to_string()]),
-    vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-    None,
-    None,
-)).with_description("Specifies whether IPv6 support is enabled for the attachment. When enabled, the transit gateway network interface receives an IPv6 address. When you e...").with_provider_name("Ipv6Support").build(),
-                    StructField::optional("security_group_referencing_support", AttributeType::enum_(
-    carina_core::schema::enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")),
-    Some(vec!["disable".to_string(), "enable".to_string()]),
-    vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())],
-    None,
-    None,
-)).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport").build()
+                    StructField::optional("appliance_mode_support", AttributeType::enum_(carina_core::schema::enum_identity("ApplianceModeSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")), Some(vec!["disable".to_string(), "enable".to_string()]), vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())], None, None)).with_description("Enable or disable support for appliance mode. If enabled, a traffic flow between a source and destination uses the same Availability Zone for the VPC ...").with_provider_name("ApplianceModeSupport").build(),
+                    StructField::optional("dns_support", AttributeType::enum_(carina_core::schema::enum_identity("DnsSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")), Some(vec!["disable".to_string(), "enable".to_string()]), vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())], None, None)).with_description("Enable or disable DNS support. The default is enable.").with_provider_name("DnsSupport").build(),
+                    StructField::optional("ipv6_support", AttributeType::enum_(carina_core::schema::enum_identity("Ipv6Support", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")), Some(vec!["disable".to_string(), "enable".to_string()]), vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())], None, None)).with_description("Specifies whether IPv6 support is enabled for the attachment. When enabled, the transit gateway network interface receives an IPv6 address. When you e...").with_provider_name("Ipv6Support").build(),
+                    StructField::optional("security_group_referencing_support", AttributeType::enum_(carina_core::schema::enum_identity("SecurityGroupReferencingSupport", Some("aws.ec2.TransitGatewayAttachment.CreateTransitGatewayVpcAttachmentRequestOptions")), Some(vec!["disable".to_string(), "enable".to_string()]), vec![("disable".to_string(), "disable".to_string()), ("enable".to_string(), "enable".to_string())], None, None)).with_description("Enables you to reference a security group across VPCs attached to a transit gateway to simplify security group management. This option is set to enabl...").with_provider_name("SecurityGroupReferencingSupport").build()
                     ],
                 ))
                 .create_only()
@@ -58,14 +42,14 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("subnet_ids", AttributeType::list(super::subnet_id()))
+            AttributeSchema::required("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.definition())))
                 .create_only()
                 .with_description("The IDs of one or more subnets. You can specify only one subnet per Availability Zone. You must specify at least one subnet, but we recommend that you...")
                 .with_provider_name("SubnetIds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("transit_gateway_id", super::transit_gateway_id())
+            AttributeSchema::required("transit_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::TransitGatewayId.definition()))
                 .create_only()
                 .identity()
                 .with_description("The ID of the transit gateway.")
@@ -73,7 +57,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", super::vpc_id())
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .identity()
                 .with_description("The ID of the VPC.")
@@ -101,5 +85,13 @@ pub fn enum_valid_values() -> (
     &'static str,
     &'static [(&'static str, &'static [&'static str])],
 ) {
-    ("ec2.TransitGatewayAttachment", &[])
+    (
+        "ec2.TransitGatewayAttachment",
+        &[
+            ("options.appliance_mode_support", NESTED_ENUM_0),
+            ("options.dns_support", NESTED_ENUM_1),
+            ("options.ipv6_support", NESTED_ENUM_2),
+            ("options.security_group_referencing_support", NESTED_ENUM_3),
+        ],
+    )
 }

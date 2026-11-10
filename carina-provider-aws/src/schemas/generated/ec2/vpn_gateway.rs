@@ -21,34 +21,28 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes a virtual private gateway.")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::optional("amazon_side_asn", carina_aws_types::ec2_vpn_gateway_amazon_side_asn())
+            AttributeSchema::optional("amazon_side_asn", carina_aws_types::with_member_identity(AttributeType::int(), carina_aws_types::AwsType::Ec2VpnGatewayAmazonSideAsn.definition()))
                 .create_only()
                 .with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. If you're using a 16-bit ASN, it must be in the 64512 to 65534 range. I...")
                 .with_provider_name("AmazonSideAsn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone", super::availability_zone())
+            AttributeSchema::optional("availability_zone", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZone.definition()))
                 .create_only()
                 .with_description("The Availability Zone for the virtual private gateway.")
                 .with_provider_name("AvailabilityZone")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("type", AttributeType::enum_(
-    carina_core::schema::enum_identity("Type", Some("aws.ec2.VpnGateway")),
-    Some(vec!["ipsec.1".to_string()]),
-    vec![("ipsec.1".to_string(), "ipsec_1".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::required("type", AttributeType::enum_(carina_core::schema::enum_identity("Type", Some("aws.ec2.VpnGateway")), Some(vec!["ipsec.1".to_string()]), vec![("ipsec.1".to_string(), "ipsec_1".to_string())], None, None))
                 .create_only()
                 .with_description("The type of VPN connection this virtual private gateway supports.")
                 .with_provider_name("Type")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpn_gateway_id", super::vpn_gateway_id())
+            AttributeSchema::provider_populated("vpn_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpnGatewayId.definition()))
                 .with_description("The ID of the virtual private gateway. (read-only)")
                 .with_provider_name("VpnGatewayId")
                 .build(),

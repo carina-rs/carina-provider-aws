@@ -21,7 +21,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("cidr_block", carina_aws_types::ec2_vpc_cidr_block())
+            AttributeSchema::optional("cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2VpcCidrBlock.definition()))
                 .create_only()
                 .with_description("The IPv4 network range for the VPC, in CIDR notation. For example, 10.0.0.0/16. We modify the specified CIDR block to its canonical form; for example,...")
                 .with_provider_name("CidrBlock")
@@ -40,13 +40,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("instance_tenancy", AttributeType::enum_(
-    carina_core::schema::enum_identity("InstanceTenancy", Some("aws.ec2.Vpc")),
-    Some(vec!["dedicated".to_string(), "default".to_string(), "host".to_string()]),
-    vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())],
-    None,
-    None,
-))
+            AttributeSchema::optional("instance_tenancy", AttributeType::enum_(carina_core::schema::enum_identity("InstanceTenancy", Some("aws.ec2.Vpc")), Some(vec!["dedicated".to_string(), "default".to_string(), "host".to_string()]), vec![("dedicated".to_string(), "dedicated".to_string()), ("default".to_string(), "default".to_string()), ("host".to_string(), "host".to_string())], None, None))
                 .create_only()
                 .with_description("The tenancy options for instances launched into the VPC. For default, instances are launched with shared tenancy by default. You can launch instances ...")
                 .with_provider_name("InstanceTenancy")
@@ -54,7 +48,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         )
         // Read contract: CreateVpc accepts the IPAM pool ID, but DescribeVpcs returns only the allocated CIDR association
         .attribute(
-            AttributeSchema::optional("ipv4_ipam_pool_id", super::ipam_pool_id())
+            AttributeSchema::optional("ipv4_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.definition()))
                 .create_only()
                 .write_only()
                 .with_description("The ID of an IPv4 IPAM pool you want to use for allocating this VPC's CIDR. For more information, see What is IPAM? in the Amazon VPC IPAM User Guide.")
@@ -62,14 +56,14 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv4_netmask_length", AttributeType::refined_int(None, Some((Some(16), Some(28)))))
+            AttributeSchema::optional("ipv4_netmask_length", carina_aws_types::with_int_range(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(0), Some(32))))), Some(16), Some(28)))
                 .create_only()
                 .with_description("The netmask length of the IPv4 CIDR you want to allocate to this VPC from an Amazon VPC IP Address Manager (IPAM) pool. For more information about IPA...")
                 .with_provider_name("Ipv4NetmaskLength")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpc_id", super::vpc_id())
+            AttributeSchema::provider_populated("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .with_description("The ID of the VPC. (read-only)")
                 .with_provider_name("VpcId")
                 .build(),

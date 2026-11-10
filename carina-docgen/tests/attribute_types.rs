@@ -386,6 +386,42 @@ fn scalars_render_identity_and_member_constraints_in_order() {
 }
 
 #[test]
+fn anonymous_scalars_render_the_effective_policy_without_layer_labels() {
+    let int = AttributeType::int_member(
+        carina_core::schema::IntIdentityLayer::new(None, Some((Some(0), Some(100000)))),
+        carina_core::schema::IntMemberConstraints::new(Some((Some(60), Some(86400)))),
+    );
+    let rendered = page(&int, &mut Hooks::default()).unwrap();
+    assert_eq!(
+        rendered.matches("Int (range: 60..=86400)").count(),
+        2,
+        "{rendered}"
+    );
+    assert!(!rendered.contains("identity constraints") && !rendered.contains("member constraints"));
+    let text = AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(
+            None,
+            Some(PatternSpec::new("^a.*", PatternMatch::Full)),
+            Some((Some(1), Some(10))),
+            None,
+        ),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new(".*z$", PatternMatch::Full)),
+            Some((Some(2), Some(8))),
+        ),
+    );
+    let rendered = page(&text, &mut Hooks::default()).unwrap();
+    assert_eq!(
+        rendered
+            .matches("String (pattern: /^a.*/ (Full), pattern: /.*z$/ (Full), len: 2..=8)")
+            .count(),
+        2,
+        "{rendered}"
+    );
+    assert!(!rendered.contains("identity constraints") && !rendered.contains("member constraints"));
+}
+
+#[test]
 fn scalars_render_all_refinements_in_github_order() {
     let validator = Arc::new(|_: &carina_core::resource::Value| Ok(()));
     let cases = [
