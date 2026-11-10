@@ -28,17 +28,102 @@ use crate::read_models_generated::Route53RecordSetReadModelSupplement;
 use crate::resend_safety_generated::Route53Client;
 use crate::send_models_generated::{Route53RecordSetCreateInput, Route53RecordSetUpdateInput};
 
-/// Composite identifier format: `hosted_zone_id|name|type`
-fn make_identifier(hosted_zone_id: &str, name: &str, record_type: &str) -> String {
-    format!("{}|{}|{}", hosted_zone_id, name, record_type)
+/// DNS comparison spelling; raw names must be canonicalized before comparison.
+#[derive(Debug, PartialEq, Eq)]
+struct CanonicalDnsName(String);
+
+impl CanonicalDnsName {
+    fn new(name: &str) -> Self {
+        Self(canonical_dns_name(name))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-fn parse_identifier(identifier: &str) -> Option<(&str, &str, &str)> {
-    let mut parts = identifier.splitn(3, '|');
-    let zone_id = parts.next()?;
-    let name = parts.next()?;
-    let record_type = parts.next()?;
-    Some((zone_id, name, record_type))
+/// A simple-routing record set, identified on disk by `hosted_zone_id|name|type`.
+#[derive(Debug)]
+struct RecordSetIdentity {
+    hosted_zone_id: String,
+    name: CanonicalDnsName,
+    record_type: RrType,
+    // Preserve the stored spelling for identifiers and Change requests. Lookup
+    // uses `name`; sending its canonical spelling would change existing requests.
+    stored_name: String,
+}
+
+impl RecordSetIdentity {
+    fn try_new(
+        hosted_zone_id: &str,
+        name: &str,
+        record_type: &str,
+    ) -> Result<Self, RecordSetIdentityError> {
+        for (part, value) in [
+            ("hosted_zone_id", hosted_zone_id),
+            ("name", name),
+            ("type", record_type),
+        ] {
+            if value.is_empty() {
+                return Err(RecordSetIdentityError::EmptyPart(part));
+            }
+            if value.contains('|') {
+                return Err(RecordSetIdentityError::DelimiterInPart(part));
+            }
+        }
+        Ok(Self {
+            hosted_zone_id: hosted_zone_id.to_string(),
+            name: CanonicalDnsName::new(name),
+            record_type: RrType::from(record_type),
+            stored_name: name.to_string(),
+        })
+    }
+
+    fn parse(identifier: &AppliedIdentifier) -> Result<Self, RecordSetIdentityError> {
+        let mut parts = identifier.as_str().split('|');
+        let (Some(zone_id), Some(name), Some(record_type), extra) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return Err(RecordSetIdentityError::InvalidFormat);
+        };
+        if extra.is_some() {
+            return Err(RecordSetIdentityError::UnsupportedRoutingPolicy);
+        }
+        Self::try_new(zone_id, name, record_type)
+    }
+
+    fn to_identifier(&self) -> String {
+        format!(
+            "{}|{}|{}",
+            self.hosted_zone_id,
+            self.stored_name,
+            self.record_type.as_str()
+        )
+    }
+
+    fn wire_name(&self) -> String {
+        normalize_dns_name(&self.stored_name)
+    }
+
+    fn matches(&self, record: &ResourceRecordSet) -> bool {
+        self.name == CanonicalDnsName::new(record.name())
+            && &self.record_type == record.r#type()
+            && record.set_identifier().is_none()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+enum RecordSetIdentityError {
+    #[error("expected a record set identifier with exactly three parts: hosted_zone_id|name|type")]
+    InvalidFormat,
+    #[error(
+        "routing-policy record sets are not supported (SetIdentifier); expected hosted_zone_id|name|type"
+    )]
+    UnsupportedRoutingPolicy,
+    #[error("record set identifier {0} must not be empty")]
+    EmptyPart(&'static str),
+    #[error(r"record set {0} must not contain '|'; write it as \174")]
+    DelimiterInPart(&'static str),
 }
 
 /// Normalize a DNS name by ensuring it has a trailing dot (Route 53 convention).
@@ -97,9 +182,9 @@ fn canonical_dns_name(name: &str) -> String {
 }
 
 /// Outcome of scanning one `ListResourceRecordSets` page for an exact
-/// `(name, type)` record. See [`scan_page_for_record`].
+/// simple-routing `(name, type)` record. See [`scan_page_for_record`].
 enum PageScan<'a> {
-    /// Exact `(normalized name, type)` match found on this page.
+    /// Exact `(canonical name, type, absent SetIdentifier)` match on this page.
     Found(&'a ResourceRecordSet),
     /// A record whose name differs from the target appeared. Because the
     /// listing is cursor-started at the target name and ordered by name,
@@ -107,14 +192,13 @@ enum PageScan<'a> {
     /// the record does not exist; stop without paging further.
     StopNotFound,
     /// Every record on this page is still at the target name but none
-    /// matched the type yet (the target name's records span a page
+    /// matched the simple-routing identity yet (the name's records span a page
     /// boundary). Follow pagination and scan the next page.
     KeepPaging,
 }
 
 /// Scan one page of `list_resource_record_sets` results for the record
-/// matching `target_name` (already trailing-dot-normalized) and
-/// `target_type`.
+/// matching the simple-routing `identity`.
 ///
 /// `start_record_name` + `start_record_type` are pagination *cursors*,
 /// not filters: AWS returns records at or after that position, ordered
@@ -126,22 +210,20 @@ enum PageScan<'a> {
 /// caller can match, page on, or stop early without scanning the whole
 /// zone (carina-rs/carina-provider-aws#333).
 ///
-/// NOTE: the match is `(name, type)` only — the carina resource identity
-/// (`zone|name|type`, see `make_identifier`). Routing-policy record sets
+/// NOTE: the on-disk identity remains `zone|name|type`. Routing-policy record sets
 /// (weighted/latency/geo/failover) have multiple records with the same
-/// `(name, type)` distinguished by `SetIdentifier`; those are not
-/// modeled and the first such record is returned (aws#335).
+/// `(name, type)` distinguished by `SetIdentifier`. Carina manages only the
+/// member with no `SetIdentifier`; skip routing members and keep scanning
+/// until a simple record is found or the target name is exhausted (aws#335).
 fn scan_page_for_record<'a>(
     records: &'a [ResourceRecordSet],
-    target_name: &str,
-    target_type: &str,
+    identity: &RecordSetIdentity,
 ) -> PageScan<'a> {
-    let target_name = canonical_dns_name(target_name);
     for rrs in records {
-        if canonical_dns_name(rrs.name()) != target_name {
+        if CanonicalDnsName::new(rrs.name()) != identity.name {
             return PageScan::StopNotFound;
         }
-        if rrs.r#type().as_str() == target_type {
+        if identity.matches(rrs) {
             return PageScan::Found(rrs);
         }
     }
@@ -208,13 +290,14 @@ fn build_alias_target_from_map(
 fn build_record_set(
     id: &ResourceId,
     alias_target: Option<&Value>,
-    name: &str,
+    identity: &RecordSetIdentity,
     resource_records: Option<&[String]>,
     ttl: Option<i64>,
-    record_type: &str,
 ) -> ProviderResult<ResourceRecordSet> {
     // Update's create-only name/type come from the applied identifier. Recheck
     // the outgoing values after deferred inputs have resolved.
+    let name = &identity.stored_name;
+    let record_type = identity.record_type.as_str();
     validate_dns_name(name).map_err(|reason| record_input_error(id, "name", reason))?;
     if record_type == "NS" && dns_name_is_wildcard(name) {
         return Err(record_input_error(
@@ -236,8 +319,8 @@ fn build_record_set(
             .map_err(|reason| record_input_error(id, "alias_target.dns_name", reason))?;
     }
     let mut builder = ResourceRecordSet::builder()
-        .name(normalize_dns_name(name))
-        .r#type(RrType::from(record_type));
+        .name(identity.wire_name())
+        .r#type(identity.record_type.clone());
 
     if let Some(ttl) = ttl {
         builder = builder.ttl(ttl);
@@ -424,6 +507,13 @@ pub(crate) fn validate_record_set_inputs(inputs: &DesiredInputs<'_>) -> Provider
     let id = inputs.id();
     let record_type = known_string(inputs.attribute("type"));
     if let Some(name) = known_string(inputs.attribute("name")) {
+        if name.contains('|') {
+            return Err(record_input_error(
+                id,
+                "name",
+                r"must not contain '|'; write it as \174",
+            ));
+        }
         validate_dns_name(name).map_err(|reason| record_input_error(id, "name", reason))?;
         if record_type == Some("NS") && dns_name_is_wildcard(name) {
             return Err(record_input_error(
@@ -502,7 +592,7 @@ fn alias_target_value(rrs: &ResourceRecordSet) -> Option<Value> {
         alias_map.insert(
             "dns_name".to_string(),
             Value::Concrete(ConcreteValue::String(
-                canonical_dns_name(alias.dns_name()).into(),
+                CanonicalDnsName::new(alias.dns_name()).as_str().into(),
             )),
         );
         alias_map.insert(
@@ -525,30 +615,27 @@ impl AwsProvider {
         id: &ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<ReadOutcome> {
-        let applied_identifier = identifier;
-        let identifier = identifier.as_str();
-        let Some((zone_id, name, record_type)) = parse_identifier(identifier) else {
-            return Ok(ReadOutcome::not_found(id.clone()));
-        };
-
-        let normalized_name = normalize_dns_name(name);
+        let identity = RecordSetIdentity::parse(identifier).map_err(|error| {
+            ProviderError::invalid_input_caused_by("Invalid record set identifier", error)
+                .for_resource(id.clone())
+        })?;
 
         // `start_record_*` are pagination cursors, not filters: AWS
         // returns records at or after that (name, type) position, ordered
         // by name then per-name type rank. Page from the cursor and scan
-        // for the exact (name, type); stop as soon as the listing moves
+        // for the simple-routing identity; stop as soon as the listing moves
         // past the target name. The previous `max_items(1)` approach only
         // worked when the target type sorted first at its name and
         // silently returned `not_found` otherwise (aws#333).
-        let mut start_name = Some(normalized_name.clone());
-        let mut start_type = Some(RrType::from(record_type));
+        let mut start_name = Some(identity.wire_name());
+        let mut start_type = Some(identity.record_type.clone());
         let mut start_identifier: Option<String> = None;
 
         loop {
             let mut request = self
                 .route53_client
                 .list_resource_record_sets()
-                .hosted_zone_id(zone_id)
+                .hosted_zone_id(&identity.hosted_zone_id)
                 .set_start_record_name(start_name.take())
                 .set_start_record_type(start_type.take());
             if let Some(sid) = start_identifier.take() {
@@ -559,15 +646,16 @@ impl AwsProvider {
                 api_error_with_meta("Failed to list record sets", e).for_resource(id.clone())
             })?;
 
-            match scan_page_for_record(result.resource_record_sets(), &normalized_name, record_type)
-            {
+            match scan_page_for_record(result.resource_record_sets(), &identity) {
                 PageScan::Found(rrs) => {
                     let fields =
                         Self::extract_route53_record_set_attributes(rrs).map_name(|name| {
                             name.map(|value| match value {
                                 Value::Concrete(ConcreteValue::String(name)) => {
                                     Value::Concrete(ConcreteValue::String(
-                                        canonical_dns_name(name.expose_plaintext()).into(),
+                                        CanonicalDnsName::new(name.expose_plaintext())
+                                            .as_str()
+                                            .into(),
                                     ))
                                 }
                                 value => value,
@@ -581,11 +669,11 @@ impl AwsProvider {
                             // HostedZoneId is the request target, not a member of
                             // ResourceRecordSet.
                             hosted_zone_id: Value::Concrete(ConcreteValue::String(
-                                zone_id.to_string().into(),
+                                identity.hosted_zone_id.clone().into(),
                             )),
                         },
                     )?;
-                    return found_managed_read(id, applied_identifier, model);
+                    return found_managed_read(id, identifier, model);
                 }
                 PageScan::StopNotFound => return Ok(ReadOutcome::not_found(id.clone())),
                 PageScan::KeepPaging => {}
@@ -628,29 +716,32 @@ impl AwsProvider {
         let resource_records = resource_records.into_inner();
         let ttl = ttl.into_inner();
         let record_type = record_type.into_inner();
+        let identity =
+            RecordSetIdentity::try_new(&hosted_zone_id, &name, &record_type).map_err(|error| {
+                ProviderError::invalid_input_caused_by("Invalid record set identifier", error)
+                    .for_resource(resource.id.clone())
+            })?;
 
         let record_set = build_record_set(
             &resource.id,
             alias_target.as_ref(),
-            &name,
+            &identity,
             resource_records.as_deref(),
             ttl,
-            &record_type,
         )?;
         change_record_set(
             &self.route53_client,
-            &hosted_zone_id,
+            &identity.hosted_zone_id,
             ChangeAction::Upsert,
             record_set,
             &resource.id,
         )
         .await?;
 
-        let identifier = make_identifier(&hosted_zone_id, &name, &record_type);
         let identifier = crate::helpers::applied_identifier(
             &resource.id,
             "route53.ChangeResourceRecordSets",
-            identifier,
+            identity.to_identifier(),
         )?;
         let outcome = self
             .read_route53_record_set(&resource.id, &identifier)
@@ -673,6 +764,10 @@ impl AwsProvider {
         to: &crate::helpers::UpdateResource,
         _schema: &CompiledResourceSchema,
     ) -> ProviderResult<ProviderResult<ReadOutcome>> {
+        let identity = RecordSetIdentity::parse(identifier).map_err(|error| {
+            ProviderError::invalid_input_caused_by("Invalid record set identifier", error)
+                .for_resource(id.clone())
+        })?;
         let input = Route53RecordSetUpdateInput::decode(to)?;
         let crate::send_models_generated::Route53RecordSetUpdateParts {
             alias_target,
@@ -685,37 +780,26 @@ impl AwsProvider {
         let alias_target = alias_target.resolve(|| Ok(None))?;
         let resource_records = resource_records.resolve(|| Ok(None))?;
         let ttl = ttl.resolve(|| Ok(None))?;
-        let Some((hosted_zone_id, name, record_type)) = parse_identifier(identifier.as_str())
-        else {
-            return Err(ProviderError::invalid_input(format!(
-                "Invalid record set identifier: {}",
-                identifier.as_str()
-            ))
-            .for_resource(id));
-        };
-
         let record_set = build_record_set(
             &id,
             alias_target.as_ref(),
-            name,
+            &identity,
             resource_records.as_deref(),
             ttl,
-            record_type,
         )?;
         change_record_set(
             &self.route53_client,
-            hosted_zone_id,
+            &identity.hosted_zone_id,
             ChangeAction::Upsert,
             record_set,
             &id,
         )
         .await?;
 
-        let identifier = make_identifier(hosted_zone_id, name, record_type);
         let identifier = crate::helpers::applied_identifier(
             &id,
             "route53.ChangeResourceRecordSets",
-            identifier,
+            identity.to_identifier(),
         )?;
         Ok(self.read_route53_record_set(&id, &identifier).await)
     }
@@ -725,30 +809,23 @@ impl AwsProvider {
         id: ResourceId,
         identifier: &AppliedIdentifier,
     ) -> ProviderResult<()> {
-        let applied_identifier = identifier;
-        let identifier = identifier.as_str();
-        let Some((zone_id, name, record_type)) = parse_identifier(identifier) else {
-            return Err(ProviderError::invalid_input(format!(
-                "Invalid record set identifier: {}",
-                identifier
-            ))
-            .for_resource(id));
-        };
+        let identity = RecordSetIdentity::parse(identifier).map_err(|error| {
+            ProviderError::invalid_input_caused_by("Invalid record set identifier", error)
+                .for_resource(id.clone())
+        })?;
 
         // Read current state to get the exact record for deletion.
         // Route 53 DELETE requires the record to match exactly.
-        let ReadOutcome::Found { state: current } = self
-            .read_route53_record_set(&id, applied_identifier)
-            .await?
+        let ReadOutcome::Found { state: current } =
+            self.read_route53_record_set(&id, identifier).await?
         else {
             return Ok(());
         };
         let current_attributes = current.attributes();
 
-        let normalized_name = normalize_dns_name(name);
         let mut builder = ResourceRecordSet::builder()
-            .name(&normalized_name)
-            .r#type(RrType::from(record_type));
+            .name(identity.wire_name())
+            .r#type(identity.record_type.clone());
 
         if let Some(Value::Concrete(ConcreteValue::Int(ttl))) = current_attributes.get("ttl") {
             builder = builder.ttl(*ttl);
@@ -785,7 +862,7 @@ impl AwsProvider {
 
         change_record_set(
             &self.route53_client,
-            zone_id,
+            &identity.hosted_zone_id,
             ChangeAction::Delete,
             record_set,
             &id,
@@ -799,14 +876,18 @@ impl AwsProvider {
 /// leaving deferred leaves opaque. Extends the dot-only symmetry from aws#300.
 pub(crate) fn normalize_record_set_dns_names(input: &mut DesiredView<'_>) -> ProviderResult<()> {
     if let Some(DesiredValueMut::Known(DesiredScalar::String(name))) = input.attribute_mut("name") {
-        *name = canonical_dns_name(name.expose_plaintext()).into();
+        *name = CanonicalDnsName::new(name.expose_plaintext())
+            .as_str()
+            .into();
     }
 
     if let Some(DesiredValueMut::Map(alias)) = input.attribute_mut("alias_target")
         && let Some(DesiredValueMut::Known(DesiredScalar::String(dns_name))) =
             alias.get_mut("dns_name")
     {
-        *dns_name = canonical_dns_name(dns_name.expose_plaintext()).into();
+        *dns_name = CanonicalDnsName::new(dns_name.expose_plaintext())
+            .as_str()
+            .into();
     }
     Ok(())
 }
@@ -902,13 +983,14 @@ mod tests {
         let ttl = ttl.into_inner();
         let record_type = record_type.into_inner();
         assert_eq!(hosted_zone_id, "Z123");
+        let identity = RecordSetIdentity::try_new(&hosted_zone_id, &name, &record_type)
+            .expect("valid record identity");
         let record_set = build_record_set(
             &r.id,
             alias_target.as_ref(),
-            &name,
+            &identity,
             resource_records.as_deref(),
             ttl,
-            &record_type,
         )
         .expect("canonical enum type should build");
 
@@ -958,6 +1040,363 @@ mod tests {
             .expect("name and type set")
     }
 
+    fn weighted_rrs(name: &str, ty: &str, set_identifier: &str) -> ResourceRecordSet {
+        ResourceRecordSet::builder()
+            .name(name)
+            .r#type(RrType::from(ty))
+            .set_identifier(set_identifier)
+            .weight(1)
+            .build()
+            .expect("name and type set")
+    }
+
+    fn identity(identifier: &str) -> RecordSetIdentity {
+        RecordSetIdentity::parse(&AppliedIdentifier::new(identifier).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_rejects_record_name_delimiter_without_requests() {
+        let mut resource = record_set("a|b.example.com")
+            .with_attribute(
+                "hosted_zone_id",
+                Value::Concrete(ConcreteValue::String("Z123".into())),
+            )
+            .with_attribute(
+                "type",
+                Value::Concrete(ConcreteValue::enum_identifier(
+                    "aws.route53.RecordSet.Type.a",
+                )),
+            )
+            .with_attribute("ttl", Value::Concrete(ConcreteValue::Int(300)))
+            .with_attribute(
+                "resource_records",
+                Value::Concrete(ConcreteValue::List(vec![Value::Concrete(
+                    ConcreteValue::String("192.0.2.1".into()),
+                )])),
+            );
+        carina_core::value::canonicalize_resources_with_schemas(
+            std::slice::from_mut(&mut resource),
+            &crate::schemas::schema_registry(),
+        )
+        .unwrap();
+        let (provider, connector) = crate::test_http::provider([]);
+        let error = match provider
+            .create_route53_record_set(&resource, crate::test_resource_schema("route53.RecordSet"))
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a raw identifier delimiter must be rejected before create"),
+        };
+        assert!(matches!(error, ProviderError::InvalidInput(_)));
+        let error =
+            carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
+        assert!(
+            error
+                .detail()
+                .cause()
+                .is_some_and(|cause| cause.is::<RecordSetIdentityError>())
+        );
+        assert!(
+            error
+                .to_string()
+                .contains(r"record set name must not contain '|'; write it as \174"),
+            "{error}"
+        );
+        connector.assert_finished();
+        assert!(connector.requests().is_empty());
+    }
+
+    #[test]
+    fn checked_identity_constructor_rejects_delimiters_in_every_part() {
+        for (zone, name, record_type, part) in [
+            ("Z|123", "example.com", "A", "hosted_zone_id"),
+            ("Z123", "a|b.example.com", "A", "name"),
+            ("Z123", "example.com", "A|a-first", "type"),
+        ] {
+            let error = RecordSetIdentity::try_new(zone, name, record_type).unwrap_err();
+            assert_eq!(error, RecordSetIdentityError::DelimiterInPart(part));
+            assert_eq!(
+                error.to_string(),
+                format!(r"record set {part} must not contain '|'; write it as \174")
+            );
+        }
+    }
+
+    #[test]
+    fn checked_identities_round_trip_for_valid_dns_spellings() {
+        for zone in ["Z123", "Z456"] {
+            for name in [
+                "example.com",
+                "Example.COM",
+                "Example.COM.",
+                "*.example.com",
+                "*.Example.COM.",
+                r"\052.example.com.",
+                r"a\174b.example.com",
+                r"a\056b.example.com",
+                r"a\134b.example.com",
+                r"\105xample.com",
+            ] {
+                for record_type in ["A", "AAAA", "TXT"] {
+                    let original = RecordSetIdentity::try_new(zone, name, record_type).unwrap();
+                    let identifier = original.to_identifier();
+                    let parsed = RecordSetIdentity::parse(
+                        &AppliedIdentifier::new(identifier.clone()).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(parsed.hosted_zone_id, original.hosted_zone_id);
+                    assert_eq!(parsed.name, original.name);
+                    assert_eq!(parsed.record_type, original.record_type);
+                    assert_eq!(parsed.to_identifier(), identifier);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_part_identity_round_trips_and_preserves_change_request_name() {
+        let id = record_set("example.com").id;
+        for (identifier, wire_name) in [
+            ("Z123|example.com|A", "example.com."),
+            ("Z123|Example.COM.|A", "Example.COM."),
+            ("Z123|*.Example.COM|A", "*.Example.COM."),
+            (r"Z123|\052.Example.COM.|A", r"\052.Example.COM."),
+        ] {
+            let identity = identity(identifier);
+            assert_eq!(identity.hosted_zone_id, "Z123");
+            assert_eq!(identity.record_type.as_str(), "A");
+            assert_eq!(identity.to_identifier(), identifier);
+            let record = build_record_set(
+                &id,
+                None,
+                &identity,
+                Some(&["192.0.2.1".to_string()]),
+                Some(300),
+            )
+            .unwrap();
+            assert_eq!(record.name(), wire_name);
+        }
+    }
+
+    #[test]
+    fn identity_matches_wildcard_and_case_canonically() {
+        for (identifier, returned_name, canonical) in [
+            (
+                "Z123|*.example.com|A",
+                r"\052.example.com.",
+                r"\052.example.com",
+            ),
+            ("Z123|Example.COM|A", "example.com.", "example.com"),
+        ] {
+            let identity = identity(identifier);
+            assert_eq!(identity.name.as_str(), canonical);
+            assert!(identity.matches(&rrs(returned_name, "A")));
+            assert!(matches!(
+                scan_page_for_record(&[rrs(returned_name, "A")], &identity),
+                PageScan::Found(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn identity_rejects_set_identifier_segments_with_typed_error() {
+        for identifier in [
+            "Z123|example.com|A|a-first",
+            "Z123|example.com|A|",
+            "Z123|example.com|A|a-first|extra",
+        ] {
+            let error =
+                RecordSetIdentity::parse(&AppliedIdentifier::new(identifier).unwrap()).unwrap_err();
+            assert_eq!(error, RecordSetIdentityError::UnsupportedRoutingPolicy);
+            assert!(
+                error
+                    .to_string()
+                    .contains("routing-policy record sets are not supported")
+            );
+        }
+    }
+
+    #[test]
+    fn identity_rejects_empty_parts_with_typed_error() {
+        for (zone, name, record_type, part) in [
+            ("", "example.com", "A", "hosted_zone_id"),
+            ("Z123", "", "A", "name"),
+            ("Z123", "example.com", "", "type"),
+        ] {
+            assert_eq!(
+                RecordSetIdentity::try_new(zone, name, record_type).unwrap_err(),
+                RecordSetIdentityError::EmptyPart(part)
+            );
+            let identifier = format!("{zone}|{name}|{record_type}");
+            let error =
+                RecordSetIdentity::parse(&AppliedIdentifier::new(identifier).unwrap()).unwrap_err();
+            assert_eq!(error, RecordSetIdentityError::EmptyPart(part));
+            assert_eq!(
+                error.to_string(),
+                format!("record set identifier {part} must not be empty")
+            );
+        }
+    }
+
+    #[test]
+    fn identity_rejects_missing_parts_with_typed_error() {
+        for identifier in ["Z123", "Z123|example.com"] {
+            let error =
+                RecordSetIdentity::parse(&AppliedIdentifier::new(identifier).unwrap()).unwrap_err();
+            assert_eq!(error, RecordSetIdentityError::InvalidFormat);
+            assert_eq!(
+                error.to_string(),
+                "expected a record set identifier with exactly three parts: hosted_zone_id|name|type"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_identities_error_consistently_before_read_update_or_delete_requests() {
+        let id = record_set("example.com").id;
+        let current =
+            crate::read_model::test_existing_state(id.clone(), Default::default()).to_snapshot();
+        let to = crate::helpers::UpdateResource::new(
+            &current,
+            &carina_core::provider::UpdatePatch { ops: vec![] },
+        );
+        for (raw, expected_reason) in [
+            (
+                "Z123",
+                "expected a record set identifier with exactly three parts",
+            ),
+            (
+                "Z123|example.com",
+                "expected a record set identifier with exactly three parts",
+            ),
+            (
+                "Z123|example.com|A|a-first",
+                "routing-policy record sets are not supported",
+            ),
+            (
+                "|example.com|A",
+                "record set identifier hosted_zone_id must not be empty",
+            ),
+            ("Z123||A", "record set identifier name must not be empty"),
+            (
+                "Z123|example.com|",
+                "record set identifier type must not be empty",
+            ),
+        ] {
+            let (provider, connector) = crate::test_http::provider([]);
+            let identifier = AppliedIdentifier::new(raw).unwrap();
+            let read_error = provider
+                .read_route53_record_set(&id, &identifier)
+                .await
+                .expect_err("malformed read identity must be rejected");
+            let update_error = provider
+                .update_route53_record_set(
+                    id.clone(),
+                    &identifier,
+                    &to,
+                    crate::test_resource_schema("route53.RecordSet"),
+                )
+                .await
+                .expect_err("malformed update identity must be rejected");
+            let delete_error = provider
+                .delete_route53_record_set(id.clone(), &identifier)
+                .await
+                .expect_err("malformed delete identity must be rejected");
+            for error in [read_error, update_error, delete_error] {
+                assert!(matches!(error, ProviderError::InvalidInput(_)));
+                let error =
+                    carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
+                        error,
+                    );
+                assert!(
+                    error
+                        .detail()
+                        .cause()
+                        .is_some_and(|cause| cause.is::<RecordSetIdentityError>())
+                );
+                assert!(error.to_string().contains(expected_reason), "{error}");
+            }
+            connector.assert_finished();
+        }
+    }
+
+    #[test]
+    fn routing_members_only_keep_paging() {
+        let page = vec![
+            weighted_rrs("example.com.", "A", "a-first"),
+            weighted_rrs("example.com.", "A", "b-second"),
+        ];
+        assert!(matches!(
+            scan_page_for_record(&page, &identity("Z123|example.com|A")),
+            PageScan::KeepPaging
+        ));
+    }
+
+    #[test]
+    fn routing_member_followed_by_different_name_stops_not_found() {
+        let page = vec![
+            weighted_rrs("example.com.", "A", "a-first"),
+            rrs("next.example.com.", "A"),
+        ];
+        assert!(matches!(
+            scan_page_for_record(&page, &identity("Z123|example.com|A")),
+            PageScan::StopNotFound
+        ));
+    }
+
+    #[test]
+    fn routing_target_type_with_other_simple_type_stops_at_different_name() {
+        let page = vec![
+            weighted_rrs("example.com.", "AAAA", "a-first"),
+            rrs("example.com.", "TXT"),
+            rrs("next.example.com.", "AAAA"),
+        ];
+        assert!(matches!(
+            scan_page_for_record(&page, &identity("Z123|example.com|AAAA")),
+            PageScan::StopNotFound
+        ));
+    }
+
+    #[tokio::test]
+    async fn read_with_only_weighted_members_is_not_found_across_identifier_cursor() {
+        let page = |set_identifier: &str, cursor: &str| {
+            format!(
+                r#"<ListResourceRecordSetsResponse xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                    <ResourceRecordSets><ResourceRecordSet>
+                        <Name>example.com.</Name><Type>A</Type>
+                        <SetIdentifier>{set_identifier}</SetIdentifier><Weight>1</Weight>
+                        <TTL>300</TTL><ResourceRecords><ResourceRecord><Value>192.0.2.1</Value></ResourceRecord></ResourceRecords>
+                    </ResourceRecordSet></ResourceRecordSets>
+                    {cursor}<MaxItems>100</MaxItems>
+                </ListResourceRecordSetsResponse>"#
+            )
+        };
+        let (provider, connector) = crate::test_http::provider([
+            (
+                200,
+                page(
+                    "a-first",
+                    "<IsTruncated>true</IsTruncated><NextRecordName>example.com.</NextRecordName><NextRecordType>A</NextRecordType><NextRecordIdentifier>b-second</NextRecordIdentifier>",
+                ),
+            ),
+            (200, page("b-second", "<IsTruncated>false</IsTruncated>")),
+        ]);
+        let id = record_set("example.com").id;
+        let outcome = provider
+            .read_route53_record_set(&id, &AppliedIdentifier::new("Z123|example.com|A").unwrap())
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ReadOutcome::NotFound { .. }));
+        connector.assert_finished();
+        let requests = connector.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1].contains("identifier=b-second"),
+            "{}",
+            requests[1]
+        );
+    }
+
     /// The carina#3106 / aws#333 failure shape: an AAAA record exists at a
     /// name that also has A and NS records. Route53 orders A before NS
     /// before AAAA at the same name, so a page started at the AAAA cursor
@@ -971,7 +1410,7 @@ mod tests {
             rrs("registry-dev.carina-rs.dev.", "NS"),
             rrs("registry-dev.carina-rs.dev.", "AAAA"),
         ];
-        match scan_page_for_record(&page, "registry-dev.carina-rs.dev.", "AAAA") {
+        match scan_page_for_record(&page, &identity("Z123|registry-dev.carina-rs.dev.|AAAA")) {
             PageScan::Found(found) => {
                 assert_eq!(found.name(), "registry-dev.carina-rs.dev.");
                 assert_eq!(found.r#type().as_str(), "AAAA");
@@ -991,7 +1430,7 @@ mod tests {
             rrs("other.carina-rs.dev.", "AAAA"),
         ];
         assert!(matches!(
-            scan_page_for_record(&page, "registry-dev.carina-rs.dev.", "AAAA"),
+            scan_page_for_record(&page, &identity("Z123|registry-dev.carina-rs.dev.|AAAA")),
             PageScan::StopNotFound
         ));
     }
@@ -1006,7 +1445,7 @@ mod tests {
             rrs("registry-dev.carina-rs.dev.", "NS"),
         ];
         assert!(matches!(
-            scan_page_for_record(&page, "registry-dev.carina-rs.dev.", "AAAA"),
+            scan_page_for_record(&page, &identity("Z123|registry-dev.carina-rs.dev.|AAAA")),
             PageScan::KeepPaging
         ));
     }
@@ -1017,7 +1456,7 @@ mod tests {
     #[test]
     fn empty_page_keeps_paging() {
         assert!(matches!(
-            scan_page_for_record(&[], "registry-dev.carina-rs.dev.", "AAAA"),
+            scan_page_for_record(&[], &identity("Z123|registry-dev.carina-rs.dev.|AAAA")),
             PageScan::KeepPaging
         ));
     }
