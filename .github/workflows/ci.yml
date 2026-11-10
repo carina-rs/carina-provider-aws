@@ -105,6 +105,14 @@ jobs:
       # pinned rev is consistent and >= .carina-core-min-rev.
       - run: ./scripts/check-carina-pin.sh
 
+  provider-release-pin:
+    name: Check provider-release Pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-provider-release-pin.sh
+      - run: bash scripts/test-check-provider-release-pin.sh
+
   test-utils-dev-only:
     name: Check test-utils dev-only features
     runs-on: ubuntu-latest
@@ -181,7 +189,7 @@ jobs:
 
   publish-dev:
     name: Publish to Carina Registry (dev)
-    needs: [check, test, validate-examples, clippy, fmt, carina-pin, test-utils-dev-only, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
+    needs: [check, test, validate-examples, clippy, fmt, carina-pin, provider-release-pin, test-utils-dev-only, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
