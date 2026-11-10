@@ -52,6 +52,8 @@ mod pattern_translation_tests;
 #[cfg(test)]
 mod reference_members_tests;
 #[cfg(test)]
+mod send_models_tests;
+#[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod test_support;
 use tag_types::{TagMapType, resource_tag_type};
@@ -894,7 +896,11 @@ enum SendFieldType {
 }
 
 fn send_field_type(value: &ValueTypeOverride) -> SendFieldType {
-    match value.attribute_type.raw_shape() {
+    send_attribute_type(&value.attribute_type)
+}
+
+fn send_attribute_type(attribute_type: &AttributeType) -> SendFieldType {
+    match attribute_type.raw_shape() {
         RawShape::Enum { .. } => SendFieldType::Enum,
         RawShape::String { .. } | RawShape::Reference { .. } | RawShape::Duration => {
             SendFieldType::String
@@ -902,6 +908,14 @@ fn send_field_type(value: &ValueTypeOverride) -> SendFieldType {
         RawShape::Int { .. } => SendFieldType::Int,
         RawShape::Bool => SendFieldType::Bool,
         RawShape::Float { .. } => SendFieldType::Float,
+        RawShape::Union(alternatives)
+            if !alternatives.is_empty()
+                && alternatives.iter().all(|alternative| {
+                    send_attribute_type(alternative) == SendFieldType::String
+                }) =>
+        {
+            SendFieldType::String
+        }
         RawShape::List { element_type, .. }
             if matches!(
                 element_type.raw_shape(),
@@ -11147,7 +11161,7 @@ mod tests {
         assert!(
             generated.contains(&format!(
                 "AttributeSchema::optional(\"path\", {})",
-                &attrs
+                attrs
                     .iter()
                     .find(|attr| attr.snake_name == "path")
                     .unwrap()
