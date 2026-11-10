@@ -318,14 +318,18 @@ mod tests {
                                 schema.resource_type(),
                                 path
                             );
-                            if arn_only {
-                                assert!(schema.parts().input_rules.iter().any(|rule| {
-                                    rule.path().segments().collect::<Vec<_>>().join(".") == path
-                                        && matches!(rule.parts().predicate,
-                                            carina_core::schema::InputPredicate::Matches(pattern)
-                                                if pattern.as_str() == carina_aws_types::kms_key_arn_pattern())
-                                }), "{}.{} needs its ARN-only input rule", schema.resource_type(), path);
-                            }
+                            let expected = if arn_only {
+                                carina_aws_types::kms_key_arn_pattern()
+                            } else {
+                                carina_aws_types::kms_key_reference_pattern()
+                            };
+                            assert_eq!(
+                                pattern.map(carina_core::schema::PatternSpec::as_str),
+                                Some(expected),
+                                "{}.{} must carry its reference grammar",
+                                schema.resource_type(),
+                                path
+                            );
                             coverage
                                 .references
                                 .insert((schema.resource_type().to_string(), path.to_string()));

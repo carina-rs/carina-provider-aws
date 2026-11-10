@@ -17,7 +17,7 @@ pub fn sqs_redrive_policy() -> AttributeType {
             // The cached sqs.json API prose describes the count but omits bounds;
             // the console guide explicitly gives the range 1..=1000:
             // https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-configure-dead-letter-queue.html
-            StructField::required("max_receive_count", AttributeType::refined_int(None, Some((Some(1), Some(1000)))))
+            StructField::required("max_receive_count", crate::with_int_range(AttributeType::int(), Some(1), Some(1000)))
                 .with_provider_name("maxReceiveCount")
                 .with_description("Number of times a consumer can receive a message before it is moved to the dead-letter queue. Range 1–1,000.").build(),
         ],

@@ -21,13 +21,22 @@ pub enum CoreIdentity {
 impl CoreIdentity {
     pub fn definition(self) -> IdentityDefinition {
         use carina_core::schema::types;
-        IdentityDefinition(match self {
-            Self::Ipv4Address => types::ipv4_address(),
-            Self::Ipv6Address => types::ipv6_address(),
-            Self::Ipv4Cidr => types::ipv4_cidr(),
-            Self::Ipv6Cidr => types::ipv6_cidr(),
-            Self::Email => types::email(),
-        })
+        macro_rules! definition {
+            ($constructor:path) => {{
+                static DEFINITION: std::sync::OnceLock<IdentityDefinition> =
+                    std::sync::OnceLock::new();
+                DEFINITION
+                    .get_or_init(|| IdentityDefinition($constructor()))
+                    .clone()
+            }};
+        }
+        match self {
+            Self::Ipv4Address => definition!(types::ipv4_address),
+            Self::Ipv6Address => definition!(types::ipv6_address),
+            Self::Ipv4Cidr => definition!(types::ipv4_cidr),
+            Self::Ipv6Cidr => definition!(types::ipv6_cidr),
+            Self::Email => definition!(types::email),
+        }
     }
     pub fn attribute_type(self) -> AttributeType {
         self.definition().into_attribute_type()
@@ -89,7 +98,10 @@ impl IdentityDefinition {
                 "{identity}: core does not enforce structural constraints on open Enum bases; use a String identity"
             ));
         }
-        let base = AttributeType::refined_string(None, pattern, length, None);
+        let base = AttributeType::string_member(
+            carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+            carina_core::schema::StringMemberConstraints::new(pattern, length),
+        );
         let validator = crate::MemberStringValidator::new(&base).map_err(|e| e.to_string())?;
         if let Some(values) = &values {
             for value in values {

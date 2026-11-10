@@ -432,18 +432,22 @@ pub(super) fn intersect<T: Ord + Copy>(left: Bounds<T>, right: Bounds<T>) -> Res
 pub(super) fn input_patterns(rules: &[TypeOverride]) -> Vec<PatternSpec> {
     rules
         .iter()
-        .filter_map(|rule| match rule {
+        .flat_map(|rule| match rule {
             TypeOverride::StringPattern(pattern) | TypeOverride::RefinedString { pattern, .. } => {
-                Some(pattern.clone())
+                vec![pattern.clone()]
             }
             TypeOverride::StringProfile(profile) => match profile.constraints().raw_shape() {
                 RawShape::String {
-                    identity_layer: carina_core::schema::StringIdentityParts { pattern, .. },
-                    ..
-                } => pattern.cloned(),
+                    identity_layer,
+                    member_layer,
+                } => [identity_layer.pattern, member_layer.pattern]
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect(),
                 _ => unreachable!("string profile"),
             },
-            _ => None,
+            _ => vec![],
         })
         .collect()
 }
@@ -484,13 +488,13 @@ pub(super) fn derive(
             TypeOverride::StringProfile(profile) => {
                 let ty = profile.constraints();
                 let RawShape::String {
-                    identity_layer: carina_core::schema::StringIdentityParts { length, .. },
-                    ..
+                    identity_layer,
+                    member_layer,
                 } = ty.raw_shape()
                 else {
                     unreachable!("string profile")
                 };
-                length
+                carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length)
             }
             _ => None,
         };

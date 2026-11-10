@@ -23,7 +23,10 @@ pub use website::*;
 // Anonymous constraints shared by the S3 helper constructors. No catalog row
 // is needed: these shapes neither introduce an identity nor need a callback.
 fn rule_id() -> carina_core::schema::AttributeType {
-    carina_core::schema::AttributeType::refined_string(None, None, Some((Some(0), Some(255))), None)
+    carina_core::schema::AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+        carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(255)))),
+    )
 }
 
 fn nonempty_list(

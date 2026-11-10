@@ -64,6 +64,134 @@ fn unnamed_member_gets_smithy_constraints() {
 }
 
 #[test]
+fn disjoint_integer_identity_bounds_report_the_member_path() {
+    let model = carina_smithy::parse(
+        &serde_json::json!({"smithy":"2.0","shapes":{
+            "test#Small":{"type":"long","traits":{"smithy.api#range":{"min":1,"max":100}}}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let error = resolve_fixture(
+        "ec2.TransitGateway",
+        "options.amazon_side_asn",
+        "test#Small",
+        &model,
+    )
+    .expect_err("empty named/member intersection must fail during derivation");
+    assert!(format!("{error:#}").contains("ec2.TransitGateway.options.amazon_side_asn"));
+}
+
+#[test]
+fn integer_and_long_members_use_effective_member_range_traits() {
+    for kind in ["integer", "long"] {
+        let model = carina_smithy::parse(
+            &serde_json::json!({"smithy":"2.0","shapes":{
+                "test#Number":{"type":kind,"traits":{"smithy.api#range":{"min":4,"max":20}}},
+                "test#Options":{"type":"structure","members":{
+                    "Value":{"target":"test#Number","traits":{"smithy.api#range":{"min":1,"max":9}}}
+                }}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let code = resolve_fixture("test.Numeric", "options", "test#Options", &model).unwrap();
+        assert!(code.contains("Some((Some(1), Some(9)))"), "{kind}: {code}");
+    }
+}
+
+#[test]
+fn string_enum_and_integer_members_share_override_precedence() {
+    let model = carina_smithy::parse(
+        &serde_json::json!({"smithy":"2.0","shapes":{
+            "test#Text":{"type":"string"},
+            "test#Number":{"type":"integer"},
+            "test#Mode":{"type":"enum","members":{
+                "A":{"target":"smithy.api#Unit","traits":{"smithy.api#enumValue":"abc"}},
+                "B":{"target":"smithy.api#Unit","traits":{"smithy.api#enumValue":"abcd"}}
+            }}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    for target in ["test#Text", "test#Mode", "test#Number"] {
+        let integer = target == "test#Number";
+        let mut declarations = TypeDeclarations::default();
+        declarations.members.insert(
+            "Value",
+            if integer {
+                TypeOverride::IntRange { min: 1, max: 2 }
+            } else {
+                TypeOverride::StringBounds { min: 1, max: 2 }
+            },
+        );
+        let structs = HashMap::from([(
+            ("Options", "Value"),
+            if integer {
+                TypeOverride::IntRange { min: 3, max: 4 }
+            } else {
+                TypeOverride::StringBounds { min: 3, max: 4 }
+            },
+        )]);
+        let (value, _) = resolve_member_value(
+            &mut TypeResolutionContext {
+                model: &model,
+                resource_name: "test.Lookup",
+                namespace: "aws.test.Lookup",
+                struct_path: vec!["Options".into()],
+                resolving_shapes: Vec::new(),
+                property_path: "options.value".into(),
+                type_overrides: &declarations,
+                all_enums: &mut BTreeMap::new(),
+                current_root_attr: None,
+                deferred_populate_struct_fields: &HashSet::new(),
+                nested_write_only_struct_fields: &HashSet::new(),
+                nested_write_only_emissions: &mut HashMap::new(),
+                struct_field_type_overrides: &structs,
+            },
+            &carina_smithy::ShapeRef {
+                target: target.into(),
+                traits: Default::default(),
+            },
+            "Value",
+        )
+        .unwrap();
+        match value.attribute_type.raw_shape() {
+            RawShape::String {
+                identity_layer,
+                member_layer,
+            } => {
+                assert!(identity_layer.length.is_none());
+                assert_eq!(member_layer.length, Some((Some(3), Some(4))));
+            }
+            RawShape::Int {
+                identity_layer,
+                member_layer,
+            } => {
+                assert!(identity_layer.range.is_none());
+                assert_eq!(member_layer.range, Some((Some(3), Some(4))));
+            }
+            RawShape::Enum { values, .. } => assert_eq!(values.unwrap(), ["abc", "abcd"]),
+            other => panic!("unexpected carrier: {other:?}"),
+        }
+        assert_eq!(
+            member_override(
+                "route53.RecordSet",
+                "hosted_zone_id",
+                "Value",
+                &declarations,
+                &structs,
+                Some("Options"),
+                None
+            ),
+            resource_type_overrides()
+                .get(&("route53.RecordSet", "hosted_zone_id"))
+                .cloned()
+        );
+    }
+}
+
+#[test]
 fn recursive_members_keep_smithy_constraints() {
     for target in ["test#Items", "test#Entries", "test#Object"] {
         let code =
@@ -240,10 +368,18 @@ fn conflicting_patterns_keep_smithy_and_collect_an_input_rule() {
         &declarations,
         &HashMap::new(),
         None,
+        None,
     )
     .unwrap();
     assert!(validate_string(value.attribute_type, "model"));
-    assert_eq!(declarations.input_patterns.borrow()["label"], vec![extra]);
+    assert_eq!(
+        declarations.input_patterns.borrow()
+            [&carina_core::schema::InputPath::new("label").unwrap()]
+            .iter()
+            .map(|pattern| pattern.as_ref().clone())
+            .collect::<Vec<_>>(),
+        vec![extra]
+    );
     assert!(
         !string_members::issues()
             .iter()

@@ -682,11 +682,14 @@ macro_rules! define_aws_type_catalog {
             /// Construct this row through the closed constraint-owning builder.
             pub fn definition(self) -> $crate::IdentityDefinition {
                 match self {
-                    $(Self::$variant => $crate::__carina_aws_catalog_definition!(
-                        $constructor;
-                        identity: self.identity(),
-                        $(values: [$($int_value),+],)?
-                    )),*
+                    $(Self::$variant => {
+                        static DEFINITION: ::std::sync::OnceLock<$crate::IdentityDefinition> = ::std::sync::OnceLock::new();
+                        DEFINITION.get_or_init(|| $crate::__carina_aws_catalog_definition!(
+                            $constructor;
+                            identity: self.identity(),
+                            $(values: [$($int_value),+],)?
+                        )).clone()
+                    }),*
                 }
             }
 

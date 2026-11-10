@@ -172,8 +172,8 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
             "Subnet",
             vec![
                 "allowed: 44, 48, 52, 56, 60, 64",
-                "`Int (member constraints: range: 16..=28)`",
-                "`Int (member constraints: range: 1..=2147483647)`",
+                "`Int (range: 16..=28)`",
+                "`Int (range: 1..=2147483647)`",
             ],
         ),
         (
@@ -184,13 +184,7 @@ fn ec2_codegen_docs_include_numeric_sets_list_bounds_and_nested_paths() {
                 "transit_gateway_cidr_blocks",
             ],
         ),
-        (
-            "Vpc",
-            vec![
-                "`Int (member constraints: range: 16..=28)`",
-                "Ec2VpcCidrBlock",
-            ],
-        ),
+        ("Vpc", vec!["`Int (range: 16..=28)`", "Ec2VpcCidrBlock"]),
     ] {
         let Some((_output, generated)) = generate(resource, "markdown") else {
             return;

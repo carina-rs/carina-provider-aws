@@ -21,6 +21,7 @@ fn role_path_keeps_smithy_search_and_adds_a_full_rule() {
         &declarations,
         &HashMap::new(),
         None,
+        None,
     )
     .unwrap();
     let RawShape::String {
@@ -42,10 +43,10 @@ fn role_path_keeps_smithy_search_and_adds_a_full_rule() {
     );
     let rules = declarations.input_patterns.borrow();
     let rule = rules
-        .get("path")
+        .get(&carina_core::schema::InputPath::new("path").unwrap())
         .and_then(|rules| rules.first())
         .expect("whole-value CreateRole narrowing");
-    let matcher = CompiledPattern::try_new(rule).unwrap();
+    let matcher = rule;
     for value in ["/", "/a/", "/application/component/"] {
         assert!(matcher.is_match(value));
     }
@@ -65,10 +66,10 @@ fn nested_input_targets_must_exist_and_be_user_authored() {
         false,
         None,
     );
-    let patterns = BTreeMap::from([(
-        "options.absent".into(),
+    let patterns = tests::pattern_fixture(
+        "options.absent",
         vec![PatternSpec::new("^x$", PatternMatch::Full)],
-    )]);
+    );
     let error = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap_err();
     assert!(error.to_string().contains("test.Nested.options.absent"));
 }
@@ -98,10 +99,10 @@ fn nested_provider_populated_child_is_rejected() {
             .build(),
         ],
     );
-    let patterns = BTreeMap::from([(
-        "options.child.label".into(),
+    let patterns = tests::pattern_fixture(
+        "options.child.label",
         vec![PatternSpec::new("^x$", PatternMatch::Full)],
-    )]);
+    );
     let error = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap_err();
     assert!(
         error
@@ -139,7 +140,9 @@ fn create_only_child_controls_the_whole_path_scope() {
     );
     let patterns = ["options.fixed.label", "options.mutable.label"]
         .into_iter()
-        .map(|p| (p.into(), vec![PatternSpec::new("^x$", PatternMatch::Full)]))
+        .flat_map(|path| {
+            tests::pattern_fixture(path, vec![PatternSpec::new("^x$", PatternMatch::Full)])
+        })
         .collect();
     let rules = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap();
     assert_eq!(rules[0].scope(), InputRuleScope::CreateOnly);

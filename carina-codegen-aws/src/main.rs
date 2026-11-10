@@ -146,13 +146,15 @@ impl TryFrom<Args> for ResolvedArgs {
 #[derive(Default)]
 struct TypeDeclarations<'a> {
     members: HashMap<&'a str, TypeOverride>,
-    authoritative: HashMap<&'a str, TypeOverride>,
     enum_aliases: HashMap<&'a str, Vec<(&'a str, &'a str)>>,
     to_dsl_overrides: HashMap<&'a str, &'a str>,
     representations: HashMap<&'a str, Representation>,
     // Derived input constraints, collected by the same seam as member types.
-    input_patterns: RefCell<BTreeMap<String, Vec<PatternSpec>>>,
+    input_patterns: RefCell<InputPatterns>,
 }
+
+type InputPatterns =
+    BTreeMap<carina_core::schema::InputPath, Vec<carina_core::schema::CompiledPattern>>;
 impl<'a> TypeDeclarations<'a> {
     fn from_resource(resource: &'a ResourceDef) -> Self {
         let mut enum_aliases: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
@@ -168,7 +170,6 @@ impl<'a> TypeDeclarations<'a> {
                 .iter()
                 .map(|(key, value)| (*key, value.clone()))
                 .collect(),
-            authoritative: HashMap::new(),
             enum_aliases,
             to_dsl_overrides: resource.to_dsl_overrides.iter().copied().collect(),
             representations: resource.representations.iter().copied().collect(),
@@ -180,12 +181,32 @@ impl<'a> TypeDeclarations<'a> {
     }
     fn add_input_pattern(&self, validated: ValidatedInputPattern) {
         let mut patterns = self.input_patterns.borrow_mut();
-        let patterns = patterns.entry(validated.path.as_str().into()).or_default();
-        let spec = validated.pattern.as_ref();
-        if !patterns.contains(spec) {
-            patterns.push(spec.clone());
+        let patterns = patterns.entry(validated.path).or_default();
+        if !patterns
+            .iter()
+            .any(|pattern| pattern.as_ref() == validated.pattern.as_ref())
+        {
+            patterns.push(validated.pattern);
         }
     }
+}
+
+/// All carriers use this precedence. An explicit data-source declaration is
+/// authoritative; ordinary members use resource path, struct field, then field.
+fn member_override(
+    resource: &str,
+    path: &str,
+    field: &str,
+    declarations: &TypeDeclarations<'_>,
+    struct_rules: &HashMap<(&str, &str), TypeOverride>,
+    parent: Option<&str>,
+    explicit: Option<&TypeOverride>,
+) -> Option<TypeOverride> {
+    explicit
+        .or_else(|| resource_type_overrides().get(&(resource, path)))
+        .or_else(|| parent.and_then(|parent| struct_rules.get(&(parent, field))))
+        .or_else(|| declarations.get(field))
+        .cloned()
 }
 
 struct ValidatedInputPattern {
@@ -413,48 +434,6 @@ fn map_type_code(key: &str, value: &str, length: Bounds<u64>) -> String {
     }
 }
 
-/// Rust and documentation use the same exact resource/path lookup. Enum
-/// identities retain their separate Smithy-shape lookup in enum_identity_override.
-#[cfg(test)]
-fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueTypeOverride> {
-    let rule = resource_type_overrides().get(&(resource, property_path))?;
-    if matches!(
-        rule,
-        TypeOverride::ListLength { .. } | TypeOverride::EnumIdentity(_)
-    ) {
-        return None;
-    }
-    let integer = matches!(rule, TypeOverride::IntRange { .. })
-        || matches!(rule,TypeOverride::Identity(row) if matches!(row.attribute_type().raw_shape(),RawShape::Int {..}));
-    let value = if integer {
-        string_members::decorate(
-            ValueTypeOverride {
-                type_code: "AttributeType::int()".into(),
-                attribute_type: AttributeType::int(),
-                documentation: None,
-                validated_input_patterns: Vec::new(),
-            },
-            rule,
-        )
-    } else {
-        string_members::derive(
-            &SmithyModel {
-                smithy: "2.0".into(),
-                metadata: Default::default(),
-                shapes: BTreeMap::new(),
-            },
-            &carina_smithy::ShapeRef {
-                target: "smithy.api#String".into(),
-                traits: Default::default(),
-            },
-            resource,
-            property_path,
-            std::slice::from_ref(rule),
-        )
-    };
-    value.ok()
-}
-
 /// Select synthetic extra types once for schemas and documentation, retaining
 /// both the Rust constructor and its complete attribute type and validation note.
 fn synthetic_extra_attribute_type(
@@ -487,6 +466,7 @@ fn synthetic_extra_attribute_type(
             &field_name.to_snake_case(),
             type_overrides,
             &HashMap::new(),
+            None,
             None,
         );
     }
@@ -558,6 +538,7 @@ fn string_list_value_override(
         &format!("{property_path}[]"),
         &TypeDeclarations::default(),
         &HashMap::new(),
+        None,
         None,
     )?;
     let length = length_from_traits(&list.traits);
@@ -1425,7 +1406,7 @@ struct CollectedResourceAttributes {
     attrs: Vec<AttrInfo>,
     all_enums: BTreeMap<String, EnumInfo>,
     description: Option<Description>,
-    input_patterns: BTreeMap<String, Vec<PatternSpec>>,
+    input_patterns: InputPatterns,
     input_rules: Vec<carina_core::schema::InputRule>,
 }
 
@@ -1434,18 +1415,12 @@ struct CollectedResourceAttributes {
 fn bind_input_patterns(
     resource: &str,
     attrs: &[AttrInfo],
-    patterns: &BTreeMap<String, Vec<PatternSpec>>,
+    patterns: &InputPatterns,
 ) -> Result<Vec<carina_core::schema::InputRule>> {
-    use carina_core::schema::{
-        InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope,
-    };
+    use carina_core::schema::{InputPredicate, InputRule, InputRuleCode, InputRuleScope};
     let mut rules = Vec::new();
-    for (path, patterns) in patterns {
-        let input_path = InputPath::new(path.clone()).with_context(|| {
-            format!(
-                "{resource}.{path}: pattern tightening requires an addressable InputRule target"
-            )
-        })?;
+    for (input_path, patterns) in patterns {
+        let path = input_path.as_str();
         let mut segments = input_path.segments();
         let root = segments.next().expect("nonempty input path");
         let attr = attrs
@@ -1499,7 +1474,7 @@ fn bind_input_patterns(
                 scope,
                 input_path.clone(),
                 InputRuleCode::new(format!("aws.additional_pattern.pattern_{index}"))?,
-                InputPredicate::Matches(pattern.clone()),
+                InputPredicate::Matches(pattern.as_ref().clone()),
             ));
         }
     }
@@ -3183,48 +3158,47 @@ fn member_string_value(
     declarations: &TypeDeclarations<'_>,
     struct_rules: &HashMap<(&str, &str), TypeOverride>,
     parent: Option<&str>,
+    explicit: Option<&TypeOverride>,
 ) -> Result<ValueTypeOverride> {
-    let rule = declarations
-        .authoritative
-        .get(field)
-        .cloned()
-        .or_else(|| {
-            resource_type_overrides()
-                .get(&(resource, path))
-                .cloned()
-                .or_else(|| parent.and_then(|parent| struct_rules.get(&(parent, field)).cloned()))
-                .or_else(|| declarations.get(field).cloned())
-        })
-        .or_else(|| infer_string_type(field));
+    let rule = member_override(
+        resource,
+        path,
+        field,
+        declarations,
+        struct_rules,
+        parent,
+        explicit,
+    )
+    .or_else(|| infer_string_type(field));
     let rules = rule.into_iter().collect::<Vec<_>>();
     let mut value = string_members::derive(model, member, resource, path, &rules)?;
     for pattern in std::mem::take(&mut value.validated_input_patterns) {
         declarations.add_input_pattern(pattern);
     }
     if let Some((reference, code)) = kms_references::member_definition(resource, path) {
-        if let RawShape::Reference {
-            pattern: Some(extra),
-            ..
-        } = reference.as_attribute_type().raw_shape()
-        {
-            declarations.add_input_pattern(ValidatedInputPattern::new(
-                resource,
-                path,
-                extra.clone(),
-            )?);
-        }
         if let (
             RawShape::String {
-                member_layer: carina_core::schema::StringMemberParts { length: source, .. },
-                ..
+                identity_layer,
+                member_layer,
             },
-            RawShape::Reference { length: extra, .. },
+            RawShape::Reference {
+                pattern: Some(own), ..
+            },
         ) = (
             value.attribute_type.raw_shape(),
             reference.as_attribute_type().raw_shape(),
-        ) {
-            string_members::intersect(source, extra)
-                .with_context(|| format!("{resource}.{path}"))?;
+        ) && identity_layer.identity.is_none()
+            && let Some(source) = member_layer.pattern.or(identity_layer.pattern)
+            && source != own
+        {
+            // Reference grammar always stays on its type. The additional
+            // Smithy policy travels with the derived member as a validated rule.
+            let extra = ValidatedInputPattern::new(resource, path, source.clone())?;
+            let length = string_members::intersect(identity_layer.length, member_layer.length)?;
+            let documentation = value.documentation.take();
+            value = string_refinement(None, length);
+            value.documentation = documentation;
+            declarations.add_input_pattern(extra);
         }
         value.attribute_type =
             carina_aws_types::try_with_member_reference(value.attribute_type, reference)
@@ -3233,6 +3207,45 @@ fn member_string_value(
             "carina_aws_types::with_member_reference({}, {code})",
             value.type_code
         );
+    }
+    Ok(value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn member_integer_value(
+    model: &SmithyModel,
+    member: &carina_smithy::ShapeRef,
+    field: &str,
+    resource: &str,
+    path: &str,
+    declarations: &TypeDeclarations<'_>,
+    struct_rules: &HashMap<(&str, &str), TypeOverride>,
+    parent: Option<&str>,
+) -> Result<ValueTypeOverride> {
+    let range = get_int_range(model, member, field).map(|bounds| (bounds.min, bounds.max));
+    string_members::intersect(range, None).with_context(|| format!("{resource}.{path}"))?;
+    let mut value = ValueTypeOverride {
+        type_code: range.map_or_else(|| "AttributeType::int()".into(), |range| format!(
+            "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some({range:?})))"
+        )),
+        attribute_type: AttributeType::int_member(
+            carina_core::schema::IntIdentityLayer::new(None, None),
+            carina_core::schema::IntMemberConstraints::new(range),
+        ),
+        documentation: None,
+        validated_input_patterns: Vec::new(),
+    };
+    if let Some(rule) = member_override(
+        resource,
+        path,
+        field,
+        declarations,
+        struct_rules,
+        parent,
+        None,
+    ) {
+        value =
+            string_members::decorate(value, &rule).with_context(|| format!("{resource}.{path}"))?;
     }
     Ok(value)
 }
@@ -3263,13 +3276,15 @@ fn enum_member_value(
     } else {
         field.to_string()
     };
-    let rule = declarations.authoritative.get(field).cloned().or_else(|| {
-        resource_type_overrides()
-            .get(&(resource, path))
-            .cloned()
-            .or_else(|| parent.and_then(|p| struct_rules.get(&(p, field)).cloned()))
-            .or_else(|| declarations.get(field).cloned())
-    });
+    let rule = member_override(
+        resource,
+        path,
+        field,
+        declarations,
+        struct_rules,
+        parent,
+        None,
+    );
     let tightenings = rule
         .iter()
         .filter(|rule| {
@@ -3463,16 +3478,17 @@ fn resolve_member_value(
     let kind = ctx.model.shape_kind(target);
     // Representation declarations may not swallow a pattern tightening. A
     // portable Matches rule needs a declared String carrier and fixed path.
-    let explicit_rule = resource_type_overrides()
-        .get(&(ctx.resource_name, ctx.property_path.as_str()))
-        .or_else(|| {
-            ctx.struct_path.last().and_then(|parent| {
-                ctx.struct_field_type_overrides
-                    .get(&(parent.as_str(), field_name))
-            })
-        })
-        .or_else(|| ctx.type_overrides.get(field_name));
+    let explicit_rule = member_override(
+        ctx.resource_name,
+        &ctx.property_path,
+        field_name,
+        ctx.type_overrides,
+        ctx.struct_field_type_overrides,
+        ctx.struct_path.last().map(String::as_str),
+        None,
+    );
     if explicit_rule
+        .as_ref()
         .is_some_and(|rule| !string_members::input_patterns(std::slice::from_ref(rule)).is_empty())
     {
         let representation = ctx.type_overrides.representations.get(field_name);
@@ -3559,41 +3575,24 @@ fn resolve_member_value(
             ctx.type_overrides,
             ctx.struct_field_type_overrides,
             ctx.struct_path.last().map(String::as_str),
+            None,
         )?;
         return Ok((value, None));
     }
     if matches!(kind, Some(ShapeKind::Integer | ShapeKind::Long)) {
-        let bounds = get_int_range(ctx.model, target, field_name);
-        let range = bounds.map(|b| (b.min, b.max));
-        let mut value = ValueTypeOverride {
-            type_code: if range.is_some() {
-                format!(
-                    "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new({range:?}))"
-                )
-            } else {
-                "AttributeType::int()".into()
-            },
-            attribute_type: AttributeType::int_member(
-                carina_core::schema::IntIdentityLayer::new(None, None),
-                carina_core::schema::IntMemberConstraints::new(range),
-            ),
-            documentation: None,
-            validated_input_patterns: Vec::new(),
-        };
-        if let Some(rule) = resource_type_overrides()
-            .get(&(ctx.resource_name, ctx.property_path.as_str()))
-            .or_else(|| {
-                ctx.struct_path.last().and_then(|parent| {
-                    ctx.struct_field_type_overrides
-                        .get(&(parent.as_str(), field_name))
-                })
-            })
-            .or_else(|| ctx.type_overrides.get(field_name))
-        {
-            value = string_members::decorate(value, rule)
-                .with_context(|| format!("{}.{}", ctx.resource_name, ctx.property_path))?;
-        }
-        return Ok((value, None));
+        return Ok((
+            member_integer_value(
+                ctx.model,
+                member,
+                field_name,
+                ctx.resource_name,
+                &ctx.property_path,
+                ctx.type_overrides,
+                ctx.struct_field_type_overrides,
+                ctx.struct_path.last().map(String::as_str),
+            )?,
+            None,
+        ));
     }
     if ctx.resolving_shapes.iter().any(|shape| shape == target) {
         anyhow::bail!(
@@ -3734,6 +3733,7 @@ fn resolve_type_shape(
             ctx.type_overrides,
             ctx.struct_field_type_overrides,
             ctx.struct_path.last().map(String::as_str),
+            None,
         )?,
     };
     Ok((value, None))
@@ -3871,94 +3871,28 @@ fn generate_struct_value(
 
 /// Intersect wire width, Smithy traits, and documented field bounds.
 /// https://smithy.io/2.0/spec/simple-types.html#integer
-fn get_int_range(model: &SmithyModel, target: &str, field_name: &str) -> Option<IntRange> {
-    let mut bounds = Vec::new();
-    if model.shape_kind(target) == Some(ShapeKind::Integer) {
-        bounds.push(IntRange {
-            min: Some(i64::from(i32::MIN)),
-            max: Some(i64::from(i32::MAX)),
-        });
-    }
-    let traits = match model.get_shape(target) {
-        Some(Shape::Integer(shape)) => Some(&shape.traits),
-        Some(Shape::Long(shape)) => Some(&shape.traits),
-        _ => None,
-    };
-    if let Some(range) = traits.and_then(|traits| traits.get("smithy.api#range")) {
-        bounds.push(IntRange {
-            min: range.get("min").and_then(|value| value.as_i64()),
-            max: range.get("max").and_then(|value| value.as_i64()),
-        });
-    }
-    if let Some(&(min, max)) = known_int_range_overrides().get(field_name) {
-        bounds.push(IntRange {
-            min: Some(min),
-            max: Some(max),
-        });
-    }
-    bounds.into_iter().reduce(|left, right| IntRange {
-        min: left.min.into_iter().chain(right.min).max(),
-        max: left.max.into_iter().chain(right.max).min(),
-    })
-}
-
-/// Overrides can refine or name an integer, but cannot widen its wire carrier.
-#[cfg(test)]
-fn bound_int_override(
+fn get_int_range(
     model: &SmithyModel,
-    target: &str,
+    member: &carina_smithy::ShapeRef,
     field_name: &str,
-    mut value: ValueTypeOverride,
-) -> ValueTypeOverride {
-    if !matches!(
-        model.shape_kind(target),
-        Some(ShapeKind::Integer | ShapeKind::Long)
-    ) {
-        return value;
-    }
-    let Some(bounds) = get_int_range(model, target, field_name) else {
-        return value;
-    };
-    let RawShape::Int {
-        identity_layer,
-        member_layer,
-    } = value.attribute_type.raw_shape()
-    else {
-        return value;
-    };
-    let identity = identity_layer.identity;
-    let range = carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
-    // A closed Int set already enforces the carrier when every member fits.
-    // Preserve its constructor, callback and allowed-value documentation.
-    if let Some(identity) = identity
-        && let Some(values) = AwsType::ALL
-            .iter()
-            .find(|row| row.identity() == *identity)
-            .and_then(|row| row.allowed_int_values())
-        && values.iter().all(|value| {
-            bounds.min.is_none_or(|minimum| *value >= minimum)
-                && bounds.max.is_none_or(|maximum| *value <= maximum)
-        })
-    {
-        return value;
-    }
-    let bounded =
-        carina_aws_types::with_int_range(value.attribute_type.clone(), bounds.min, bounds.max);
-    if let RawShape::Int {
-        identity_layer,
-        member_layer,
-    } = bounded.raw_shape()
-        && range == carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range)
-    {
-        return value;
-    }
-
-    value.type_code = format!(
-        "carina_aws_types::with_int_range({}, {:?}, {:?})",
-        value.type_code, bounds.min, bounds.max
-    );
-    value.attribute_type = bounded;
-    value
+) -> Option<IntRange> {
+    let carrier = (model.shape_kind(&member.target) == Some(ShapeKind::Integer))
+        .then_some((Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX))));
+    let traits = string_members::effective_traits(model, member);
+    let modeled = traits.get("smithy.api#range").map(|range| {
+        (
+            range.get("min").and_then(|value| value.as_i64()),
+            range.get("max").and_then(|value| value.as_i64()),
+        )
+    });
+    let extra = known_int_range_overrides()
+        .get(field_name)
+        .map(|&(min, max)| (Some(min), Some(max)));
+    carina_core::schema::intersect_bounds(
+        carina_core::schema::intersect_bounds(carrier, modeled),
+        extra,
+    )
+    .map(|(min, max)| IntRange { min, max })
 }
 
 /// Generate per-service mod.rs files that declare resource modules.
@@ -7735,12 +7669,7 @@ fn data_source_type(
     } else {
         provider_name.into()
     };
-    let mut declarations = TypeDeclarations::default();
-    if let Some(rule) = &source.decoration {
-        declarations
-            .authoritative
-            .insert(field.as_str(), rule.clone());
-    }
+    let declarations = TypeDeclarations::default();
     let value = member_string_value(
         model,
         resource,
@@ -7750,6 +7679,7 @@ fn data_source_type(
         &declarations,
         &HashMap::new(),
         None,
+        source.decoration.as_ref(),
     )?;
     anyhow::ensure!(
         declarations.input_patterns.borrow().is_empty(),
@@ -8238,6 +8168,7 @@ fn discover_markdown_member(
             type_overrides,
             struct_field_type_overrides,
             parent_struct,
+            None,
         )?
         .markdown(heading_path, enum_namespace, all_enums, struct_defs);
     }
@@ -8315,32 +8246,6 @@ fn discover_markdown_type(
     )? {
         return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
     }
-    if matches!(
-        model.shape_kind(target),
-        Some(ShapeKind::Integer | ShapeKind::Long)
-    ) {
-        let range = get_int_range(model, target, field_name).map(|b| (b.min, b.max));
-        let mut value = ValueTypeOverride {
-            type_code: String::new(),
-            attribute_type: AttributeType::int_member(
-                carina_core::schema::IntIdentityLayer::new(None, None),
-                carina_core::schema::IntMemberConstraints::new(range),
-            ),
-            documentation: None,
-            validated_input_patterns: Vec::new(),
-        };
-        if let Some(rule) = resource_type_overrides()
-            .get(&(resource_name, property_path))
-            .or_else(|| {
-                parent_struct.and_then(|p| struct_field_type_overrides.get(&(p, field_name)))
-            })
-            .or_else(|| type_overrides.get(field_name))
-        {
-            value = string_members::decorate(value, rule)?;
-        }
-        return value.markdown(heading_path, enum_namespace, all_enums, struct_defs);
-    }
-
     let kind = model.shape_kind(target);
 
     Ok(match kind {
@@ -8353,29 +8258,21 @@ fn discover_markdown_type(
             type_overrides,
             struct_field_type_overrides,
             parent_struct,
+            None,
+        )?
+        .markdown(heading_path, enum_namespace, all_enums, struct_defs)?,
+        Some(ShapeKind::Integer | ShapeKind::Long) => member_integer_value(
+            model,
+            &member,
+            field_name,
+            resource_name,
+            property_path,
+            type_overrides,
+            struct_field_type_overrides,
+            parent_struct,
         )?
         .markdown(heading_path, enum_namespace, all_enums, struct_defs)?,
         Some(ShapeKind::Boolean) => scalar_display(ScalarDoc::Bool, None),
-        Some(ShapeKind::Integer) | Some(ShapeKind::Long) => {
-            let range = get_int_range(model, target, field_name);
-            if let Some(r) = range {
-                scalar_display(
-                    ScalarDoc::Int {
-                        range: Some((r.min, r.max)),
-                        validate: false,
-                    },
-                    None,
-                )
-            } else {
-                scalar_display(
-                    ScalarDoc::Int {
-                        range: None,
-                        validate: false,
-                    },
-                    None,
-                )
-            }
-        }
         Some(ShapeKind::Float) | Some(ShapeKind::Double) => scalar_display(
             ScalarDoc::Float {
                 range: None,
@@ -8529,6 +8426,7 @@ fn discover_markdown_type(
                     &TypeDeclarations::default(),
                     &HashMap::new(),
                     None,
+                    None,
                 )?
                 .markdown(
                     &heading_path.child(TypeEdge::Key),
@@ -8664,6 +8562,7 @@ fn discover_markdown_type(
             type_overrides,
             struct_field_type_overrides,
             parent_struct,
+            None,
         )?
         .markdown(heading_path, enum_namespace, all_enums, struct_defs)?,
     })
@@ -10298,45 +10197,41 @@ mod tests {
     }
 
     #[test]
-    fn smithy_integer_bounds_preserve_int_enum_and_contained_range_constructors() {
+    fn integer_member_preserves_the_named_policy_and_its_wire_bounds() {
         let model = carina_smithy::parse(
-            r##"{
-            "smithy": "2.0", "shapes": {"test#Integer": {"type":"integer"}}
-        }"##,
+            r#"{"smithy":"2.0","shapes":{"test#Integer":{"type":"integer"}}}"#,
         )
         .unwrap();
-        let retention = resource_value_override("logs.LogGroup", "retention_in_days").unwrap();
-        let original = retention.type_code.clone();
-        let retention = bound_int_override(&model, "test#Integer", "Count", retention);
-        assert_eq!(retention.type_code, original);
-        assert!(matches!(
-            retention.attribute_type.raw_shape(),
-            RawShape::Int {
-                identity_layer: carina_core::schema::IntIdentityParts { range: None, .. },
-                ..
-            }
-        ));
-
-        for (minimum, maximum) in [(0, 100), (i64::from(i32::MIN), i64::from(i32::MAX))] {
-            let original = format!(
-                "AttributeType::refined_int(None, Some((Some({minimum}), Some({maximum}))))"
-            );
-            let bounded = bound_int_override(
-                &model,
-                "test#Integer",
-                "Count",
-                ValueTypeOverride {
-                    type_code: original.clone(),
-                    documentation: None,
-                    validated_input_patterns: Vec::new(),
-                    attribute_type: AttributeType::refined_int(
-                        None,
-                        Some((Some(minimum), Some(maximum))),
-                    ),
-                },
-            );
-            assert_eq!(bounded.type_code, original);
-        }
+        let value = resolve_value_fixture(
+            &model,
+            "logs.LogGroup",
+            "retention_in_days",
+            "RetentionInDays",
+            "test#Integer",
+            &TypeDeclarations::default(),
+        )
+        .unwrap();
+        let RawShape::Int {
+            identity_layer,
+            member_layer,
+        } = value.attribute_type.raw_shape()
+        else {
+            panic!("Int")
+        };
+        assert_eq!(
+            identity_layer.identity,
+            Some(&AwsType::LogsLogGroupRetentionInDays.identity())
+        );
+        assert!(identity_layer.validate.is_some());
+        assert!(identity_layer.range.is_none());
+        assert_eq!(
+            member_layer.range,
+            Some((Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX))))
+        );
+        assert!(
+            value.type_code.contains("with_member_identity")
+                && value.type_code.contains("IntMemberConstraints")
+        );
     }
 
     #[test]
@@ -10349,7 +10244,15 @@ mod tests {
         }"##,
         )
         .unwrap();
-        let range = get_int_range(&model, "test#Unbounded", "Count").unwrap();
+        let range = get_int_range(
+            &model,
+            &carina_smithy::ShapeRef {
+                target: "test#Unbounded".into(),
+                traits: Default::default(),
+            },
+            "Count",
+        )
+        .unwrap();
         assert_eq!((range.min, range.max), (None, None));
         let display = discover_markdown_type(
             &model,
@@ -10388,30 +10291,82 @@ mod tests {
             }
         }"##).unwrap();
         for target in ["test#Integer", "smithy.api#Integer"] {
-            let range = get_int_range(&model, target, "Count")
-                .expect("Integer must have its carrier bounds");
+            let range = get_int_range(
+                &model,
+                &carina_smithy::ShapeRef {
+                    target: target.into(),
+                    traits: Default::default(),
+                },
+                "Count",
+            )
+            .expect("Integer must have its carrier bounds");
             assert_eq!(
                 (range.min, range.max),
                 (Some(i64::from(i32::MIN)), Some(i64::from(i32::MAX)))
             );
         }
-        let range = get_int_range(&model, "test#PositiveInteger", "Count").unwrap();
+        let range = get_int_range(
+            &model,
+            &carina_smithy::ShapeRef {
+                target: "test#PositiveInteger".into(),
+                traits: Default::default(),
+            },
+            "Count",
+        )
+        .unwrap();
         assert_eq!((range.min, range.max), (Some(1), Some(i64::from(i32::MAX))));
-        let range = get_int_range(&model, "test#PositiveInteger", "FromPort").unwrap();
+        let range = get_int_range(
+            &model,
+            &carina_smithy::ShapeRef {
+                target: "test#PositiveInteger".into(),
+                traits: Default::default(),
+            },
+            "FromPort",
+        )
+        .unwrap();
         assert_eq!((range.min, range.max), (Some(1), Some(65535)));
-        assert!(get_int_range(&model, "test#Long", "Count").is_none());
-        let range = get_int_range(&model, "test#PositiveLong", "Count").unwrap();
+        assert!(
+            get_int_range(
+                &model,
+                &carina_smithy::ShapeRef {
+                    target: "test#Long".into(),
+                    traits: Default::default()
+                },
+                "Count"
+            )
+            .is_none()
+        );
+        let range = get_int_range(
+            &model,
+            &carina_smithy::ShapeRef {
+                target: "test#PositiveLong".into(),
+                traits: Default::default(),
+            },
+            "Count",
+        )
+        .unwrap();
         assert_eq!((range.min, range.max), (Some(1), Some(i64::MAX)));
         for (target, maximum) in [
             ("test#Integer", i64::from(i32::MAX)),
             ("test#Long", i64::MAX),
         ] {
-            let value = bound_int_override(&model, target, "Count", ValueTypeOverride {
-                type_code: "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(9223372036854775807)))))".to_string(),
-                documentation: None,
-            validated_input_patterns: Vec::new(),
-                attribute_type: AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(i64::MAX))))),
-            });
+            let mut declarations = TypeDeclarations::default();
+            declarations.members.insert(
+                "Count",
+                TypeOverride::IntRange {
+                    min: 1,
+                    max: i64::MAX,
+                },
+            );
+            let value = resolve_value_fixture(
+                &model,
+                "test.Numeric",
+                "count",
+                "Count",
+                target,
+                &declarations,
+            )
+            .unwrap();
             let RawShape::Int {
                 identity_layer,
                 member_layer,
@@ -10458,21 +10413,23 @@ mod tests {
             };
             assert!(generated.contains(constructor), "{generated}");
         }
-        assert!(resource_value_override("s3.Other", "rules[].id").is_none());
         assert!(
-            resource_value_override(
-                "s3.BucketLifecycleConfiguration",
-                "rules[].noncurrent_version_transitions[].noncurrent_days"
-            )
-            .is_none()
+            resource_type_overrides()
+                .get(&("s3.Other", "rules[].id"))
+                .is_none()
+        );
+        assert!(
+            resource_type_overrides()
+                .get(&(
+                    "s3.BucketLifecycleConfiguration",
+                    "rules[].noncurrent_version_transitions[].noncurrent_days"
+                ))
+                .is_none()
         );
         let markdown = lifecycle_markdown_fixture();
+        assert!(markdown.contains("`Int (range: 1..=100)`"), "{markdown}");
         assert!(
-            markdown.contains("`Int (member constraints: range: 1..=100)`"),
-            "{markdown}"
-        );
-        assert!(
-            markdown.contains("`Int (member constraints: range: 1..=2147483647)`"),
+            markdown.contains("`Int (range: 1..=2147483647)`"),
             "{markdown}"
         );
         assert!(markdown.contains("`String (len: 0..=255)`"), "{markdown}");
@@ -10569,7 +10526,15 @@ mod tests {
                 "renewal_summary.domain_validation_options[].resource_record.value",
             ),
         ] {
-            let value = resource_value_override(resource, path).unwrap();
+            let value = resolve_value_fixture(
+                &carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).unwrap(),
+                resource,
+                path,
+                "Value",
+                "smithy.api#String",
+                &TypeDeclarations::default(),
+            )
+            .unwrap();
             assert!(value.type_code.starts_with("AttributeType::string_member("));
             let RawShape::String {
                 identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
@@ -10620,11 +10585,15 @@ mod tests {
             "resource_records[]",
         ] {
             assert!(
-                resource_value_override(resource.name, path).is_some(),
+                resource_type_overrides()
+                    .get(&(resource.name, path))
+                    .is_some(),
                 "{path}"
             );
             assert!(
-                resource_value_override("route53.Other", path).is_none(),
+                resource_type_overrides()
+                    .get(&("route53.Other", path))
+                    .is_none(),
                 "{path}"
             );
         }
@@ -10638,7 +10607,9 @@ mod tests {
             "type",
         ] {
             assert!(
-                resource_value_override(resource.name, path).is_none(),
+                resource_type_overrides()
+                    .get(&(resource.name, path))
+                    .is_none(),
                 "{path}"
             );
         }
@@ -10995,7 +10966,7 @@ mod tests {
         )
         .expect("generate Logs markdown");
         assert!(
-            markdown.contains("`String (member constraints: pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)`"),
+            markdown.contains("`String (pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)`"),
             "{markdown}"
         );
         assert!(
@@ -11003,12 +10974,12 @@ mod tests {
             "{markdown}"
         );
         assert!(
-            markdown.contains("| `log_group_name` | `String (member constraints: pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)` |"),
+            markdown.contains("| `log_group_name` | `String (pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)` |"),
             "{markdown}"
         );
         // Smithy Integer is 32-bit; unranged Integers carry the i32 range (#588 S3 slice)
         assert!(
-            markdown.contains("| `retention_in_days` | `Int (member constraints: range: -2147483648..=2147483647)` |"),
+            markdown.contains("| `retention_in_days` | `Int (range: -2147483648..=2147483647)` |"),
             "{markdown}"
         );
     }
@@ -11065,6 +11036,7 @@ mod tests {
                     &TypeDeclarations::default(),
                     &HashMap::new(),
                     None,
+                    None,
                 )
                 .unwrap()
                 .type_code,
@@ -11116,7 +11088,7 @@ mod tests {
         }));
         for path in ["nested.role_name", "nested.path", "role_name[]", "path[]"] {
             assert!(
-                resource_value_override("iam.Role", path).is_none(),
+                resource_type_overrides().get(&("iam.Role", path)).is_none(),
                 "{path}"
             );
         }
@@ -11190,12 +11162,21 @@ mod tests {
             "joined_timestamp",
         ] {
             assert!(
-                resource_value_override("organizations.Account", path).is_none(),
+                resource_type_overrides()
+                    .get(&("organizations.Account", path))
+                    .is_none(),
                 "{path}"
             );
         }
-        let output = resource_value_override("organizations.Organization", "master_account_email")
-            .expect("management account output must share the Organizations Email type");
+        let output = resolve_value_fixture(
+            &carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).unwrap(),
+            "organizations.Organization",
+            "master_account_email",
+            "Value",
+            "smithy.api#String",
+            &TypeDeclarations::default(),
+        )
+        .expect("management account output must share the Organizations Email type");
         assert_eq!(
             output.type_code,
             "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.definition())"
@@ -11205,11 +11186,23 @@ mod tests {
             "acm.Certificate",
             "identitystore.User",
         ] {
-            assert!(resource_value_override(resource, "email").is_none());
-            assert!(resource_value_override(resource, "master_account_email").is_none());
+            assert!(
+                resource_type_overrides()
+                    .get(&(resource, "email"))
+                    .is_none()
+            );
+            assert!(
+                resource_type_overrides()
+                    .get(&(resource, "master_account_email"))
+                    .is_none()
+            );
         }
         for resource in ["organizations.Other", "iam.Role"] {
-            assert!(resource_value_override(resource, "account_name").is_none());
+            assert!(
+                resource_type_overrides()
+                    .get(&(resource, "account_name"))
+                    .is_none()
+            );
         }
     }
 
@@ -11223,7 +11216,7 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            "`String (member constraints: len: 1..=50)`",
+            "`String (len: 1..=50)`",
             r"`account_name` | Create and update | `String (pattern: /^[ -;=?-~]+\z/ (Full))`",
             r"`IamRoleName (",
             "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
@@ -11299,7 +11292,11 @@ mod tests {
             "id[]",
             "master_account_arn[]",
         ] {
-            assert!(resource_value_override(resource.name, path).is_none());
+            assert!(
+                resource_type_overrides()
+                    .get(&(resource.name, path))
+                    .is_none()
+            );
         }
         let markdown = generate_markdown_resource(
             &resource,
@@ -11308,7 +11305,7 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (member constraints: pattern: /^o-[a-z0-9]{10,32}$/ (Full))`",
+            r"`String (pattern: /^o-[a-z0-9]{10,32}$/ (Full))`",
             // #638: Management-account ARN docs pin all eight supported partitions.
             "OrganizationsAccountArn (identity constraints: pattern:",
             // #638: Organization ARN docs pin all eight supported partitions.
@@ -13706,10 +13703,10 @@ mod tests {
     #[test]
     fn input_patterns_reject_provider_outputs_and_bind_scope() {
         use carina_core::schema::InputRuleScope;
-        let patterns = BTreeMap::from([(
-            "label".into(),
+        let patterns = pattern_fixture(
+            "label",
             vec![PatternSpec::new("^extra$", PatternMatch::Full)],
-        )]);
+        );
         let mut attr = test_attr(
             "Label",
             "label",
@@ -13734,6 +13731,49 @@ mod tests {
             bind_input_patterns("test.InputPattern", &[attr], &patterns).unwrap()[0].scope(),
             InputRuleScope::CreateOnly
         );
+    }
+
+    fn resolve_value_fixture(
+        model: &SmithyModel,
+        resource: &str,
+        path: &str,
+        field: &str,
+        target: &str,
+        declarations: &TypeDeclarations<'_>,
+    ) -> Result<ValueTypeOverride> {
+        resolve_member_value(
+            &mut TypeResolutionContext {
+                model,
+                resource_name: resource,
+                namespace: "aws.test.Fixture",
+                struct_path: Vec::new(),
+                resolving_shapes: Vec::new(),
+                property_path: path.into(),
+                type_overrides: declarations,
+                all_enums: &mut BTreeMap::new(),
+                current_root_attr: None,
+                deferred_populate_struct_fields: &HashSet::new(),
+                nested_write_only_struct_fields: &HashSet::new(),
+                nested_write_only_emissions: &mut HashMap::new(),
+                struct_field_type_overrides: &HashMap::new(),
+            },
+            &carina_smithy::ShapeRef {
+                target: target.into(),
+                traits: Default::default(),
+            },
+            field,
+        )
+        .map(|(value, _)| value)
+    }
+
+    pub(super) fn pattern_fixture(path: &str, patterns: Vec<PatternSpec>) -> InputPatterns {
+        let declarations = TypeDeclarations::default();
+        for pattern in patterns {
+            declarations.add_input_pattern(
+                ValidatedInputPattern::new("test.Fixture", path, pattern).unwrap(),
+            );
+        }
+        declarations.input_patterns.into_inner()
     }
 
     pub(super) fn test_attr(
@@ -14054,7 +14094,8 @@ mod tests {
                     "path_prefix",
                     &TypeDeclarations::default(),
                     &HashMap::new(),
-                    None
+                    None,
+                    None,
                 )
                 .unwrap()
                 .type_code
@@ -14111,7 +14152,7 @@ mod tests {
         );
         assert!(
             md.contains(
-                r"- **Type:** `String (member constraints: pattern: /^\u002F[\u0021-\u007F]*$/ (Full), len: 1..=512)`"
+                r"- **Type:** `String (pattern: /^\u002F[\u0021-\u007F]*$/ (Full), len: 1..=512)`"
             ),
             "path_prefix constraint: {md}"
         );

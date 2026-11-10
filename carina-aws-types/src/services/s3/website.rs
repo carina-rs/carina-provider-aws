@@ -10,11 +10,12 @@ pub fn s3_index_document() -> AttributeType {
         vec![
             StructField::required(
                 "suffix",
-                AttributeType::refined_string(
-                    None,
-                    Some(PatternSpec::new(r"^[^/]+\z", PatternMatch::Full)),
-                    None,
-                    None,
+                AttributeType::string_member(
+                    carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+                    carina_core::schema::StringMemberConstraints::new(
+                        Some(PatternSpec::new(r"^[^/]+\z", PatternMatch::Full)),
+                        None,
+                    ),
                 ),
             )
             .with_provider_name("Suffix")

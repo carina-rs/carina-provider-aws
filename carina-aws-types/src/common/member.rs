@@ -42,6 +42,27 @@ impl From<&str> for MemberIdentityError {
     }
 }
 
+fn same_validator(left: Option<&CustomValidator>, right: Option<&CustomValidator>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+        _ => false,
+    }
+}
+
+type Bounds<T> = Option<(Option<T>, Option<T>)>;
+
+fn checked_bounds<T: Ord + Copy>(
+    left: Bounds<T>,
+    right: Bounds<T>,
+) -> Result<Bounds<T>, MemberIdentityError> {
+    let bounds = carina_core::schema::intersect_bounds(left, right);
+    if bounds.is_some_and(|(min, max)| matches!((min,max),(Some(min),Some(max)) if min>max)) {
+        return Err("empty constraint intersection".into());
+    }
+    Ok(bounds)
+}
+
 fn check_existing_identity(
     base: &AttributeType,
     named: &AttributeType,
@@ -79,7 +100,7 @@ fn check_existing_identity(
             a.pattern == b.pattern
                 && a.length == b.length
                 && a.to_dsl == b.to_dsl
-                && a.validate.is_some() == b.validate.is_some()
+                && same_validator(a.validate, b.validate)
         }
         (
             RawShape::Int {
@@ -88,7 +109,7 @@ fn check_existing_identity(
             RawShape::Int {
                 identity_layer: b, ..
             },
-        ) => a.range == b.range && a.validate.is_some() == b.validate.is_some(),
+        ) => a.range == b.range && same_validator(a.validate, b.validate),
         _ => false,
     };
     if !same {
@@ -126,10 +147,11 @@ pub fn try_with_member_identity(
             },
         ) => {
             let range = if source.identity.is_none() {
-                carina_core::schema::intersect_bounds(source.range, member_layer.range)
+                checked_bounds(source.range, member_layer.range)?
             } else {
                 member_layer.range
             };
+            checked_bounds(named.range, range)?;
             let definition = match named.validate {
                 Some(check) => IntIdentityLayer::with_validator(
                     named
@@ -149,6 +171,7 @@ pub fn try_with_member_identity(
                 .string_identity_layer()
                 .expect("String definition")
                 .clone();
+            checked_bounds(definition.parts().length, member.parts().length)?;
             AttributeType::string_member(definition, member)
         }
         (
@@ -294,7 +317,7 @@ fn string_slot(
     };
     Ok(StringMemberConstraints::new(
         pattern,
-        carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length),
+        checked_bounds(identity_layer.length, member_layer.length)?,
     ))
 }
 
@@ -331,12 +354,8 @@ fn enum_base(
     let RawShape::String { identity_layer, .. } = definition.raw_shape() else {
         return Err("enum definition base must be String".into());
     };
-    Ok(AttributeType::refined_string(
-        None,
-        identity_layer.pattern.cloned(),
-        identity_layer.length,
-        None,
-    ))
+    debug_assert!(identity_layer.pattern.is_none() && identity_layer.length.is_none());
+    Ok(AttributeType::string())
 }
 
 fn intersect_values(
@@ -429,12 +448,8 @@ fn enum_presentation(
                 && member_layer.length.is_none()),
         "open enum cannot retain structural constraints"
     );
-    let definition = AttributeType::refined_string(
-        None,
-        identity_layer.pattern.cloned(),
-        identity_layer.length,
-        None,
-    );
+    // Finite sets were checked before publication; open bases are unconstrained.
+    let definition = AttributeType::string();
     AttributeType::enum_with_base(identity, definition, values, aliases, semantic, to_dsl)
 }
 
@@ -534,21 +549,22 @@ pub fn try_with_member_reference(
     check_existing_identity(&base, &reference)?;
     let slot = string_slot(&base)?;
     let RawShape::Reference {
-        identity, length, ..
+        identity,
+        pattern,
+        length,
     } = reference.raw_shape()
     else {
         return Err("reference definition required".into());
     };
-    let length = carina_core::schema::intersect_bounds(slot.parts().length, length);
-    if length.is_some_and(|(a, b)| matches!((a,b),(Some(a),Some(b)) if a>b)) {
-        return Err("empty reference length intersection".into());
-    }
-    // Codegen binds the reference's extra pattern as a portable input rule.
-    Ok(AttributeType::reference(
-        identity.clone(),
-        slot.parts().pattern.cloned(),
-        length,
-    ))
+    let length = checked_bounds(slot.parts().length, length)?;
+    let pattern = match (slot.parts().pattern, pattern) {
+        (Some(source), Some(reference)) if source != reference => {
+            return Err("reference and member patterns need separate constraints".into());
+        }
+        (source, reference) => reference.or(source).cloned(),
+    };
+    // The reference's grammar is intrinsic, including for handwritten callers.
+    Ok(AttributeType::reference(identity.clone(), pattern, length))
 }
 
 #[cfg(test)]

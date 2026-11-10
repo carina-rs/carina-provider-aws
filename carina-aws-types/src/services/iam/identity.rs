@@ -33,11 +33,12 @@ pub const IAM_PATH_PATTERN: &str = r"^(?:/|/[\x21-\x7E]+/)\z";
 
 /// Shared standalone anonymous IAM path, with length 1..512.
 pub fn iam_path() -> AttributeType {
-    AttributeType::refined_string(
-        None,
-        Some(PatternSpec::new(IAM_PATH_PATTERN, PatternMatch::Full)),
-        Some((Some(1), Some(512))),
-        None,
+    AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new(IAM_PATH_PATTERN, PatternMatch::Full)),
+            Some((Some(1), Some(512))),
+        ),
     )
 }
 
@@ -45,11 +46,12 @@ pub fn iam_path() -> AttributeType {
 /// Source: carina-provider-aws/tests/fixtures/smithy/iam.json, pathPrefixType:
 /// length 1..512; `^\u002F[\u0021-\u007F]*$` (includes DEL, unlike pathType).
 pub fn iam_path_prefix() -> AttributeType {
-    AttributeType::refined_string(
-        None,
-        Some(PatternSpec::new(r"^/[\x21-\x7F]*\z", PatternMatch::Full)),
-        Some((Some(1), Some(512))),
-        None,
+    AttributeType::string_member(
+        carina_core::schema::StringIdentityLayer::new(None, None, None, None),
+        carina_core::schema::StringMemberConstraints::new(
+            Some(PatternSpec::new(r"^/[\x21-\x7F]*\z", PatternMatch::Full)),
+            Some((Some(1), Some(512))),
+        ),
     )
 }
 
@@ -82,13 +84,9 @@ mod tests {
             let RawShape::String {
                 identity_layer:
                     carina_core::schema::StringIdentityParts {
-                        identity,
-                        pattern,
-                        length,
-                        validate,
-                        ..
+                        identity, validate, ..
                     },
-                ..
+                member_layer: carina_core::schema::StringMemberParts { pattern, length },
             } = attr.raw_shape()
             else {
                 panic!("IAM path must be a String");

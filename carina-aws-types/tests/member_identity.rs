@@ -125,3 +125,129 @@ fn reference_binding_rejects_a_different_existing_identity() {
         Err(MemberIdentityError::IdentityConflict { .. })
     ));
 }
+
+#[test]
+fn handwritten_reference_keeps_its_grammar_without_an_input_rule() {
+    let ty = carina_aws_types::with_member_reference(
+        AttributeType::string(),
+        AwsType::KmsKeyReference.definition(),
+    );
+    let schema = admitted(ty);
+    for (text, valid) in [
+        ("not-a-kms-key", false),
+        ("alias/aws/s3", true),
+        ("01234567-89ab-cdef-0123-456789abcdef", true),
+    ] {
+        let value: Value = Value::Concrete(ConcreteValue::String(text.into()));
+        assert_eq!(schema.validate(&value).is_ok(), valid, "{text}");
+    }
+}
+
+#[test]
+fn competing_reference_patterns_are_an_error_instead_of_a_dropped_check() {
+    let base = AttributeType::refined_string(
+        None,
+        Some(PatternSpec::new("^source$", PatternMatch::Full)),
+        None,
+        None,
+    );
+    assert!(
+        carina_aws_types::try_with_member_reference(base, AwsType::KmsKeyReference.definition(),)
+            .is_err()
+    );
+}
+
+#[test]
+fn same_identity_with_a_different_callback_is_a_conflicting_definition() {
+    use carina_core::schema::legacy_validator;
+    let id = TypeIdentity::bare("Checked");
+    let first = legacy_validator(|_| Ok(()));
+    let second = legacy_validator(|_| Err("different policy".into()));
+    for (base, named) in [
+        (
+            IdentityDefinition::string(id.clone(), None, None, Some(first.clone()), None),
+            IdentityDefinition::string(id.clone(), None, None, Some(second.clone()), None),
+        ),
+        (
+            IdentityDefinition::int(id.clone(), Some((Some(1), Some(100))), Some(first)),
+            IdentityDefinition::int(id.clone(), Some((Some(1), Some(100))), Some(second)),
+        ),
+    ] {
+        assert!(matches!(
+            try_with_member_identity(base.into_attribute_type(), named),
+            Err(MemberIdentityError::ConflictingDefinition(_))
+        ));
+    }
+    assert!(matches!(
+        try_with_member_identity(
+            IdentityDefinition::int(id.clone(), Some((Some(1), Some(5))), None)
+                .into_attribute_type(),
+            IdentityDefinition::int(id, Some((Some(1), Some(10))), None),
+        ),
+        Err(MemberIdentityError::ConflictingDefinition(_))
+    ));
+}
+
+#[test]
+fn attaching_an_identity_rejects_disjoint_member_bounds() {
+    let number = AttributeType::refined_int(None, Some((Some(1), Some(100))));
+    assert!(try_with_member_identity(number, AwsType::Ec2AmazonSideAsn.definition()).is_err());
+    let text = AttributeType::refined_string(None, None, Some((Some(1), Some(3))), None);
+    assert!(
+        try_with_member_identity(text, AwsType::OrganizationsAccountEmail.definition()).is_err()
+    );
+}
+
+#[test]
+fn anonymous_integer_bounds_live_only_in_the_member_layer() {
+    let ty = carina_aws_types::with_int_range(
+        AttributeType::refined_int(None, Some((Some(1), Some(100)))),
+        Some(0),
+        Some(200),
+    );
+    let carina_core::schema::RawShape::Int {
+        identity_layer,
+        member_layer,
+    } = ty.raw_shape()
+    else {
+        panic!("Int");
+    };
+    assert!(
+        identity_layer.identity.is_none()
+            && identity_layer.range.is_none()
+            && identity_layer.validate.is_none()
+    );
+    assert_eq!(member_layer.range, Some((Some(1), Some(100))));
+}
+
+#[test]
+fn independently_requested_catalog_definitions_remain_identical() {
+    let row = AwsType::IamRoleArn;
+    try_with_member_identity(row.attribute_type(), row.definition()).unwrap();
+    let row = carina_aws_types::CoreIdentity::Email;
+    try_with_member_identity(row.attribute_type(), row.definition()).unwrap();
+}
+
+#[test]
+fn anonymous_shared_strings_publish_only_member_constraints() {
+    for ty in [
+        carina_aws_types::iam_path(),
+        carina_aws_types::iam_path_prefix(),
+        carina_aws_types::route53_dns_name(),
+        carina_aws_types::elbv2_health_check_port(),
+    ] {
+        let carina_core::schema::RawShape::String {
+            identity_layer,
+            member_layer,
+        } = ty.raw_shape()
+        else {
+            panic!("String")
+        };
+        assert!(
+            identity_layer.identity.is_none()
+                && identity_layer.pattern.is_none()
+                && identity_layer.length.is_none()
+        );
+        assert!(member_layer.pattern.is_some());
+    }
+}

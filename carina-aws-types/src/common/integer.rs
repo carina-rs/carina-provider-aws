@@ -15,6 +15,12 @@ pub fn with_int_range(
     else {
         panic!("integer bounds require an Int constructor");
     };
+    let anonymous = identity_layer.identity.is_none();
+    let existing_member_range = if anonymous {
+        carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range)
+    } else {
+        member_layer.range
+    };
     let identity = match identity_layer.validate {
         Some(validate) => carina_core::schema::IntIdentityLayer::with_validator(
             identity_layer
@@ -26,13 +32,17 @@ pub fn with_int_range(
         ),
         None => carina_core::schema::IntIdentityLayer::new(
             identity_layer.identity.cloned(),
-            identity_layer.range,
+            if anonymous {
+                None
+            } else {
+                identity_layer.range
+            },
         ),
     };
     AttributeType::int_member(
         identity,
         carina_core::schema::IntMemberConstraints::new(carina_core::schema::intersect_bounds(
-            member_layer.range,
+            existing_member_range,
             Some((minimum, maximum)),
         )),
     )
@@ -121,9 +131,8 @@ mod tests {
         assert!(matches!(
             narrower.raw_shape(),
             RawShape::Int {
-                identity_layer: carina_core::schema::IntIdentityParts {
+                member_layer: carina_core::schema::IntMemberParts {
                     range: Some((Some(1), Some(100))),
-                    ..
                 },
                 ..
             }
