@@ -1,5 +1,6 @@
 //! Evaluate emitted schemas and compare every enum with docgen's derived types.
 use super::*;
+use std::collections::BTreeSet;
 
 type Aliases = BTreeMap<String, Vec<(String, String)>>;
 
@@ -18,6 +19,35 @@ fn every_generated_enum_has_the_docgen_aliases() {
     resources.extend(resource_defs::logs_resources());
     resources.extend(resource_defs::acm_resources());
     resources.extend(resource_defs::sqs_resources());
+    let mut sources = resource_defs::sts_data_sources();
+    sources.extend(resource_defs::identitystore_data_sources());
+    sources.extend(resource_defs::s3_data_sources());
+    sources.extend(resource_defs::iam_data_sources());
+    let namespaces = resources
+        .iter()
+        .flat_map(|resource| {
+            std::iter::once(resource.service_namespace).chain(
+                resource
+                    .update_ops
+                    .iter()
+                    .filter_map(|operation| operation.fields.cross_service_namespace()),
+            )
+        })
+        .chain(sources.iter().map(|source| source.service_namespace))
+        .collect::<BTreeSet<_>>();
+    for namespace in namespaces {
+        let service = namespace
+            .strip_prefix("com.amazonaws.")
+            .unwrap_or(namespace);
+        let path = models.join(format!("{service}.json"));
+        if !path.is_file() {
+            eprintln!(
+                "Skipping enum alias parity: Smithy model not cached: {}. Run scripts/download-smithy-models.sh to enable this test.",
+                path.display()
+            );
+            return;
+        }
+    }
     let mut expected = Aliases::new();
     for resource in &resources {
         let model = load_model(&models, resource.service_namespace).unwrap();
@@ -29,10 +59,6 @@ fn every_generated_enum_has_the_docgen_aliases() {
             );
         }
     }
-    let mut sources = resource_defs::sts_data_sources();
-    sources.extend(resource_defs::identitystore_data_sources());
-    sources.extend(resource_defs::s3_data_sources());
-    sources.extend(resource_defs::iam_data_sources());
     for source in sources {
         let model = load_model(&models, source.service_namespace).unwrap();
         let mut add = |name: &str, provider: &str, declaration: &DataSourceType| {
