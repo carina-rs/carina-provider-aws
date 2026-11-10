@@ -137,8 +137,10 @@ impl ReferenceResolution {
             Self::AccessDenied(failure) => Err(CoreError::AccessDenied(
                 native_sdk_error(provider_name, failure, KmsErrorKind::ApiError).into(),
             )),
-            Self::Transient(failure) => Err(CoreError::Transient(
-                native_sdk_error(provider_name, failure, KmsErrorKind::ApiError).into(),
+            Self::Transient(failure) => Err(CoreError::InvalidReference(
+                native_sdk_error(provider_name, failure, KmsErrorKind::ApiError)
+                    .with_retryability(Retryability::Transient)
+                    .into(),
             )),
             Self::InvalidReference(failure) => Err(CoreError::InvalidReference(
                 native_sdk_error(provider_name, failure, KmsErrorKind::InvalidInput).into(),
@@ -170,8 +172,10 @@ impl ReferenceResolution {
             Self::AccessDenied(failure) => Err(GuestError::AccessDenied(
                 native_sdk_error(provider_name, failure, KmsErrorKind::ApiError).into(),
             )),
-            Self::Transient(failure) => Err(GuestError::Transient(
-                native_sdk_error(provider_name, failure, KmsErrorKind::ApiError).into(),
+            Self::Transient(failure) => Err(GuestError::InvalidReference(
+                native_sdk_error(provider_name, failure, KmsErrorKind::ApiError)
+                    .with_retryability(Retryability::Transient)
+                    .into(),
             )),
             Self::InvalidReference(failure) => Err(GuestError::InvalidReference(
                 native_sdk_error(provider_name, failure, KmsErrorKind::InvalidInput).into(),
@@ -485,11 +489,12 @@ mod tests {
             assert!(failure.code.is_none());
             assert!(failure.status.is_none());
             assert!(failure.request_id.is_none());
-            let Err(ReferenceError::Transient(error)) =
+            let Err(ReferenceError::InvalidReference(error)) =
                 classify_failure(failure).into_guest("awscc")
             else {
                 panic!("transport failure must be transient");
             };
+            assert_eq!(error.retryability(), Retryability::Transient);
             let error = error.to_wire();
             assert_eq!(error.cause.as_deref(), Some(expected));
         }
@@ -592,15 +597,19 @@ mod tests {
             .unwrap();
             let error = match result {
                 Ok(CoreOutcome::NotFound(error)) => error,
-                Err(
-                    CoreError::AccessDenied(error)
-                    | CoreError::Transient(error)
-                    | CoreError::InvalidReference(error),
-                ) => error.as_ref().clone(),
+                Err(CoreError::AccessDenied(error) | CoreError::InvalidReference(error)) => {
+                    error.as_ref().clone()
+                }
                 Ok(CoreOutcome::Resolved(_)) => panic!("SDK failure must retain its diagnostic"),
             };
-            // The former wire decode set no retry policy, even for ReferenceError::Transient.
-            assert_eq!(error.retryability(), Retryability::Unclassified);
+            assert_eq!(
+                error.retryability(),
+                if code == "ThrottlingException" {
+                    Retryability::Transient
+                } else {
+                    Retryability::Unclassified
+                }
+            );
             let diagnostic = ProviderDiagnostic::new(error);
             assert!(diagnostic.source_is::<DescribeKeyFailure>());
             assert!(!diagnostic.source_is::<SdkError<ErrorMetadata, HttpResponse>>());
@@ -785,11 +794,31 @@ mod tests {
         };
 
         for provider_name in ["aws", "awscc"] {
-            for (code, status, expected) in [
-                ("NotFoundException", 404, "not-found"),
-                ("AccessDeniedException", 403, "denied"),
-                ("ThrottlingException", 429, "transient"),
-                ("InvalidKeyIdException", 400, "invalid"),
+            for (code, status, expected, retryability) in [
+                (
+                    "NotFoundException",
+                    404,
+                    "not-found",
+                    Retryability::Unclassified,
+                ),
+                (
+                    "AccessDeniedException",
+                    403,
+                    "denied",
+                    Retryability::Unclassified,
+                ),
+                (
+                    "ThrottlingException",
+                    429,
+                    "invalid",
+                    Retryability::Transient,
+                ),
+                (
+                    "InvalidKeyIdException",
+                    400,
+                    "invalid",
+                    Retryability::Unclassified,
+                ),
             ] {
                 let fake = client(Err(DescribeKeyFailure {
                     message: "service error: safe AWS failure details".into(),
@@ -814,9 +843,6 @@ mod tests {
                         Err(CoreError::AccessDenied(error)) => Err(CoreError::AccessDenied(
                             error.as_ref().clone().into_host_for_test().into(),
                         )),
-                        Err(CoreError::Transient(error)) => Err(CoreError::Transient(
-                            error.as_ref().clone().into_host_for_test().into(),
-                        )),
                         Err(CoreError::InvalidReference(error)) => {
                             Err(CoreError::InvalidReference(
                                 error.as_ref().clone().into_host_for_test().into(),
@@ -828,11 +854,11 @@ mod tests {
                 let (actual, error) = match &results[0] {
                     Ok(CoreOutcome::NotFound(error)) => ("not-found", error),
                     Err(CoreError::AccessDenied(error)) => ("denied", error.as_ref()),
-                    Err(CoreError::Transient(error)) => ("transient", error.as_ref()),
                     Err(CoreError::InvalidReference(error)) => ("invalid", error.as_ref()),
                     other => panic!("unexpected {other:?}"),
                 };
                 assert_eq!(actual, expected);
+                assert_eq!(error.retryability(), retryability, "{code}");
                 if let Err(reference_error) = &results[0] {
                     let source = reference_error
                         .source()
@@ -845,7 +871,7 @@ mod tests {
                 let wire = error.to_wire();
                 assert_eq!(
                     wire.kind,
-                    if expected == "invalid" {
+                    if expected == "invalid" && retryability == Retryability::Unclassified {
                         ProviderErrorKind::InvalidInput
                     } else {
                         ProviderErrorKind::ApiError
@@ -1108,14 +1134,11 @@ mod tests {
                 ),
             ] {
                 let fake = client(response);
-                let error = match resolve_guest_key_reference(&fake, provider_name, region, raw)
-                    .await
-                {
-                    Err(
-                        ReferenceError::InvalidReference(error) | ReferenceError::Transient(error),
-                    ) => error,
-                    other => panic!("unexpected {other:?}"),
-                };
+                let error =
+                    match resolve_guest_key_reference(&fake, provider_name, region, raw).await {
+                        Err(ReferenceError::InvalidReference(error)) => error,
+                        other => panic!("unexpected {other:?}"),
+                    };
                 let error = error.to_wire();
                 assert_eq!(error.provider_name.as_deref(), Some(provider_name));
             }
@@ -1124,24 +1147,99 @@ mod tests {
 
     #[tokio::test]
     async fn aws_codes_determine_typed_outcomes_and_preserve_metadata() {
-        for (code, status, expected) in [
-            (Some("NotFoundException"), Some(400), "not-found"),
-            (Some("AccessDenied"), Some(403), "denied"),
-            (Some("AccessDeniedException"), Some(400), "denied"),
-            (Some("AccessDeniedFoo"), Some(400), "denied"),
-            (Some("ThrottlingException"), Some(400), "transient"),
-            (Some("Throttling"), Some(400), "transient"),
-            (Some("LimitExceededException"), Some(400), "transient"),
-            (Some("DependencyTimeoutException"), Some(500), "transient"),
-            (Some("KMSInternalException"), Some(500), "transient"),
-            (Some("ServiceUnavailableException"), Some(503), "transient"),
-            (Some("UnrecognizedClientException"), Some(400), "transient"),
-            (Some("ExpiredTokenException"), Some(400), "transient"),
-            (None, None, "transient"),
-            (None, Some(502), "transient"),
-            (Some("InvalidArnException"), Some(400), "invalid"),
-            (Some("InvalidKeyIdException"), Some(400), "invalid"),
-            (Some("ValidationException"), Some(400), "invalid"),
+        for (code, status, expected, retryability) in [
+            (
+                Some("NotFoundException"),
+                Some(400),
+                "not-found",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("AccessDenied"),
+                Some(403),
+                "denied",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("AccessDeniedException"),
+                Some(400),
+                "denied",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("AccessDeniedFoo"),
+                Some(400),
+                "denied",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("ThrottlingException"),
+                Some(400),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("Throttling"),
+                Some(400),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("LimitExceededException"),
+                Some(400),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("DependencyTimeoutException"),
+                Some(500),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("KMSInternalException"),
+                Some(500),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("ServiceUnavailableException"),
+                Some(503),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("UnrecognizedClientException"),
+                Some(400),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (
+                Some("ExpiredTokenException"),
+                Some(400),
+                "invalid",
+                Retryability::Transient,
+            ),
+            (None, None, "invalid", Retryability::Transient),
+            (None, Some(502), "invalid", Retryability::Transient),
+            (
+                Some("InvalidArnException"),
+                Some(400),
+                "invalid",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("InvalidKeyIdException"),
+                Some(400),
+                "invalid",
+                Retryability::Unclassified,
+            ),
+            (
+                Some("ValidationException"),
+                Some(400),
+                "invalid",
+                Retryability::Unclassified,
+            ),
         ] {
             let fake = client(Err(DescribeKeyFailure {
                 message: "service error: AWS failure details".into(),
@@ -1154,11 +1252,11 @@ mod tests {
             let (actual, error) = match result {
                 Ok(ReferenceOutcome::NotFound(e)) => ("not-found", e),
                 Err(ReferenceError::AccessDenied(e)) => ("denied", e),
-                Err(ReferenceError::Transient(e)) => ("transient", e),
                 Err(ReferenceError::InvalidReference(e)) => ("invalid", e),
                 other => panic!("unexpected {other:?}"),
             };
             assert_eq!(actual, expected, "{code:?}");
+            assert_eq!(error.retryability(), retryability, "{code:?}");
             let error = error.to_wire();
             assert_eq!(
                 error.cause.as_deref(),
