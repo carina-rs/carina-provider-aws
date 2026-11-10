@@ -126,24 +126,35 @@ fn validated_int_enum_definition(
     identity: TypeIdentity,
     valid_values: &'static [i64],
 ) -> IdentityDefinition {
-    IdentityDefinition::int(
-        identity,
-        None,
-        Some(legacy_validator(move |value| {
-            if let Value::Concrete(ConcreteValue::Int(value)) = value {
-                if valid_values.contains(value) {
-                    Ok(())
-                } else {
-                    Err(
-                        format!("Value {value} is not valid; allowed values are: {valid_values:?}")
-                            .into(),
-                    )
-                }
-            } else {
-                Err("Expected integer".into())
-            }
-        })),
-    )
+    type Key = (TypeIdentity, &'static [i64]);
+    static DEFINITIONS: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<Key, IdentityDefinition>>,
+    > = std::sync::LazyLock::new(Default::default);
+    DEFINITIONS
+        .lock()
+        .expect("integer enum definitions")
+        .entry((identity.clone(), valid_values))
+        .or_insert_with(|| {
+            IdentityDefinition::int(
+                identity,
+                None,
+                Some(legacy_validator(move |value| {
+                    if let Value::Concrete(ConcreteValue::Int(value)) = value {
+                        if valid_values.contains(value) {
+                            Ok(())
+                        } else {
+                            Err(format!(
+                                "Value {value} is not valid; allowed values are: {valid_values:?}"
+                            )
+                            .into())
+                        }
+                    } else {
+                        Err("Expected integer".into())
+                    }
+                })),
+            )
+        })
+        .clone()
 }
 
 fn ec2_int_enum(identity: TypeIdentity, values: &'static [i64]) -> IdentityDefinition {

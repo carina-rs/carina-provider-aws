@@ -98,29 +98,31 @@ impl IdentityDefinition {
                 "{identity}: core does not enforce structural constraints on open Enum bases; use a String identity"
             ));
         }
-        let base = AttributeType::string_member(
-            carina_core::schema::StringIdentityLayer::new(None, None, None, None),
-            carina_core::schema::StringMemberConstraints::new(pattern, length),
-        );
-        let validator = crate::MemberStringValidator::new(&base).map_err(|e| e.to_string())?;
+        let policy = Self::string(identity.clone(), pattern, length, semantic.clone(), None)
+            .into_attribute_type();
+        let validator = crate::MemberStringValidator::new(&policy).map_err(|e| e.to_string())?;
         if let Some(values) = &values {
             for value in values {
                 if !validator.accepts(value) {
                     return Err(format!(
-                        "{identity}: enum value {value:?} violates the identity pattern/length constraints"
+                        "{identity}: enum value {value:?} violates the identity pattern/length or semantic policy"
                     ));
                 }
-                if let Some(check) = &semantic {
-                    let input: carina_core::resource::Value =
-                        carina_core::resource::Value::Concrete(
-                            carina_core::resource::ConcreteValue::String(value.as_str().into()),
-                        );
-                    check(&input).map_err(|e| {
-                        format!(
-                            "{identity}: enum value {value:?} violates the identity policy: {e}"
-                        )
-                    })?;
-                }
+            }
+        }
+        for (canonical, _) in &aliases {
+            if values
+                .as_ref()
+                .is_some_and(|values| !values.contains(canonical))
+            {
+                return Err(format!(
+                    "{identity}: alias target {canonical:?} is absent from the enum value set"
+                ));
+            }
+            if !validator.accepts(canonical) {
+                return Err(format!(
+                    "{identity}: alias target {canonical:?} violates the identity pattern/length or semantic policy"
+                ));
             }
         }
         // Protocol 27 closed enums transport their exact finite set, not a

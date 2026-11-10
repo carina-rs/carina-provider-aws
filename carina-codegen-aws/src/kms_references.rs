@@ -113,11 +113,7 @@ pub fn member_definition(
     path: &str,
 ) -> Option<(carina_aws_types::IdentityDefinition, &'static str)> {
     match classification(resource, path) {
-        Some(Classification::Reference { arn_only: true }) => Some((
-            carina_aws_types::kms_key_arn_reference_definition(),
-            "carina_aws_types::kms_key_arn_reference_definition()",
-        )),
-        Some(Classification::Reference { arn_only: false }) => Some((
+        Some(Classification::Reference { .. }) => Some((
             carina_aws_types::AwsType::KmsKeyReference.definition(),
             "carina_aws_types::AwsType::KmsKeyReference.definition()",
         )),

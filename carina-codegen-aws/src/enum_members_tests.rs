@@ -21,7 +21,7 @@ fn text(source: &str) -> (SmithyModel, carina_smithy::ShapeRef) {
     )
 }
 
-fn evaluate(code: &str) {
+fn evaluate(code: &str, expected_aliases: &[(String, String)]) {
     use std::process::Command;
     let deps = std::env::current_exe()
         .unwrap()
@@ -35,8 +35,9 @@ fn evaluate(code: &str) {
     let executable = temp.path().join("emitted");
     std::fs::write(&source,format!(r#"use carina_core::schema::{{AttributeType,RawShape}};
 fn main() {{let ty={code};
-let RawShape::Enum {{base,values:Some(values),..}}=ty.raw_shape() else {{panic!("closed enum")}};
+let RawShape::Enum {{base,values:Some(values),dsl_aliases,..}}=ty.raw_shape() else {{panic!("closed enum")}};
 assert!(matches!(base.raw_shape(),RawShape::String {{..}}));assert_eq!(values,["A"]);
+assert_eq!(dsl_aliases.iter().map(|(a,b)|(a.as_str(),b.as_str())).collect::<Vec<_>>(), {expected_aliases:?});
 carina_core::schema::ValidatedConfigSchema::validate(std::collections::BTreeMap::from([("value".into(),ty)])).unwrap();
 }}"#)).unwrap();
     let output = Command::new("rustc")
@@ -83,7 +84,7 @@ fn empty_closed_identity_intersection_is_a_codegen_error() {
 fn local_enum_on_an_enum_compiles_and_evaluates() {
     let base=ValueTypeOverride {
         type_code:r#"AttributeType::enum_(carina_core::schema::enum_identity("Old", Some("aws.test")),Some(vec!["A".into(),"B".into()]),vec![],None,None)"#.into(),
-        documentation: None, validated_input_patterns: Vec::new(),
+        documentation: None, validated_input_constraints: Vec::new(),
         attribute_type:AttributeType::enum_(carina_core::schema::enum_identity("Old",Some("aws.test")),Some(vec!["A".into(),"B".into()]),vec![],None,None),
     };
     let result = string_members::decorate(
@@ -95,7 +96,89 @@ fn local_enum_on_an_enum_compiles_and_evaluates() {
         },
     )
     .unwrap();
-    evaluate(&result.type_code);
+    let RawShape::Enum { dsl_aliases, .. } = result.attribute_type.raw_shape() else {
+        panic!("Enum")
+    };
+    evaluate(&result.type_code, dsl_aliases);
+}
+
+#[test]
+fn modeled_enum_values_must_not_disappear_during_derivation() {
+    let (model, mut member) = text("^A$");
+    member.target = "test#Mode".into();
+    member
+        .traits
+        .insert("smithy.api#pattern".into(), serde_json::json!("^A$"));
+    for named in [false, true] {
+        let mut declarations = TypeDeclarations::default();
+        if named {
+            declarations
+                .members
+                .insert("Mode", TypeOverride::Identity(AwsType::DnsRecordType));
+            member.traits.clear();
+        }
+        let error = enum_member_value(
+            &model,
+            "test.StrictEnum",
+            &member,
+            "Mode",
+            "mode",
+            "aws.test",
+            &declarations,
+            &HashMap::new(),
+            None,
+        )
+        .err()
+        .expect("B must cause an error rather than disappear");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("test.StrictEnum.mode") && message.contains('B'),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn enum_decoration_cannot_publish_a_string_identity_as_an_enum() {
+    let base = ValueTypeOverride {
+        type_code: "AttributeType::string()".into(),
+        attribute_type: AttributeType::enum_(
+            TypeIdentity::bare("Enum"),
+            Some(vec!["A".into()]),
+            vec![],
+            None,
+            None,
+        ),
+        documentation: None,
+        validated_input_constraints: vec![],
+    };
+    assert!(string_members::decorate(base, &TypeOverride::Identity(AwsType::IamRoleName)).is_err());
+}
+
+#[test]
+fn allowed_values_check_the_complete_enum_policy() {
+    let model = carina_smithy::parse(r#"{"smithy":"2.0","shapes":{}}"#).unwrap();
+    let member = carina_smithy::ShapeRef {
+        target: "smithy.api#String".into(),
+        traits: Default::default(),
+    };
+    let error = string_members::derive(
+        &model,
+        &member,
+        "test.Values",
+        "region",
+        &[TypeOverride::NamedValues {
+            identity: AwsType::Region,
+            values: &["not-a-region"],
+        }],
+    )
+    .err()
+    .expect("the named Enum's semantic policy must reject an invalid override value");
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("test.Values.region") && message.contains("not-a-region"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -316,7 +399,7 @@ fn open_enum_send_classification_is_generic() {
     let value = ValueTypeOverride {
         type_code: "arbitrary_open_enum_expression()".into(),
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
         attribute_type: AttributeType::enum_(
             carina_core::schema::enum_identity("FutureIdentity", Some("aws.test")),
             None,

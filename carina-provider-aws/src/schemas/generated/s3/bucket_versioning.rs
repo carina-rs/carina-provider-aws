@@ -33,6 +33,7 @@ pub fn s3_bucket_versioning_config() -> AwsSchemaConfig {
                             Some("aws.s3.BucketVersioning"),
                         ),
                         &["Enabled", "Suspended"],
+                        &[("Enabled", "enabled"), ("Suspended", "suspended")],
                     ),
                 )
                 .with_description("Versioning state of the bucket: Enabled or Suspended.")

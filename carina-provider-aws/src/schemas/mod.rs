@@ -271,6 +271,69 @@ mod tests {
     }
 
     #[test]
+    fn every_reference_identity_has_one_definition() {
+        type Definitions = std::collections::BTreeMap<
+            String,
+            (
+                String,
+                Option<carina_core::schema::PatternSpec>,
+                Option<(Option<u64>, Option<u64>)>,
+            ),
+        >;
+        fn walk(ty: &AttributeType, path: &str, seen: &mut Definitions) {
+            match ty.raw_shape() {
+                RawShape::Reference {
+                    identity,
+                    pattern,
+                    length,
+                } => {
+                    let id = identity.to_string();
+                    if let Some((first, grammar, bounds)) = seen.get(&id) {
+                        assert_eq!(
+                            (pattern, length),
+                            (grammar.as_ref(), *bounds),
+                            "{id}: {first} differs from {path}"
+                        );
+                    } else {
+                        seen.insert(id, (path.into(), pattern.cloned(), length));
+                    }
+                }
+                RawShape::List { element_type, .. } => walk(element_type, path, seen),
+                RawShape::Map { key, value, .. } => {
+                    walk(key, path, seen);
+                    walk(value, path, seen)
+                }
+                RawShape::Struct { fields, .. } => {
+                    for field in fields {
+                        walk(
+                            field.parts().field_type,
+                            &format!("{path}.{}", field.name()),
+                            seen,
+                        )
+                    }
+                }
+                RawShape::Union(members) => {
+                    for member in members {
+                        walk(member, path, seen)
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut seen = std::collections::BTreeMap::new();
+        for config in super::generated::configs() {
+            for (name, attr) in config.schema.attributes() {
+                walk(
+                    attr.attr_type(),
+                    &format!("{}.{}", config.schema.resource_type(), name),
+                    &mut seen,
+                );
+            }
+        }
+        assert!(!seen.is_empty());
+    }
+
+    #[test]
     fn final_registry_classifies_every_kms_string_including_handwritten_structs() {
         use carina_codegen_aws::kms_references::{
             CLASSIFICATIONS, Classification, NotReference, PathSegment, classify_string,
@@ -318,11 +381,10 @@ mod tests {
                                 schema.resource_type(),
                                 path
                             );
-                            let expected = if arn_only {
-                                carina_aws_types::kms_key_arn_pattern()
-                            } else {
-                                carina_aws_types::kms_key_reference_pattern()
-                            };
+                            let expected = carina_aws_types::kms_key_reference_pattern();
+                            if arn_only {
+                                assert!(schema.input_rules().iter().any(|rule|rule.path().as_str()==path && matches!(rule.predicate(),carina_core::schema::InputPredicate::Matches(p) if p.as_str()==carina_aws_types::kms_key_arn_pattern())),"{}.{} must keep its ARN-only input rule",schema.resource_type(),path);
+                            }
                             assert_eq!(
                                 pattern.map(carina_core::schema::PatternSpec::as_str),
                                 Some(expected),

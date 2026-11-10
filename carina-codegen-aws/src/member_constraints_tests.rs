@@ -373,10 +373,13 @@ fn conflicting_patterns_keep_smithy_and_collect_an_input_rule() {
     .unwrap();
     assert!(validate_string(value.attribute_type, "model"));
     assert_eq!(
-        declarations.input_patterns.borrow()
+        declarations.input_constraints.borrow()
             [&carina_core::schema::InputPath::new("label").unwrap()]
             .iter()
-            .map(|pattern| pattern.as_ref().clone())
+            .map(|constraint| match constraint {
+                SlotConstraint::Pattern(p) => p.as_ref().clone(),
+                _ => panic!("pattern"),
+            })
             .collect::<Vec<_>>(),
         vec![extra]
     );

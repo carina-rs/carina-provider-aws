@@ -128,19 +128,13 @@ fn identity_layer_is_the_single_structural_owner() {
     }
 }
 #[test]
-fn enum_values_intersect_the_named_callback() {
-    let ty = try_with_member_identity(closed(&["okay", "bad"]), identity_with_callback()).unwrap();
-    let RawShape::Enum {
-        values: Some(values),
-        ..
-    } = ty.raw_shape()
-    else {
-        panic!("closed enum")
-    };
-    assert_eq!(values, ["okay"]);
+fn string_identity_keeps_its_semantic_callback() {
+    let ty = try_with_member_identity(AttributeType::string(), identity_with_callback()).unwrap();
+    assert!(diagnostics(ty.clone(), "okay").is_empty());
+    assert_eq!(diagnostics(ty, "bad").len(), 1);
 }
 #[test]
-fn empty_callback_intersection_is_an_error() {
+fn enum_cannot_borrow_a_string_identity_callback() {
     assert!(try_with_member_identity(closed(&["bad"]), identity_with_callback()).is_err());
 }
 
@@ -378,14 +372,10 @@ fn finite_values_encode_the_checked_policy_without_member_bases() {
 }
 
 #[test]
-fn named_string_finite_intersection_transports() {
-    let source = AttributeType::enum_with_base(
-        carina_core::schema::enum_identity("Source", Some("test")),
-        AttributeType::string(),
-        Some(vec!["a".into(), "aa".into()]),
-        vec![],
-        None,
-        None,
+fn named_string_member_constraints_transport_as_a_string() {
+    let source = AttributeType::string_member(
+        StringIdentityLayer::new(None, None, None, None),
+        StringMemberConstraints::new(None, Some((Some(1), Some(2)))),
     );
     let named = carina_aws_types::IdentityDefinition::string(
         carina_core::schema::enum_identity("Letters", Some("test")),
@@ -397,6 +387,6 @@ fn named_string_finite_intersection_transports() {
     let schema = ResourceSchema::new("test.Finite")
         .attribute(AttributeSchema::optional("value", with_member_identity(source, named)).build())
         .validate()
-        .expect("a checked finite set needs no constrained Enum base");
+        .expect("a named String keeps its member layer on the wire");
     carina_core::protocol_convert::resource_schema_to_protocol(&schema).unwrap();
 }

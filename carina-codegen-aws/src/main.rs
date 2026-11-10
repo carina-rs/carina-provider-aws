@@ -40,6 +40,8 @@ use carina_codegen_aws::overrides::{
 #[cfg(test)]
 mod data_source_types_tests;
 #[cfg(test)]
+mod enum_emission_tests;
+#[cfg(test)]
 mod enum_members_tests;
 #[cfg(test)]
 mod input_patterns_tests;
@@ -150,11 +152,10 @@ struct TypeDeclarations<'a> {
     to_dsl_overrides: HashMap<&'a str, &'a str>,
     representations: HashMap<&'a str, Representation>,
     // Derived input constraints, collected by the same seam as member types.
-    input_patterns: RefCell<InputPatterns>,
+    input_constraints: RefCell<InputConstraints>,
 }
 
-type InputPatterns =
-    BTreeMap<carina_core::schema::InputPath, Vec<carina_core::schema::CompiledPattern>>;
+type InputConstraints = BTreeMap<carina_core::schema::InputPath, Vec<SlotConstraint>>;
 impl<'a> TypeDeclarations<'a> {
     fn from_resource(resource: &'a ResourceDef) -> Self {
         let mut enum_aliases: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
@@ -173,20 +174,20 @@ impl<'a> TypeDeclarations<'a> {
             enum_aliases,
             to_dsl_overrides: resource.to_dsl_overrides.iter().copied().collect(),
             representations: resource.representations.iter().copied().collect(),
-            input_patterns: RefCell::default(),
+            input_constraints: RefCell::default(),
         }
     }
     fn get(&self, name: &str) -> Option<&TypeOverride> {
         self.members.get(name)
     }
-    fn add_input_pattern(&self, validated: ValidatedInputPattern) {
-        let mut patterns = self.input_patterns.borrow_mut();
-        let patterns = patterns.entry(validated.path).or_default();
-        if !patterns
+    fn add_input_constraint(&self, validated: ValidatedInputConstraint) {
+        let mut patterns = self.input_constraints.borrow_mut();
+        let constraints = patterns.entry(validated.path).or_default();
+        if !constraints
             .iter()
-            .any(|pattern| pattern.as_ref() == validated.pattern.as_ref())
+            .any(|p| p.predicate() == validated.constraint.predicate())
         {
-            patterns.push(validated.pattern);
+            constraints.push(validated.constraint);
         }
     }
 }
@@ -209,27 +210,62 @@ fn member_override(
         .cloned()
 }
 
-struct ValidatedInputPattern {
-    path: carina_core::schema::InputPath,
-    pattern: carina_core::schema::CompiledPattern,
+enum SlotConstraint {
+    Pattern(carina_core::schema::CompiledPattern),
+    Length { min: Option<u64>, max: Option<u64> },
 }
-impl ValidatedInputPattern {
-    fn new(resource: &str, path: &str, pattern: PatternSpec) -> Result<Self> {
-        let path = carina_core::schema::InputPath::new(path.to_owned()).with_context(|| {
-            format!(
-                "{resource}.{path}: pattern tightening requires an addressable InputRule target"
-            )
-        })?;
+impl SlotConstraint {
+    fn predicate(&self) -> carina_core::schema::InputPredicate<PatternSpec> {
+        use carina_core::schema::InputPredicate;
+        match self {
+            Self::Pattern(pattern) => InputPredicate::Matches(pattern.as_ref().clone()),
+            Self::Length { min, max } => InputPredicate::Length {
+                min: *min,
+                max: *max,
+            },
+        }
+    }
+}
+struct ValidatedInputConstraint {
+    path: carina_core::schema::InputPath,
+    constraint: SlotConstraint,
+}
+impl ValidatedInputConstraint {
+    fn path(resource: &str, path: &str) -> Result<carina_core::schema::InputPath> {
+        carina_core::schema::InputPath::new(path.to_owned()).with_context(|| {
+            format!("{resource}.{path}: slot constraint requires an addressable InputRule target")
+        })
+    }
+    fn pattern(resource: &str, path: &str, pattern: PatternSpec) -> Result<Self> {
+        let path = Self::path(resource, path)?;
         let pattern = carina_core::schema::CompiledPattern::try_new(&pattern)
             .with_context(|| format!("{resource}.{path}: invalid InputRule pattern"))?;
-        Ok(Self { path, pattern })
+        Ok(Self {
+            path,
+            constraint: SlotConstraint::Pattern(pattern),
+        })
+    }
+    fn length(resource: &str, path: &str, min: Option<u64>, max: Option<u64>) -> Result<Self> {
+        let path = Self::path(resource, path)?;
+        anyhow::ensure!(
+            min.is_some() || max.is_some(),
+            "{resource}.{path}: empty InputRule length"
+        );
+        anyhow::ensure!(
+            !matches!((min,max),(Some(min),Some(max)) if min>max),
+            "{resource}.{path}: empty length intersection"
+        );
+        Ok(Self {
+            path,
+            constraint: SlotConstraint::Length { min, max },
+        })
     }
 }
 
 struct ValueTypeOverride {
     type_code: String,
     documentation: Option<String>,
-    validated_input_patterns: Vec<ValidatedInputPattern>,
+    validated_input_constraints: Vec<ValidatedInputConstraint>,
     attribute_type: AttributeType,
 }
 impl ValueTypeOverride {
@@ -238,7 +274,7 @@ impl ValueTypeOverride {
             type_code: code.into(),
             attribute_type: attribute_type_from_code(code)?,
             documentation: None,
-            validated_input_patterns: Vec::new(),
+            validated_input_constraints: Vec::new(),
         })
     }
 }
@@ -415,7 +451,7 @@ fn string_refinement(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Valu
     ValueTypeOverride {
         type_code,
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
         attribute_type: AttributeType::string_member(
             carina_core::schema::StringIdentityLayer::new(None, None, None, None),
             carina_core::schema::StringMemberConstraints::new(pattern.cloned(), length),
@@ -474,7 +510,7 @@ fn synthetic_extra_attribute_type(
         type_code: representation.code().into(),
         attribute_type: attribute_type_from_code(representation.code())?,
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
     };
     if let Some(rule) = resource_type_overrides()
         .get(&(resource, field_name.to_snake_case().as_str()))
@@ -554,7 +590,7 @@ fn string_list_value_override(
             ListElements::AllowDuplicates,
         ),
         documentation: element.documentation,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
     }))
 }
 /// Information about a detected enum type
@@ -1406,18 +1442,18 @@ struct CollectedResourceAttributes {
     attrs: Vec<AttrInfo>,
     all_enums: BTreeMap<String, EnumInfo>,
     description: Option<Description>,
-    input_patterns: InputPatterns,
+    input_constraints: InputConstraints,
     input_rules: Vec<carina_core::schema::InputRule>,
 }
 
 /// InputPath permits only a writable attribute followed by fixed struct fields.
 /// Collection positions fail earlier, at string derivation, with the full path.
-fn bind_input_patterns(
+fn bind_input_constraints(
     resource: &str,
     attrs: &[AttrInfo],
-    patterns: &InputPatterns,
+    patterns: &InputConstraints,
 ) -> Result<Vec<carina_core::schema::InputRule>> {
-    use carina_core::schema::{InputPredicate, InputRule, InputRuleCode, InputRuleScope};
+    use carina_core::schema::{InputRule, InputRuleCode, InputRuleScope};
     let mut rules = Vec::new();
     for (input_path, patterns) in patterns {
         let path = input_path.as_str();
@@ -1473,8 +1509,11 @@ fn bind_input_patterns(
             rules.push(InputRule::value(
                 scope,
                 input_path.clone(),
-                InputRuleCode::new(format!("aws.additional_pattern.pattern_{index}"))?,
-                InputPredicate::Matches(pattern.as_ref().clone()),
+                InputRuleCode::new(match pattern {
+                    SlotConstraint::Pattern(_) => format!("aws.additional_pattern.pattern_{index}"),
+                    SlotConstraint::Length { .. } => format!("aws.member_length.length_{index}"),
+                })?,
+                pattern.predicate(),
             ));
         }
     }
@@ -2176,7 +2215,7 @@ fn collect_resource_attributes_unvalidated(
         attrs,
         all_enums,
         description,
-        input_patterns: type_overrides.input_patterns.into_inner(),
+        input_constraints: type_overrides.input_constraints.into_inner(),
         input_rules: res.input_rules.clone(),
     })
 }
@@ -2188,10 +2227,10 @@ fn collect_resource_attributes_with_read_dispositions(
 ) -> Result<CollectedResourceAttributes> {
     let mut collected = collect_resource_attributes_unvalidated(res, model, dispositions)?;
     apply_read_contract(res, model, &mut collected.attrs, dispositions)?;
-    collected.input_rules.extend(bind_input_patterns(
+    collected.input_rules.extend(bind_input_constraints(
         res.name,
         &collected.attrs,
-        &collected.input_patterns,
+        &collected.input_constraints,
     )?);
     collected.all_enums.retain(|path, _| {
         let root = path
@@ -3070,7 +3109,6 @@ fn attribute_type_from_code(code: &str) -> Result<AttributeType> {
         bucket_event_bridge_configuration,
         bucket_target_object_key_format,
         identitystore_user_name,
-        kms_key_arn_reference,
         nat_gateway_availability_zone_addresses,
         s3_object_lock_enabled,
         s3_versioning_status,
@@ -3172,34 +3210,31 @@ fn member_string_value(
     .or_else(|| infer_string_type(field));
     let rules = rule.into_iter().collect::<Vec<_>>();
     let mut value = string_members::derive(model, member, resource, path, &rules)?;
-    for pattern in std::mem::take(&mut value.validated_input_patterns) {
-        declarations.add_input_pattern(pattern);
+    for pattern in std::mem::take(&mut value.validated_input_constraints) {
+        declarations.add_input_constraint(pattern);
     }
     if let Some((reference, code)) = kms_references::member_definition(resource, path) {
-        if let (
-            RawShape::String {
-                identity_layer,
-                member_layer,
-            },
-            RawShape::Reference {
-                pattern: Some(own), ..
-            },
-        ) = (
-            value.attribute_type.raw_shape(),
-            reference.as_attribute_type().raw_shape(),
-        ) && identity_layer.identity.is_none()
-            && let Some(source) = member_layer.pattern.or(identity_layer.pattern)
-            && source != own
-        {
-            // Reference grammar always stays on its type. The additional
-            // Smithy policy travels with the derived member as a validated rule.
-            let extra = ValidatedInputPattern::new(resource, path, source.clone())?;
-            let length = string_members::intersect(identity_layer.length, member_layer.length)?;
-            let documentation = value.documentation.take();
-            value = string_refinement(None, length);
-            value.documentation = documentation;
-            declarations.add_input_pattern(extra);
-        }
+        value = member_reference_value(value, resource, path, declarations, reference, code)?;
+    }
+    Ok(value)
+}
+
+fn member_reference_value(
+    mut value: ValueTypeOverride,
+    resource: &str,
+    path: &str,
+    declarations: &TypeDeclarations<'_>,
+    reference: carina_aws_types::IdentityDefinition,
+    code: &str,
+) -> Result<ValueTypeOverride> {
+    let RawShape::String {
+        identity_layer: i,
+        member_layer: m,
+    } = value.attribute_type.raw_shape()
+    else {
+        anyhow::bail!("{resource}.{path}: reference decoration requires a String carrier");
+    };
+    if i.identity.is_some() {
         value.attribute_type =
             carina_aws_types::try_with_member_reference(value.attribute_type, reference)
                 .with_context(|| format!("{resource}.{path}"))?;
@@ -3207,7 +3242,46 @@ fn member_string_value(
             "carina_aws_types::with_member_reference({}, {code})",
             value.type_code
         );
+        return Ok(value);
     }
+    for pattern in [i.pattern, m.pattern].into_iter().flatten() {
+        declarations.add_input_constraint(ValidatedInputConstraint::pattern(
+            resource,
+            path,
+            pattern.clone(),
+        )?);
+    }
+    let length = string_members::intersect(i.length, m.length)
+        .with_context(|| format!("{resource}.{path}"))?;
+    let RawShape::Reference { length: own, .. } = reference.as_attribute_type().raw_shape() else {
+        anyhow::bail!("{resource}.{path}: reference definition required");
+    };
+    // Check satisfiability without donating slot bounds to the identity.
+    string_members::intersect(length, own).with_context(|| format!("{resource}.{path}"))?;
+    if let Some((min, max)) = length {
+        declarations
+            .add_input_constraint(ValidatedInputConstraint::length(resource, path, min, max)?);
+    }
+    if matches!(
+        kms_references::classification(resource, path),
+        Some(kms_references::Classification::Reference { arn_only: true })
+    ) {
+        declarations.add_input_constraint(ValidatedInputConstraint::pattern(
+            resource,
+            path,
+            PatternSpec::new(carina_aws_types::kms_key_arn_pattern(), PatternMatch::Full),
+        )?);
+    }
+    let documentation = value.documentation.take();
+    value = string_refinement(None, None);
+    value.documentation = documentation;
+    value.attribute_type =
+        carina_aws_types::try_with_member_reference(value.attribute_type, reference)
+            .with_context(|| format!("{resource}.{path}"))?;
+    value.type_code = format!(
+        "carina_aws_types::with_member_reference({}, {code})",
+        value.type_code
+    );
     Ok(value)
 }
 
@@ -3233,7 +3307,7 @@ fn member_integer_value(
             carina_core::schema::IntMemberConstraints::new(range),
         ),
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
     };
     if let Some(rule) = member_override(
         resource,
@@ -3299,8 +3373,8 @@ fn enum_member_value(
         .cloned()
         .collect::<Vec<_>>();
     let mut base = string_members::derive(model, member, resource, path, &tightenings)?;
-    for pattern in std::mem::take(&mut base.validated_input_patterns) {
-        declarations.add_input_pattern(pattern);
+    for pattern in std::mem::take(&mut base.validated_input_constraints) {
+        declarations.add_input_constraint(pattern);
     }
     let mut identity_override = enum_identity_override(resource, parent, field);
     if let Some(
@@ -3342,30 +3416,29 @@ fn enum_member_value(
         }
         _ => {}
     }
-    if let Some(row) = identity_override
-        && let RawShape::Enum {
-            values: Some(named_values),
-            ..
-        } = row.attribute_type().raw_shape()
-    {
-        if let Some(TypeOverride::NamedValues {
-            values: allowed, ..
-        }) = &rule
-        {
-            for value in *allowed {
-                anyhow::ensure!(
-                    named_values.iter().any(|named| named == value),
-                    "{resource}.{path}: override value {value:?} is absent from the named identity's value set"
-                );
-            }
-        }
-        values.retain(|value| named_values.contains(value));
+    // A modeled alternative is authoritative: no implicit retain/filter may
+    // erase it merely because a decoration disagrees with its source model.
+    let source = carina_aws_types::MemberStringValidator::new(&base.attribute_type)?;
+    for value in &values {
+        anyhow::ensure!(
+            source.accepts(value),
+            "{resource}.{path}: enum value {value:?} violates the derived Smithy constraints"
+        );
     }
-    // A finite closed enum can express the exact intersection without a
-    // constrained base (which protocol v24 cannot transport).
-    let validator = carina_aws_types::MemberStringValidator::new(&base.attribute_type)?;
-    values.retain(|value| validator.accepts(value));
-    drop(validator);
+    if let Some(row) = identity_override {
+        let definition = row.attribute_type();
+        anyhow::ensure!(
+            matches!(definition.raw_shape(), RawShape::Enum { .. }),
+            "{resource}.{path}: identity {row:?} is not an Enum definition"
+        );
+        let named = carina_aws_types::MemberStringValidator::new(&definition)?;
+        for value in &values {
+            anyhow::ensure!(
+                named.accepts(value),
+                "{resource}.{path}: enum value {value:?} is absent from or rejected by identity {row:?}"
+            );
+        }
+    }
     anyhow::ensure!(
         !values.is_empty(),
         "{resource}.{path}: empty enum intersection"
@@ -3393,12 +3466,19 @@ fn enum_member_value(
         );
     }
     let aliases = build_dsl_aliases(&values, Some(&alias_definitions));
-    let mut attribute_type = AttributeType::enum_(identity, Some(values), aliases, None, None);
-    if let Some(named) = &named {
-        attribute_type = carina_aws_types::try_with_member_identity(attribute_type, named.clone())
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("{resource}.{path}"))?;
-    }
+    let attribute_type = if let Some(named) = &named {
+        carina_aws_types::try_with_named_enum_values(
+            named.clone(),
+            &values.iter().map(String::as_str).collect::<Vec<_>>(),
+            &aliases
+                .iter()
+                .map(|(api, dsl)| (api.as_str(), dsl.as_str()))
+                .collect::<Vec<_>>(),
+        )
+        .with_context(|| format!("{resource}.{path}"))?
+    } else {
+        AttributeType::enum_(identity, Some(values), aliases, None, None)
+    };
     let RawShape::Enum {
         identity: actual_identity,
         values: Some(values),
@@ -3428,8 +3508,13 @@ fn enum_member_value(
         "AttributeType::enum_({identity_code}, Some(vec![{values_code}]), vec![{aliases_code}], None, None)"
     );
     let code = if let Some(row) = identity_override {
+        let values = values.iter().map(String::as_str).collect::<Vec<_>>();
+        let aliases = dsl_aliases
+            .iter()
+            .map(|(api, dsl)| (api.as_str(), dsl.as_str()))
+            .collect::<Vec<_>>();
         format!(
-            "carina_aws_types::with_member_identity({code}, carina_aws_types::AwsType::{row:?}.definition())"
+            "carina_aws_types::with_named_enum_values(carina_aws_types::AwsType::{row:?}.definition(), &{values:?}, &{aliases:?})"
         )
     } else {
         code
@@ -3438,7 +3523,7 @@ fn enum_member_value(
         type_code: code,
         attribute_type,
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
     };
     Ok(Some((value, info)))
 }
@@ -3538,7 +3623,7 @@ fn resolve_member_value(
                                 ListElements::AllowDuplicates,
                             ),
                             documentation: None,
-                            validated_input_patterns: Vec::new(),
+                            validated_input_constraints: Vec::new(),
                         },
                         None,
                     ));
@@ -3658,7 +3743,7 @@ fn resolve_type_shape(
                     ListElements::AllowDuplicates,
                 ),
                 documentation: None,
-                validated_input_patterns: Vec::new(),
+                validated_input_constraints: Vec::new(),
             }
         }
         Some(ShapeKind::Map) => {
@@ -3680,7 +3765,7 @@ fn resolve_type_shape(
                     length,
                 ),
                 documentation: None,
-                validated_input_patterns: Vec::new(),
+                validated_input_constraints: Vec::new(),
             }
         }
         Some(ShapeKind::Structure) => {
@@ -3697,7 +3782,7 @@ fn resolve_type_shape(
                     type_code: tags.code(),
                     attribute_type: tags.attribute_type(),
                     documentation: None,
-                    validated_input_patterns: Vec::new(),
+                    validated_input_constraints: Vec::new(),
                 }
             } else if name == "AttributeBooleanValue" {
                 ValueTypeOverride::from_constructor("AttributeType::bool()")?
@@ -3865,7 +3950,7 @@ fn generate_struct_value(
             field_groups.to_vec(),
         ),
         documentation: None,
-        validated_input_patterns: Vec::new(),
+        validated_input_constraints: Vec::new(),
     })
 }
 
@@ -7165,13 +7250,15 @@ fn generate_markdown_resource(
     // Use the Rust path's mutability classification and rule binding too.
     // Avoid a second traversal for pages without pattern tightenings (including
     // docs-only recursive shape fixtures).
-    if !type_overrides.input_patterns.borrow().is_empty() {
+    if !type_overrides.input_constraints.borrow().is_empty() {
         use carina_core::schema::{InputPredicate, InputRuleScope};
         let collected = collect_resource_attributes(res, model)?;
         page.heading(Heading::plain(2, "Additional Input Constraints"))?;
         let rows = collected.input_rules.iter().filter_map(|rule| {
-            let InputPredicate::Matches(pattern) = rule.predicate() else {
-                return None;
+            let (pattern, length) = match rule.predicate() {
+                InputPredicate::Matches(pattern) => (Some(pattern), None),
+                InputPredicate::Length { min, max } => (None, Some((*min, *max))),
+                _ => return None,
             };
             let scope = match rule.scope() {
                 InputRuleScope::CreateOnly => "Create only",
@@ -7182,8 +7269,8 @@ fn generate_markdown_resource(
                 TableCell::text(scope),
                 scalar_display(
                     ScalarDoc::String {
-                        pattern: Some(pattern),
-                        length: None,
+                        pattern,
+                        length,
                         validate: false,
                         to_dsl: None,
                     },
@@ -7606,7 +7693,7 @@ fn data_source_type(
                 ListElements::AllowDuplicates,
             ),
             documentation: None,
-            validated_input_patterns: Vec::new(),
+            validated_input_constraints: Vec::new(),
         });
     }
     if source.representation == Representation::IdentityStoreName
@@ -7647,7 +7734,7 @@ fn data_source_type(
             ),
             attribute_type: AttributeType::struct_("IdentityStoreUserName", values),
             documentation: None,
-            validated_input_patterns: Vec::new(),
+            validated_input_constraints: Vec::new(),
         });
     }
     if source.representation != Representation::String {
@@ -7655,7 +7742,7 @@ fn data_source_type(
             type_code: source.representation.code().into(),
             attribute_type: attribute_type_from_code(source.representation.code())?,
             documentation: None,
-            validated_input_patterns: Vec::new(),
+            validated_input_constraints: Vec::new(),
         };
         return match &source.decoration {
             Some(rule) => {
@@ -7682,7 +7769,7 @@ fn data_source_type(
         source.decoration.as_ref(),
     )?;
     anyhow::ensure!(
-        declarations.input_patterns.borrow().is_empty(),
+        declarations.input_constraints.borrow().is_empty(),
         "{resource}.{path}: pattern tightening cannot attach an InputRule to a data-source attribute"
     );
     Ok(value)
@@ -8684,9 +8771,7 @@ fn type_code_to_display(type_code: &str) -> String {
         "carina_aws_types::sqs_queue_arn()" => "SqsQueueArn".to_string(),
         s if s.contains("route53_hosted_zone_id") => "Route53HostedZoneId".to_string(),
         "super::kms_key_arn()" | "super::super::kms::key::arn()" => "KmsKeyArn".to_string(),
-        "carina_aws_types::kms_key_reference()" | "carina_aws_types::kms_key_arn_reference()" => {
-            "KmsKeyReference".to_string()
-        }
+        "carina_aws_types::kms_key_reference()" => "KmsKeyReference".to_string(),
         s if s.contains("vpc_id") => "VpcId".to_string(),
         s if s.contains("subnet_id") => "SubnetId".to_string(),
         s if s.contains("security_group_rule_id") => "SecurityGroupRuleId".to_string(),
@@ -13717,18 +13802,18 @@ mod tests {
             None,
         );
         let error =
-            bind_input_patterns("test.InputPattern", &[attr.clone()], &patterns).unwrap_err();
+            bind_input_constraints("test.InputPattern", &[attr.clone()], &patterns).unwrap_err();
         assert!(error.to_string().contains("test.InputPattern.label"));
         assert!(error.to_string().contains("provider-populated"));
         attr.is_read_only = false;
         assert_eq!(
-            bind_input_patterns("test.InputPattern", &[attr.clone()], &patterns).unwrap()[0]
+            bind_input_constraints("test.InputPattern", &[attr.clone()], &patterns).unwrap()[0]
                 .scope(),
             InputRuleScope::EveryWrite
         );
         attr.is_create_only = true;
         assert_eq!(
-            bind_input_patterns("test.InputPattern", &[attr], &patterns).unwrap()[0].scope(),
+            bind_input_constraints("test.InputPattern", &[attr], &patterns).unwrap()[0].scope(),
             InputRuleScope::CreateOnly
         );
     }
@@ -13766,14 +13851,14 @@ mod tests {
         .map(|(value, _)| value)
     }
 
-    pub(super) fn pattern_fixture(path: &str, patterns: Vec<PatternSpec>) -> InputPatterns {
+    pub(super) fn pattern_fixture(path: &str, patterns: Vec<PatternSpec>) -> InputConstraints {
         let declarations = TypeDeclarations::default();
         for pattern in patterns {
-            declarations.add_input_pattern(
-                ValidatedInputPattern::new("test.Fixture", path, pattern).unwrap(),
+            declarations.add_input_constraint(
+                ValidatedInputConstraint::pattern("test.Fixture", path, pattern).unwrap(),
             );
         }
-        declarations.input_patterns.into_inner()
+        declarations.input_constraints.into_inner()
     }
 
     pub(super) fn test_attr(
@@ -15429,22 +15514,18 @@ mod tests {
 
         assert_eq!(
             generated
-                .matches("carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity()")
+                .matches("carina_aws_types::AwsType::AcmCertificateResourceRecordType.definition()")
                 .count(),
             2,
             "both projections of ACM's ResourceRecord shape need its CNAME-only identity: {generated}"
         );
         assert_eq!(
-            generated
-                .matches("Some(vec![\"CNAME\".to_string()])")
-                .count(),
+            generated.matches(", &[\"CNAME\"],").count(),
             2,
             "identity override must retain ACM's own CNAME-only model values: {generated}"
         );
         assert_eq!(
-            generated
-                .matches("vec![(\"CNAME\".to_string(), \"cname\".to_string())]")
-                .count(),
+            generated.matches("&[(\"CNAME\", \"cname\")]").count(),
             2,
             "identity override must retain generated DSL aliases: {generated}"
         );

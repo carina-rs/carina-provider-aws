@@ -500,9 +500,9 @@ pub(super) fn derive(
         };
         length = intersect(length, extra_length).with_context(|| format!("{resource}.{path}"))?;
     }
-    let validated_input_patterns = input_patterns(rules)
+    let validated_input_constraints = input_patterns(rules)
         .into_iter()
-        .map(|p| super::ValidatedInputPattern::new(resource, path, p))
+        .map(|p| super::ValidatedInputConstraint::pattern(resource, path, p))
         .collect::<Result<Vec<_>>>()?;
     let mut value = string_refinement(pattern.as_ref(), length);
     for rule in rules {
@@ -514,7 +514,7 @@ pub(super) fn derive(
             None => correction.documentation().into(),
         });
     }
-    value.validated_input_patterns = validated_input_patterns;
+    value.validated_input_constraints = validated_input_constraints;
     Ok(value)
 }
 
@@ -536,10 +536,8 @@ pub(super) fn decorate(
                     (
                         RawShape::String { .. },
                         RawShape::String { .. } | RawShape::Enum { .. }
-                    ) | (
-                        RawShape::Enum { .. },
-                        RawShape::Enum { .. } | RawShape::String { .. }
-                    ) | (RawShape::Int { .. }, RawShape::Int { .. })
+                    ) | (RawShape::Enum { .. }, RawShape::Enum { .. })
+                        | (RawShape::Int { .. }, RawShape::Int { .. })
                 ),
                 "identity {row:?} has an incompatible carrier"
             );
@@ -618,7 +616,7 @@ pub(super) fn decorate(
                         type_code: value.type_code.clone(),
                         attribute_type: value.attribute_type.clone(),
                         documentation: None,
-                        validated_input_patterns: Vec::new(),
+                        validated_input_constraints: Vec::new(),
                     },
                     &TypeOverride::Identity(*row),
                 )?;
@@ -641,20 +639,36 @@ pub(super) fn decorate(
                 ),
                 "local enum requires a string carrier"
             );
-            let (base, source) = match value.attribute_type.raw_shape() {
-                RawShape::Enum { base, values, .. } => (base, values),
-                RawShape::String { .. } => (&value.attribute_type, None),
+            let source = match value.attribute_type.raw_shape() {
+                RawShape::Enum { values, .. } => values,
+                RawShape::String { .. } => None,
                 _ => unreachable!(),
             };
-            let selected = validate_allowed_values(base, source, values)?;
+            let selected = validate_allowed_values(&value.attribute_type, source, values)?;
             let selected = selected.iter().map(String::as_str).collect::<Vec<_>>();
+            let aliases = match value.attribute_type.raw_shape() {
+                RawShape::Enum { dsl_aliases, .. } => dsl_aliases
+                    .iter()
+                    .filter(|(api, _)| selected.contains(&api.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                _ => selected
+                    .iter()
+                    .map(|v| (v.to_string(), carina_aws_types::dsl_enum_value(v)))
+                    .collect(),
+            };
+            let aliases = aliases
+                .iter()
+                .map(|(api, dsl)| (api.as_str(), dsl.as_str()))
+                .collect::<Vec<_>>();
             value.attribute_type = carina_aws_types::with_member_enum_values(
                 value.attribute_type,
                 identity,
                 &selected,
+                &aliases,
             );
             value.type_code = format!(
-                "carina_aws_types::with_member_enum_values({}, carina_core::schema::enum_identity({name:?}, Some({namespace:?})), &{selected:?})",
+                "carina_aws_types::with_member_enum_values({}, carina_core::schema::enum_identity({name:?}, Some({namespace:?})), &{selected:?}, &{aliases:?})",
                 value.type_code
             );
         }
@@ -691,10 +705,10 @@ pub(super) fn decorate(
 }
 
 fn allowed_values(mut value: ValueTypeOverride, allowed: &[&str]) -> Result<ValueTypeOverride> {
-    let RawShape::Enum { base, values, .. } = value.attribute_type.raw_shape() else {
+    let RawShape::Enum { values, .. } = value.attribute_type.raw_shape() else {
         anyhow::bail!("allowed-value refinement requires a named string enum")
     };
-    let selected = validate_allowed_values(base, values, allowed)?;
+    let selected = validate_allowed_values(&value.attribute_type, values, allowed)?;
     value.type_code = format!(
         "carina_aws_types::with_member_values({}, &[{}])",
         value.type_code,

@@ -39,29 +39,26 @@ fn replacing_a_string_identity_cannot_discard_its_pattern() {
 }
 
 #[test]
-fn open_enum_cannot_hide_a_named_string_policy_in_its_base() {
-    let base = AttributeType::enum_with_base(
-        TypeIdentity::bare("Source"),
-        AttributeType::string(),
+fn open_enum_cannot_hide_slot_constraints_in_its_base() {
+    let base = AttributeType::refined_string(
+        None,
+        Some(PatternSpec::new("^a+$", PatternMatch::Full)),
+        None,
+        None,
+    );
+    let named = IdentityDefinition::enum_(
+        TypeIdentity::bare("Target"),
+        None,
+        None,
         None,
         vec![],
         None,
         None,
     );
-    let named = IdentityDefinition::string(
-        TypeIdentity::bare("Target"),
-        Some(PatternSpec::new("^a+$", PatternMatch::Full)),
-        Some((Some(1), Some(8))),
-        None,
-        None,
-    );
-    assert!(
-        matches!(
-            try_with_member_identity(base, named),
-            Err(MemberIdentityError::OpenEnumConstraints)
-        ),
-        "core ignores structural restrictions on an open Enum base"
-    );
+    assert!(matches!(
+        try_with_member_identity(base, named),
+        Err(MemberIdentityError::OpenEnumConstraints)
+    ));
 }
 
 #[test]
@@ -250,4 +247,131 @@ fn anonymous_shared_strings_publish_only_member_constraints() {
         );
         assert!(member_layer.pattern.is_some());
     }
+}
+
+#[test]
+fn references_cannot_absorb_slot_local_constraints() {
+    for base in [
+        AttributeType::refined_string(None, None, Some((Some(1), Some(256))), None),
+        AttributeType::refined_string(
+            None,
+            Some(PatternSpec::new("^slot$", PatternMatch::Full)),
+            None,
+            None,
+        ),
+    ] {
+        assert!(
+            carina_aws_types::try_with_member_reference(
+                base,
+                AwsType::KmsKeyReference.definition()
+            )
+            .is_err()
+        );
+    }
+    let no_grammar = IdentityDefinition::reference(
+        carina_core::schema::TypeIdentity::bare("Reference"),
+        None,
+        None,
+    );
+    let base = AttributeType::refined_string(
+        None,
+        Some(PatternSpec::new("^slot$", PatternMatch::Full)),
+        None,
+        None,
+    );
+    assert!(carina_aws_types::try_with_member_reference(base, no_grammar).is_err());
+}
+
+#[test]
+fn enum_identity_attachment_rejects_relabeling_and_conflicting_definitions() {
+    let definition = |name: &str, values: &[&str], aliases: Vec<(String, String)>| {
+        IdentityDefinition::enum_(
+            TypeIdentity::bare(name),
+            None,
+            None,
+            Some(values.iter().map(|v| (*v).into()).collect()),
+            aliases,
+            None,
+            None,
+        )
+    };
+    assert!(matches!(
+        try_with_member_identity(
+            definition("Old", &["A"], vec![]).into_attribute_type(),
+            definition("New", &["A"], vec![])
+        ),
+        Err(MemberIdentityError::IdentityConflict { .. })
+    ));
+    for named in [
+        definition("Same", &["A", "B"], vec![]),
+        definition("Same", &["A"], vec![("A".into(), "first".into())]),
+    ] {
+        assert!(matches!(
+            try_with_member_identity(
+                definition("Same", &["A"], vec![]).into_attribute_type(),
+                named
+            ),
+            Err(MemberIdentityError::ConflictingDefinition(_))
+        ));
+    }
+    let named = definition("Same", &["A"], vec![]);
+    try_with_member_identity(named.clone().into_attribute_type(), named).unwrap();
+}
+
+#[test]
+fn an_enum_cannot_take_a_string_identity() {
+    let base = AttributeType::enum_(
+        TypeIdentity::bare("Source"),
+        Some(vec!["A".into()]),
+        vec![],
+        None,
+        None,
+    );
+    let named =
+        IdentityDefinition::string(TypeIdentity::bare("StringIdentity"), None, None, None, None);
+    assert!(try_with_member_identity(base, named).is_err());
+}
+
+#[test]
+fn int_enum_constructors_share_the_catalog_callback() {
+    let row = AwsType::LogsLogGroupRetentionInDays;
+    let base =
+        carina_aws_types::validated_int_enum(row.identity(), row.allowed_int_values().unwrap());
+    try_with_member_identity(base, row.definition()).unwrap();
+}
+
+#[test]
+fn enum_alias_targets_must_belong_to_the_checked_value_set() {
+    let result = IdentityDefinition::try_enum(
+        TypeIdentity::bare("Letters"),
+        Some(PatternSpec::new("^A+$", PatternMatch::Full)),
+        Some((Some(1), Some(2))),
+        Some(vec!["A".into()]),
+        vec![("B".into(), "bee".into())],
+        None,
+        None,
+    );
+    assert!(
+        result.is_err(),
+        "an alias must not introduce B outside the checked set"
+    );
+}
+
+#[test]
+fn narrowing_an_enum_preserves_an_explicitly_empty_alias_set() {
+    let base = AttributeType::enum_(
+        TypeIdentity::bare("Unaliased"),
+        Some(vec!["API-VALUE".into()]),
+        vec![],
+        None,
+        None,
+    );
+    let narrowed = carina_aws_types::with_member_values(base, &["API-VALUE"]);
+    let carina_core::schema::RawShape::Enum { dsl_aliases, .. } = narrowed.raw_shape() else {
+        panic!("Enum")
+    };
+    assert!(
+        dsl_aliases.is_empty(),
+        "narrowing must not synthesize presentation aliases"
+    );
 }

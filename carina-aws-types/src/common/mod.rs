@@ -29,6 +29,7 @@ pub use send_outcome::{FinalAttempt, Idempotency, SendClassification, Transience
 mod member;
 pub use member::{
     MemberIdentityError, MemberStringValidator, try_with_member_identity,
-    try_with_member_reference, with_member_enum_identity, with_member_enum_values,
-    with_member_identity, with_member_reference, with_member_values,
+    try_with_member_reference, try_with_named_enum_values, with_member_enum_identity,
+    with_member_enum_values, with_member_identity, with_member_reference, with_member_values,
+    with_named_enum_values,
 };

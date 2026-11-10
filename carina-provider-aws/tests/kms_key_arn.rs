@@ -128,15 +128,53 @@ fn key_arn_outputs_are_assignable_to_reference_inputs() {
 
 #[test]
 fn logs_reference_preserves_arn_only_and_smithy_length_constraints() {
-    let t = carina_aws_types::kms_key_arn_reference();
-    let carina_core::schema::RawShape::Reference { length, .. } = t.raw_shape() else {
-        panic!("expected a reference leaf");
+    use carina_core::{
+        effect::Effect,
+        input_rules::finalize_plan_for_test,
+        plan::Plan,
+        resource::{ResolvedResource, Resource},
+        schema::SchemaRegistry,
     };
-    assert_eq!(length, Some((Some(0), Some(256))));
-    assert_schema_accepts(
-        t.clone(),
-        "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+    let native = carina_provider_aws::schemas::all_schemas()
+        .into_iter()
+        .find(|schema| schema.parts().resource_type == "logs.LogGroup")
+        .unwrap();
+    let wire = carina_core::protocol_convert::protocol_to_resource_schema(
+        &carina_core::protocol_convert::resource_schema_to_protocol(&native).unwrap(),
+    )
+    .unwrap();
+    let good = "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+    let overlong = format!(
+        "arn:aws:kms:us-{}-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+        "a".repeat(250)
     );
-    assert_schema_rejects(t.clone(), "alias/example");
-    assert_schema_rejects(t, "arn:aws:kms:us-east-1:123456789012:alias/example");
+    assert_schema_accepts(carina_aws_types::kms_key_reference(), &overlong);
+    for schema in [native, wire] {
+        let mut registry = SchemaRegistry::new();
+        registry.insert("aws", schema);
+        for (text, valid) in [
+            (good, true),
+            ("alias/example", false),
+            ("arn:aws:kms:us-east-1:123456789012:alias/example", false),
+            (overlong.as_str(), false),
+        ] {
+            let string = |value: &str| {
+                carina_core::resource::Value::Concrete(
+                    carina_core::resource::ConcreteValue::String(value.into()),
+                )
+            };
+            let desired = ResolvedResource::resolve_raw_fixture(
+                Resource::with_provider("aws", "logs.LogGroup", "probe", None)
+                    .with_attribute("log_group_name", string("reference-test"))
+                    .with_attribute("kms_key_id", string(text)),
+                &registry,
+            )
+            .unwrap();
+            let mut plan = Plan::new();
+            plan.add(Effect::Create(desired));
+            let result = finalize_plan_for_test(plan)
+                .check_inputs(&registry, &std::collections::HashMap::new());
+            assert_eq!(result.is_ok(), valid, "{text}: {result:?}");
+        }
+    }
 }

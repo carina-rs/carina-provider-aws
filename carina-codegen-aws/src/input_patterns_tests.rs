@@ -41,12 +41,14 @@ fn role_path_keeps_smithy_search_and_adds_a_full_rule() {
             .unwrap()
             .is_match("/no-trailing")
     );
-    let rules = declarations.input_patterns.borrow();
+    let rules = declarations.input_constraints.borrow();
     let rule = rules
         .get(&carina_core::schema::InputPath::new("path").unwrap())
         .and_then(|rules| rules.first())
         .expect("whole-value CreateRole narrowing");
-    let matcher = rule;
+    let SlotConstraint::Pattern(matcher) = rule else {
+        panic!("pattern")
+    };
     for value in ["/", "/a/", "/application/component/"] {
         assert!(matcher.is_match(value));
     }
@@ -70,7 +72,7 @@ fn nested_input_targets_must_exist_and_be_user_authored() {
         "options.absent",
         vec![PatternSpec::new("^x$", PatternMatch::Full)],
     );
-    let error = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap_err();
+    let error = bind_input_constraints("test.Nested", &[attr], &patterns).unwrap_err();
     assert!(error.to_string().contains("test.Nested.options.absent"));
 }
 
@@ -103,7 +105,7 @@ fn nested_provider_populated_child_is_rejected() {
         "options.child.label",
         vec![PatternSpec::new("^x$", PatternMatch::Full)],
     );
-    let error = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap_err();
+    let error = bind_input_constraints("test.Nested", &[attr], &patterns).unwrap_err();
     assert!(
         error
             .to_string()
@@ -144,7 +146,7 @@ fn create_only_child_controls_the_whole_path_scope() {
             tests::pattern_fixture(path, vec![PatternSpec::new("^x$", PatternMatch::Full)])
         })
         .collect();
-    let rules = bind_input_patterns("test.Nested", &[attr], &patterns).unwrap();
+    let rules = bind_input_constraints("test.Nested", &[attr], &patterns).unwrap();
     assert_eq!(rules[0].scope(), InputRuleScope::CreateOnly);
     assert_eq!(rules[1].scope(), InputRuleScope::EveryWrite);
 }

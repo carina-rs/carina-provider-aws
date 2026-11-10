@@ -22,6 +22,7 @@ fn override_table_cannot_hold_constructor_text() {
         ("member-string-definition.rs", false),
         ("member-int-definition.rs", false),
         ("member-reference-definition.rs", false),
+        ("named-enum-definition.rs", false),
         ("identity-decoration.rs", true),
         ("typed-member-definitions.rs", true),
     ] {

@@ -92,7 +92,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("key_algorithm", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.identity(), Some(vec!["EC_prime256v1".to_string(), "EC_secp384r1".to_string(), "RSA_2048".to_string()]), vec![("EC_prime256v1".to_string(), "ec_prime256v1".to_string()), ("EC_secp384r1".to_string(), "ec_secp384r1".to_string()), ("RSA_2048".to_string(), "rsa_2048".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.definition()))
+            AttributeSchema::optional("key_algorithm", carina_aws_types::with_named_enum_values(carina_aws_types::AwsType::AcmCertificateKeyAlgorithm.definition(), &["EC_prime256v1", "EC_secp384r1", "RSA_2048"], &[("EC_prime256v1", "ec_prime256v1"), ("EC_secp384r1", "ec_secp384r1"), ("RSA_2048", "rsa_2048")]))
                 .create_only()
                 .with_description("Specifies the algorithm of the public and private key pair that your certificate uses to encrypt data. RSA is the default key algorithm for ACM certif...")
                 .with_provider_name("KeyAlgorithm")
@@ -148,7 +148,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     "ResourceRecord".to_string(),
                     vec![
                     StructField::required("name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
-                    StructField::required("type", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(), Some(vec!["CNAME".to_string()]), vec![("CNAME".to_string(), "cname".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateResourceRecordType.definition())).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
+                    StructField::required("type", carina_aws_types::with_named_enum_values(carina_aws_types::AwsType::AcmCertificateResourceRecordType.definition(), &["CNAME"], &[("CNAME", "cname")])).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
                     StructField::required("value", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).deferred_populate().with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
@@ -187,7 +187,7 @@ pub fn acm_certificate_config() -> AwsSchemaConfig {
                     "ResourceRecord".to_string(),
                     vec![
                     StructField::required("name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The name of the DNS record to create in your domain. This is supplied by ACM.").with_provider_name("Name").build(),
-                    StructField::required("type", carina_aws_types::with_member_identity(AttributeType::enum_(carina_aws_types::AwsType::AcmCertificateResourceRecordType.identity(), Some(vec!["CNAME".to_string()]), vec![("CNAME".to_string(), "cname".to_string())], None, None), carina_aws_types::AwsType::AcmCertificateResourceRecordType.definition())).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
+                    StructField::required("type", carina_aws_types::with_named_enum_values(carina_aws_types::AwsType::AcmCertificateResourceRecordType.definition(), &["CNAME"], &[("CNAME", "cname")])).with_description("The type of DNS record. Currently this can be CNAME.").with_provider_name("Type").build(),
                     StructField::required("value", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(1024)))))).with_description("The value of the CNAME record to add to your DNS database. This is supplied by ACM.").with_provider_name("Value").build()
                     ],
                 )).with_description("Contains the CNAME record that you add to your DNS database for domain validation. For more information, see Use DNS to Validate Domain Ownership. The...").with_provider_name("ResourceRecord").build(),
