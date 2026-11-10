@@ -40,21 +40,21 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("resource_configuration_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
+            AttributeSchema::optional("resource_configuration_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.definition()))
                 .create_only()
                 .with_description("(Resource and Tunnel endpoints only) The Amazon Resource Name (ARN) of a resource configuration associated with the VPC endpoint. The type of resource...")
                 .with_provider_name("ResourceConfigurationArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("route_table_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::RouteTableId.attribute_type())))
+            AttributeSchema::optional("route_table_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::RouteTableId.definition())))
                 .create_only()
                 .with_description("(Gateway endpoint) The route table IDs.")
                 .with_provider_name("RouteTableIds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("security_group_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.attribute_type())))
+            AttributeSchema::optional("security_group_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.definition())))
                 .create_only()
                 .with_description("(Interface, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the security groups to associate with the endpoint network interfaces. If ...")
                 .with_provider_name("SecurityGroupIds")
@@ -68,21 +68,21 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("service_network_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
+            AttributeSchema::optional("service_network_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.definition()))
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of a service network that will be associated with the VPC endpoint of type service-network.")
                 .with_provider_name("ServiceNetworkArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("service_region", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Region.attribute_type()))
+            AttributeSchema::optional("service_region", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Region.definition()))
                 .create_only()
                 .with_description("The Region where the service is hosted. The default is the current Region.")
                 .with_provider_name("ServiceRegion")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.attribute_type())))
+            AttributeSchema::optional("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.definition())))
                 .create_only()
                 .with_description("(Interface, Gateway Load Balancer endpoints, Resource, ServiceNetwork, and Tunnel endpoints only) The IDs of the subnets in which to create endpoint n...")
                 .with_provider_name("SubnetIds")
@@ -96,14 +96,14 @@ pub fn ec2_vpc_endpoint_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the VPC.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpc_endpoint_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcEndpointId.attribute_type()))
+            AttributeSchema::provider_populated("vpc_endpoint_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcEndpointId.definition()))
                 .with_description("The ID of the endpoint. (read-only)")
                 .with_provider_name("VpcEndpointId")
                 .build(),

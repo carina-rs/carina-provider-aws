@@ -24,7 +24,7 @@ mod read_back;
 pub mod sdk;
 mod sdk_config;
 mod services;
-pub use identity_definition::IdentityDefinition;
+pub use identity_definition::{CoreIdentity, IdentityDefinition};
 
 /// Implementation details used by exported catalog macros.
 #[doc(hidden)]

@@ -4,7 +4,7 @@ use std::process::Command;
 mod support;
 
 #[test]
-fn identity_662_override_table_cannot_hold_constructor_text() {
+fn override_table_cannot_hold_constructor_text() {
     let deps = std::env::current_exe()
         .unwrap()
         .parent()
@@ -19,7 +19,11 @@ fn identity_662_override_table_cannot_hold_constructor_text() {
         ("attribute-type-replacement.rs", false),
         ("closure-replacement.rs", false),
         ("catalog-structural-replacement.rs", false),
+        ("member-string-definition.rs", false),
+        ("member-int-definition.rs", false),
+        ("member-reference-definition.rs", false),
         ("identity-decoration.rs", true),
+        ("typed-member-definitions.rs", true),
     ] {
         let temporary = support::build_tempdir();
         let output = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))

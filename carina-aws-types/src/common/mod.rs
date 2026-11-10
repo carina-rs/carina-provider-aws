@@ -28,6 +28,7 @@ pub use send_outcome::attach_single_attempt_verdict_for_test;
 pub use send_outcome::{FinalAttempt, Idempotency, SendClassification, Transience};
 mod member;
 pub use member::{
-    member_string_accepts, try_with_member_identity, with_member_enum_identity,
-    with_member_enum_values, with_member_identity, with_member_reference, with_member_values,
+    MemberIdentityError, MemberStringValidator, try_with_member_identity,
+    try_with_member_reference, with_member_enum_identity, with_member_enum_values,
+    with_member_identity, with_member_reference, with_member_values,
 };

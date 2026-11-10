@@ -29,13 +29,13 @@ pub fn iam_roles_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("arns", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(20), Some(2048))))), carina_aws_types::AwsType::IamRoleArn.attribute_type())))
+            AttributeSchema::provider_populated("arns", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(20), Some(2048))))), carina_aws_types::AwsType::IamRoleArn.definition())))
                 .with_description("Set of ARNs of the matched IAM roles.")
                 .with_provider_name("")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("names", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_+=,.@\\-]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(64))))), carina_aws_types::AwsType::IamRoleName.attribute_type())))
+            AttributeSchema::provider_populated("names", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_+=,.@\\-]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(64))))), carina_aws_types::AwsType::IamRoleName.definition())))
                 .with_description("Set of names of the matched IAM roles.")
                 .with_provider_name("")
                 .build(),

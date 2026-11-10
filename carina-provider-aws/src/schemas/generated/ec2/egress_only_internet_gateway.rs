@@ -23,7 +23,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
                     "vpc_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::VpcId.attribute_type(),
+                        carina_aws_types::AwsType::VpcId.definition(),
                     ),
                 )
                 .create_only()
@@ -38,7 +38,7 @@ pub fn ec2_egress_only_internet_gateway_config() -> AwsSchemaConfig {
                     "egress_only_internet_gateway_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::EgressOnlyInternetGatewayId.attribute_type(),
+                        carina_aws_types::AwsType::EgressOnlyInternetGatewayId.definition(),
                     ),
                 )
                 .with_description("The ID of the egress-only internet gateway. (read-only)")

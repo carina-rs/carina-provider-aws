@@ -41,7 +41,7 @@ fn model(pattern: &str) -> SmithyModel {
 }
 
 #[test]
-fn identity_662_named_member_keeps_smithy_constraints() {
+fn named_member_keeps_smithy_constraints() {
     let code = resolve_fixture(
         "route53.RecordSet",
         "hosted_zone_id",
@@ -55,7 +55,7 @@ fn identity_662_named_member_keeps_smithy_constraints() {
 }
 
 #[test]
-fn identity_662_unnamed_member_gets_smithy_constraints() {
+fn unnamed_member_gets_smithy_constraints() {
     let code =
         resolve_fixture("test.Constraints", "label", "test#Text", &model(r"^\w+\d$")).unwrap();
     assert!(code.contains("[A-Za-z0-9_]"), "{code}");
@@ -64,7 +64,7 @@ fn identity_662_unnamed_member_gets_smithy_constraints() {
 }
 
 #[test]
-fn identity_662_recursive_members_keep_smithy_constraints() {
+fn recursive_members_keep_smithy_constraints() {
     for target in ["test#Items", "test#Entries", "test#Object"] {
         let code =
             resolve_fixture("test.Constraints", "items", target, &model("^zone-[A-Z]+$")).unwrap();
@@ -84,7 +84,7 @@ fn identity_662_recursive_members_keep_smithy_constraints() {
 }
 
 #[test]
-fn identity_662_untranslatable_pattern_reports_its_path() {
+fn untranslatable_pattern_reports_its_path() {
     let error = resolve_fixture(
         "test.Constraints",
         "items[].label",
@@ -98,7 +98,7 @@ fn identity_662_untranslatable_pattern_reports_its_path() {
 }
 
 #[test]
-fn identity_662_unanchored_patterns_keep_search_semantics() {
+fn unanchored_patterns_keep_search_semantics() {
     let code =
         resolve_fixture("test.Constraints", "label", "test#Text", &model("prefix-")).unwrap();
     assert!(code.contains("PatternMatch::Substring"), "{code}");
@@ -126,7 +126,7 @@ fn validate_string(ty: AttributeType, value: &str) -> bool {
 }
 
 #[test]
-fn identity_662_member_traits_override_target_traits() {
+fn member_traits_override_target_traits() {
     let model = model("^target$");
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
@@ -145,7 +145,7 @@ fn identity_662_member_traits_override_target_traits() {
 }
 
 #[test]
-fn identity_662_recursive_member_traits_reach_the_string_seam() {
+fn recursive_member_traits_reach_the_string_seam() {
     let mut model = model("^target$");
     let traits = BTreeMap::from([
         (
@@ -173,7 +173,7 @@ fn identity_662_recursive_member_traits_reach_the_string_seam() {
 }
 
 #[test]
-fn identity_662_ascii_shorthands_and_partial_anchors_validate_as_declared() {
+fn ascii_shorthands_and_partial_anchors_validate_as_declared() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -200,7 +200,7 @@ fn identity_662_ascii_shorthands_and_partial_anchors_validate_as_declared() {
 }
 
 #[test]
-fn identity_662_callbacks_remain_bound_to_the_member_identity() {
+fn callbacks_remain_bound_to_the_member_identity() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -221,7 +221,7 @@ fn identity_662_callbacks_remain_bound_to_the_member_identity() {
 }
 
 #[test]
-fn identity_662_conflicting_patterns_keep_smithy_and_collect_an_input_rule() {
+fn conflicting_patterns_keep_smithy_and_collect_an_input_rule() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -252,7 +252,7 @@ fn identity_662_conflicting_patterns_keep_smithy_and_collect_an_input_rule() {
 }
 
 #[test]
-fn identity_662_bounds_intersect_and_empty_intersections_error() {
+fn bounds_intersect_and_empty_intersections_error() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -289,7 +289,7 @@ fn identity_662_bounds_intersect_and_empty_intersections_error() {
 }
 
 #[test]
-fn identity_662_finite_enum_constraints_are_folded_into_the_allowed_subset() {
+fn finite_enum_constraints_are_folded_into_the_allowed_subset() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -333,7 +333,7 @@ fn identity_662_finite_enum_constraints_are_folded_into_the_allowed_subset() {
 }
 
 #[test]
-fn identity_662_dot_translation_keeps_ecma_line_terminator_semantics() {
+fn dot_translation_keeps_ecma_line_terminator_semantics() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -373,7 +373,7 @@ fn arn_fixture(source: Option<&str>) -> (SmithyModel, carina_smithy::ShapeRef) {
 }
 
 #[test]
-fn identity_662_round2_arn_partition_accepts_every_provider_partition() {
+fn arn_partition_accepts_every_provider_partition() {
     for (resource, path, row, source, rest) in [
         (
             "organizations.Account",
@@ -445,7 +445,7 @@ fn identity_662_round2_arn_partition_accepts_every_provider_partition() {
 }
 
 #[test]
-fn identity_662_round2_arn_partition_source_drift_is_an_error() {
+fn arn_partition_source_drift_is_an_error() {
     for source in [
         None,
         Some("^arn:aws-cn:organizations:.*$"),
@@ -463,7 +463,7 @@ fn identity_662_round2_arn_partition_source_drift_is_an_error() {
 }
 
 #[test]
-fn identity_662_round2_arn_partition_note_reaches_attribute_docs() {
+fn arn_partition_note_reaches_attribute_docs() {
     for (resource, path, row, source) in [
         (
             "organizations.Account",
@@ -512,7 +512,7 @@ fn identity_662_round2_arn_partition_note_reaches_attribute_docs() {
 }
 
 #[test]
-fn identity_662_round6_only_truly_equivalent_pattern_overrides_are_absent() {
+fn only_truly_equivalent_pattern_overrides_are_absent() {
     for site in [
         ("iam.Roles", "path_prefix"),
         ("organizations.Organization", "id"),
@@ -531,7 +531,7 @@ fn identity_662_round6_only_truly_equivalent_pattern_overrides_are_absent() {
 }
 
 #[test]
-fn identity_662_round4_extra_pattern_on_list_or_map_position_errors() {
+fn extra_pattern_on_list_or_map_position_errors() {
     let member = carina_smithy::ShapeRef {
         target: "test#Text".into(),
         traits: Default::default(),
@@ -559,7 +559,7 @@ fn identity_662_round4_extra_pattern_on_list_or_map_position_errors() {
 }
 
 #[test]
-fn identity_662_round4_data_source_representation_cannot_swallow_a_pattern() {
+fn data_source_representation_cannot_swallow_a_pattern() {
     let source = DataSourceType {
         representation: Representation::UnorderedStrings,
         decoration: Some(TypeOverride::StringPattern(PatternSpec::new(

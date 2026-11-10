@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, StructField};
 
 /// Returns the schema config for identitystore.User (Smithy: com.amazonaws.identitystore)
 pub fn identitystore_user_config() -> AwsSchemaConfig {
@@ -47,7 +47,7 @@ pub fn identitystore_user_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("emails", AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\t\\n\\r \u{a0}\u{3000}]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(1024))))), types::email()), false, Some((Some(1), Some(1))), carina_core::schema::ListElements::AllowDuplicates))
+            AttributeSchema::provider_populated("emails", AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\t\\n\\r \u{a0}\u{3000}]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(1024))))), carina_aws_types::CoreIdentity::Email.definition()), false, Some((Some(1), Some(1))), carina_core::schema::ListElements::AllowDuplicates))
                 .with_description("Email addresses associated with the user.")
                 .with_provider_name("Emails")
                 .build(),

@@ -13,8 +13,8 @@ use carina_core::schema::{
 };
 
 use crate::{
-    arn_partition_pattern, arn_regex, validate_arn, validate_availability_zone,
-    validate_aws_region, validate_iam_arn, validate_kms_key_arn, validate_kms_key_id,
+    arn_partition_pattern, arn_regex, validate_availability_zone, validate_aws_region,
+    validate_iam_arn,
 };
 
 // IAM roleNameType and policyNameType use ^[\w+=,.@-]+$.
@@ -584,9 +584,8 @@ macro_rules! __carina_aws_catalog_constructor_path {
 /// Each row uses the same grammar. An own-identity row supplies `segments`,
 /// `kind`, and `valid_sample`; a refinement supplies `refines`; and an integer
 /// enum additionally supplies `values`. Constructors return `IdentityDefinition`;
-/// validator presence is derived from that definition. The optional legacy
-/// `has_validator` annotation is accepted for source compatibility and does not
-/// control dispatch. `constructor_path_prefix` is optional at catalog level;
+/// validator presence is derived from that definition.
+/// `constructor_path_prefix` is optional at catalog level;
 /// when present, the macro generates `constructor_path()` by appending the row's
 /// wrapper name and `()` to that literal prefix.
 ///
@@ -611,7 +610,6 @@ macro_rules! define_aws_type_catalog {
                         $(refines: $refined_type:path,)?
                         $(valid_sample: $valid_sample:literal,)?
                         $(values: [$($int_value:literal),+ $(,)?],)?
-                        $(has_validator: $has_validator:literal,)?
                         constructor: $constructor:expr $(,)?
                     }
                 ),* $(,)?
@@ -726,12 +724,10 @@ define_aws_type_catalog! {
         segments: [],
         kind: "Arn",
         valid_sample: "arn:aws:s3:::example-bucket",
-
-        constructor: |identity| validated_string(
+        constructor: |identity| metadata_string(
             identity,
-            PatternSpec::new(arn_regex("[^:]+:.*$"), PatternMatch::Full),
+            PatternSpec::new(arn_regex(r"[^:]+:[^:\n]*:[^:\n]*:.*$"), PatternMatch::Full),
             None,
-            validate_arn,
         ),
     },
     /// Generic AWS resource ID.
@@ -739,15 +735,13 @@ define_aws_type_catalog! {
         segments: [],
         kind: "ResourceId",
         valid_sample: "resource-12345678",
-
-        constructor: |identity| metadata_string(identity, PatternSpec::new("^[a-z]+-[0-9a-f]{8,}$", PatternMatch::Full), None),
+        constructor: |identity| metadata_string(identity, PatternSpec::new("^[a-z0-9]+-[0-9a-f]{8,}$", PatternMatch::Full), None),
     },
     /// Twelve-digit AWS account ID.
     AccountId => aws_account_id {
         segments: [],
         kind: "AccountId",
         valid_sample: "123456789012",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new("^[0-9]{12}$", PatternMatch::Full), Some((Some(12), Some(12)))),
     },
     /// AWS Region in provider-facing API spelling.
@@ -755,7 +749,6 @@ define_aws_type_catalog! {
         segments: [],
         kind: "Region",
         valid_sample: "ap-northeast-1",
-
         constructor: |identity| validated_open_enum(identity, validate_aws_region),
     },
     /// AWS Availability Zone in provider-facing API spelling.
@@ -763,7 +756,6 @@ define_aws_type_catalog! {
         segments: ["AvailabilityZone"],
         kind: "ZoneName",
         valid_sample: "ap-northeast-1a",
-
         constructor: availability_zone_type,
     },
     /// AWS Availability Zone ID.
@@ -771,7 +763,6 @@ define_aws_type_catalog! {
         segments: ["AvailabilityZone"],
         kind: "ZoneId",
         valid_sample: "use1-az1",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new("^[a-z]+[0-9]+-az[0-9]+$", PatternMatch::Full), None),
     },
     /// Canonical UTC timestamp used by S3 lifecycle expiration and transition dates.
@@ -779,7 +770,6 @@ define_aws_type_catalog! {
         segments: ["s3", "BucketLifecycleConfiguration"],
         kind: "LifecycleDate",
         valid_sample: "2026-01-01T00:00:00Z",
-
         constructor: s3_lifecycle_date_type,
     },
     /// IAM role name. Smithy com.amazonaws.iam#roleNameType in
@@ -789,7 +779,6 @@ define_aws_type_catalog! {
         segments: ["iam", "Role"],
         kind: "Name",
         valid_sample: "example-role",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(64)))),
     },
     /// IAM policy name, including inline policies. Smithy policyNameType in
@@ -800,7 +789,6 @@ define_aws_type_catalog! {
         segments: ["iam", "Policy"],
         kind: "Name",
         valid_sample: "example-policy",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new(IAM_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(128)))),
     },
     /// IAM role ID.
@@ -808,7 +796,6 @@ define_aws_type_catalog! {
         segments: ["iam", "Role"],
         kind: "Id",
         valid_sample: "AROA1234567890EXAMPLE",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new("^AROA[A-Z0-9]+$", PatternMatch::Full), None),
     },
     /// IAM role ARN.
@@ -816,7 +803,6 @@ define_aws_type_catalog! {
         segments: ["iam", "Role"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:role/example-role",
-
         constructor: |identity| iam_arn(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:role/.+$"), PatternMatch::Full),
@@ -828,7 +814,6 @@ define_aws_type_catalog! {
         segments: ["iam", "Policy"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:policy/example-policy",
-
         constructor: |identity| iam_arn(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:policy/.+$"), PatternMatch::Full),
@@ -840,7 +825,6 @@ define_aws_type_catalog! {
         segments: ["iam", "OidcProvider"],
         kind: "Arn",
         valid_sample: "arn:aws:iam::123456789012:oidc-provider/example.com",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("iam::[^:]*:oidc-provider/.+$"), PatternMatch::Full),
@@ -852,8 +836,7 @@ define_aws_type_catalog! {
         segments: ["kms", "Key"],
         kind: "Id",
         valid_sample: "12345678-1234-1234-1234-123456789abc",
-
-        constructor: |identity| validated_string(
+        constructor: |identity| metadata_string(
             identity,
             PatternSpec::new([
                 "^((arn:",
@@ -861,7 +844,6 @@ define_aws_type_catalog! {
                 ":kms:[^:]*:[^:]*:(key|alias)/.+)|(alias/.+)|([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}))$",
             ].concat(), PatternMatch::Full),
             None,
-            validate_kms_key_id,
         ),
     },
     /// Comparison-only KMS reference. Authored inputs remain strings.
@@ -878,12 +860,10 @@ Some((Some(1), Some(2048)))),
         segments: ["kms", "Key"],
         kind: "Arn",
         valid_sample: "arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc",
-
-        constructor: |identity| validated_string(
+        constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(crate::kms_key_arn_pattern(), PatternMatch::Full),
             None,
-            validate_kms_key_arn,
         ),
     },
     /// EC2 IPAM pool ID.
@@ -891,7 +871,6 @@ Some((Some(1), Some(2048)))),
         segments: ["ec2", "IpamPool"],
         kind: "Id",
         valid_sample: "ipam-pool-12345678",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new("^ipam-pool-[0-9a-f]{8,}$", PatternMatch::Full), None),
     },
     /// Route 53 hosted-zone ID.
@@ -899,7 +878,6 @@ Some((Some(1), Some(2048)))),
         segments: ["route53", "HostedZone"],
         kind: "Id",
         valid_sample: "Z2FDTNDATAQYW2",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new("^Z[A-Z0-9]+$", PatternMatch::Full),
@@ -915,7 +893,6 @@ Some((Some(1), Some(2048)))),
         segments: ["route53", "RecordSet"],
         kind: "Type",
         valid_sample: "CNAME",
-
         constructor: dns_record_type_type,
     },
     /// Public RequestCertificate Common Name: DomainNameString plus the
@@ -926,7 +903,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "DomainName",
         valid_sample: "xn--r8jz45g.carina-rs.dev",
-
         constructor: |identity| acm_request_domain_type(identity, 64),
     },
     /// Additional public certificate request domain: same IDNA rules, 253 cap.
@@ -936,7 +912,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "SubjectAlternativeName",
         valid_sample: "xn--r8jz45g.carina-rs.dev",
-
         constructor: |identity| acm_request_domain_type(identity, 253),
     },
     /// ACM certificate resource ARN:
@@ -951,7 +926,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "Arn",
         valid_sample: "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"acm:[a-z0-9-]+:[0-9]{12}:certificate/[A-Za-z0-9_+=,.@-]+\z"), PatternMatch::Full),
@@ -966,7 +940,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "KeyAlgorithm",
         valid_sample: "RSA_2048",
-
         constructor: |identity| enum_definition(
             &["EC_prime256v1", "EC_secp384r1", "RSA_2048"], identity,
         ),
@@ -979,7 +952,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "ValidationUrl",
         valid_sample: "http://example.com/.well-known/pki-validation/token.txt",
-
         constructor: |identity| validated_string(
             identity, PatternSpec::new(ACM_VALIDATION_URL_PATTERN, PatternMatch::Full), None, validate_acm_validation_url,
         ),
@@ -990,7 +962,6 @@ Some((Some(1), Some(2048)))),
         segments: ["acm", "Certificate"],
         kind: "ResourceRecordType",
         valid_sample: "CNAME",
-
         constructor: |identity| enum_definition(&["CNAME"], identity),
     },
     /// ELBv2 HTTP matcher codes, independent of load-balancer protocol constraints.
@@ -999,7 +970,6 @@ Some((Some(1), Some(2048)))),
         segments: ["elasticloadbalancingv2", "TargetGroup"],
         kind: "HttpCode",
         valid_sample: "200",
-
         constructor: |identity| crate::elbv2_matcher_codes(identity, 200, 599),
     },
     /// ELBv2 gRPC matcher codes.
@@ -1008,7 +978,6 @@ Some((Some(1), Some(2048)))),
         segments: ["elasticloadbalancingv2", "TargetGroup"],
         kind: "GrpcCode",
         valid_sample: "12",
-
         constructor: |identity| crate::elbv2_matcher_codes(identity, 0, 99),
     },
     /// CloudWatch Logs retention days, sharing AWSCC's established identity.
@@ -1038,7 +1007,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sqs", "Queue"],
         kind: "Arn",
         valid_sample: "arn:aws:sqs:ap-northeast-1:123456789012:example-queue",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"sqs:[a-z0-9-]+:[0-9]{12}:(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z"), PatternMatch::Full),
@@ -1052,7 +1020,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sqs", "Queue"],
         kind: "DeduplicationScope",
         valid_sample: "messageGroup",
-
         constructor: |identity| enum_definition(&["messageGroup", "queue"], identity),
     },
     /// Closed SQS FIFO throughput limit; aliases retain exact API spellings.
@@ -1062,7 +1029,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sqs", "Queue"],
         kind: "FifoThroughputLimit",
         valid_sample: "perQueue",
-
         constructor: |identity| enum_definition(&["perQueue", "perMessageGroupId"], identity),
     },
     /// Existing redrive-permission identity, owned by the catalog so struct
@@ -1072,7 +1038,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sqs", "Queue", "RedriveAllowPolicy"],
         kind: "RedrivePermission",
         valid_sample: "allowAll",
-
         constructor: |identity| enum_definition(&["allowAll", "denyAll", "byQueue"], identity),
     },
     /// Identity Store ID.
@@ -1080,7 +1045,6 @@ Some((Some(1), Some(2048)))),
         segments: ["identitystore", "Store"],
         kind: "Id",
         valid_sample: "d-1234567890",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new("^(d-[0-9a-fA-F]{10}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", PatternMatch::Full),
@@ -1092,7 +1056,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sso", "Principal"],
         kind: "Id",
         valid_sample: "12345678-1234-1234-1234-123456789abc",
-
         constructor: |identity| metadata_string(identity, PatternSpec::new("^.{1,64}$", PatternMatch::Full), None),
     },
     /// IAM Identity Center instance ARN.
@@ -1100,7 +1063,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sso", "Instance"],
         kind: "Arn",
         valid_sample: "arn:aws:sso:::instance/ssoins-1234567890abcdef",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sso:::instance/.+$"), PatternMatch::Full),
@@ -1112,7 +1074,6 @@ Some((Some(1), Some(2048)))),
         segments: ["sso", "PermissionSet"],
         kind: "Arn",
         valid_sample: "arn:aws:sso:::permissionSet/ssoins-1234567890abcdef/ps-1234567890abcdef",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sso:::permissionSet/.+$"), PatternMatch::Full),
@@ -1124,7 +1085,6 @@ Some((Some(1), Some(2048)))),
         segments: ["s3"],
         kind: "Grantee",
         valid_sample: "id=canonical-user-id",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(r"^(id|emailAddress|uri)=.+(\s*,\s*(id|emailAddress|uri)=.+)*$", PatternMatch::Full),
@@ -1136,7 +1096,6 @@ Some((Some(1), Some(2048)))),
         segments: ["cloudfront"],
         kind: "HostedZoneId",
         valid_sample: "Z2FDTNDATAQYW2",
-
         constructor: |identity| IdentityDefinition::enum_(identity,
 None,
 None,
@@ -1150,7 +1109,6 @@ None),
         segments: ["s3", "Bucket"],
         kind: "Arn",
         valid_sample: "arn:aws:s3:::example-bucket",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("s3:::.+$"), PatternMatch::Full),
@@ -1162,7 +1120,6 @@ None),
         segments: ["sts", "CallerIdentity"],
         kind: "Arn",
         valid_sample: "arn:aws:sts::123456789012:assumed-role/example-role/example-session",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex("sts:.*$"), PatternMatch::Full),
@@ -1181,7 +1138,6 @@ None),
         segments: ["organizations", "Account"],
         kind: "Email",
         valid_sample: "user@example.com",
-
         constructor: organizations_account_email_type,
     },
     /// Organizations account ARN. Cached organizations.json AccountArn, used by
@@ -1201,7 +1157,6 @@ None),
         segments: ["organizations", "Account"],
         kind: "Arn",
         valid_sample: "arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"), PatternMatch::Full),
@@ -1223,7 +1178,6 @@ None),
         segments: ["organizations", "Organization"],
         kind: "Arn",
         valid_sample: "arn:aws:organizations::123456789012:organization/o-exampleorgid",
-
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\z"), PatternMatch::Full),
@@ -1239,7 +1193,6 @@ None),
         segments: ["ec2"],
         kind: "AmazonSideAsn",
         valid_sample: "64512",
-
         constructor: ec2_amazon_side_asn_type,
     },
     /// VGW private and legacy Amazon ASNs, including existing read-back values.
@@ -1251,7 +1204,6 @@ None),
         segments: [],
         kind: "AmazonSideAsn",
         valid_sample: "64512",
-
         constructor: ec2_vpn_gateway_amazon_side_asn_type,
     },
     /// CreateFlowLogsRequest$MaxAggregationInterval -> Integer (prose).
@@ -1261,7 +1213,6 @@ None),
         kind: "MaxAggregationInterval",
         valid_sample: "60",
         values: [60, 600],
-
         constructor: ec2_int_enum,
     },
     /// CreateSubnetRequest$Ipv6NetmaskLength -> NetmaskLength (prose).
@@ -1271,7 +1222,6 @@ None),
         kind: "Ipv6NetmaskLength",
         valid_sample: "64",
         values: [44, 48, 52, 56, 60, 64],
-
         constructor: ec2_int_enum,
     },
     /// CreateSecurityGroupRequest$GroupName: ASCII alphabet and reserved prefix.
@@ -1280,7 +1230,6 @@ None),
         segments: ["ec2", "SecurityGroup"],
         kind: "Name",
         valid_sample: "carina-security-group",
-
         constructor: |identity| validated_string(
             identity, PatternSpec::new(EC2_SECURITY_GROUP_NAME_PATTERN, PatternMatch::Full), Some((Some(1), Some(255))),
             validate_ec2_security_group_name,
@@ -1293,7 +1242,6 @@ None),
         segments: ["ec2", "Vpc"],
         kind: "Ipv4Cidr",
         valid_sample: "10.0.0.0/16",
-
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_vpc_cidr),
     },
     /// CreateSubnetRequest$CidrBlock, preserving noncanonical input spellings.
@@ -1302,7 +1250,6 @@ None),
         segments: ["ec2", "Subnet"],
         kind: "Ipv4Cidr",
         valid_sample: "10.0.0.0/24",
-
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv4_cidr),
     },
     /// CreateSubnetRequest$Ipv6CidrBlock: /44..=/64 in increments of four.
@@ -1311,7 +1258,6 @@ None),
         segments: ["ec2", "Subnet"],
         kind: "Ipv6Cidr",
         valid_sample: "2001:db8::/64",
-
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_subnet_ipv6_cidr),
     },
     /// TransitGatewayRequestOptions$TransitGatewayCidrBlocks accepts both families.
@@ -1322,7 +1268,6 @@ None),
         segments: ["ec2", "TransitGateway"],
         kind: "CidrBlock",
         valid_sample: "10.0.0.0/24",
-
         constructor: |identity| ec2_cidr_type(identity, validate_ec2_transit_gateway_cidr),
     },
     /// EC2 VPC ID.
@@ -1330,7 +1275,6 @@ None),
         segments: ["ec2", "Vpc"],
         kind: "Id",
         valid_sample: "vpc-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "vpc"),
     },
     /// EC2 subnet ID.
@@ -1338,7 +1282,6 @@ None),
         segments: ["ec2", "Subnet"],
         kind: "Id",
         valid_sample: "subnet-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "subnet"),
     },
     /// EC2 security-group ID.
@@ -1346,7 +1289,6 @@ None),
         segments: ["ec2", "SecurityGroup"],
         kind: "Id",
         valid_sample: "sg-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "sg"),
     },
     /// EC2 internet-gateway ID.
@@ -1354,7 +1296,6 @@ None),
         segments: ["ec2", "InternetGateway"],
         kind: "Id",
         valid_sample: "igw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "igw"),
     },
     /// EC2 route-table ID.
@@ -1362,7 +1303,6 @@ None),
         segments: ["ec2", "RouteTable"],
         kind: "Id",
         valid_sample: "rtb-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "rtb"),
     },
     /// EC2 NAT-gateway ID.
@@ -1370,7 +1310,6 @@ None),
         segments: ["ec2", "NatGateway"],
         kind: "Id",
         valid_sample: "nat-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "nat"),
     },
     /// EC2 VPC-peering-connection ID.
@@ -1378,7 +1317,6 @@ None),
         segments: ["ec2", "VpcPeeringConnection"],
         kind: "Id",
         valid_sample: "pcx-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "pcx"),
     },
     /// EC2 transit-gateway ID.
@@ -1386,7 +1324,6 @@ None),
         segments: ["ec2", "TransitGateway"],
         kind: "Id",
         valid_sample: "tgw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "tgw"),
     },
     /// EC2 VPC CIDR-block-association ID.
@@ -1394,7 +1331,6 @@ None),
         segments: ["ec2", "VpcCidrBlockAssociation"],
         kind: "Id",
         valid_sample: "vpc-cidr-assoc-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "vpc-cidr-assoc"),
     },
     /// EC2 transit-gateway route-table ID.
@@ -1402,7 +1338,6 @@ None),
         segments: ["ec2", "TransitGatewayRouteTable"],
         kind: "Id",
         valid_sample: "tgw-rtb-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "tgw-rtb"),
     },
     /// EC2 VPN-gateway ID.
@@ -1410,7 +1345,6 @@ None),
         segments: ["ec2", "VpnGateway"],
         kind: "Id",
         valid_sample: "vgw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "vgw"),
     },
     /// EC2 egress-only internet-gateway ID.
@@ -1418,7 +1352,6 @@ None),
         segments: ["ec2", "EgressOnlyInternetGateway"],
         kind: "Id",
         valid_sample: "eigw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "eigw"),
     },
     /// EC2 VPC-endpoint ID.
@@ -1426,7 +1359,6 @@ None),
         segments: ["ec2", "VpcEndpoint"],
         kind: "Id",
         valid_sample: "vpce-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "vpce"),
     },
     /// EC2 instance ID.
@@ -1434,7 +1366,6 @@ None),
         segments: ["ec2", "Instance"],
         kind: "Id",
         valid_sample: "i-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "i"),
     },
     /// EC2 network-interface ID.
@@ -1442,7 +1373,6 @@ None),
         segments: ["ec2", "NetworkInterface"],
         kind: "Id",
         valid_sample: "eni-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "eni"),
     },
     /// EC2 Elastic IP allocation ID.
@@ -1450,7 +1380,6 @@ None),
         segments: ["ec2", "Eip"],
         kind: "AllocationId",
         valid_sample: "eipalloc-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "eipalloc"),
     },
     /// EC2 prefix-list ID.
@@ -1458,7 +1387,6 @@ None),
         segments: ["ec2", "PrefixList"],
         kind: "Id",
         valid_sample: "pl-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "pl"),
     },
     /// EC2 carrier-gateway ID.
@@ -1466,7 +1394,6 @@ None),
         segments: ["ec2", "CarrierGateway"],
         kind: "Id",
         valid_sample: "cagw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "cagw"),
     },
     /// EC2 local-gateway ID.
@@ -1474,7 +1401,6 @@ None),
         segments: ["ec2", "LocalGateway"],
         kind: "Id",
         valid_sample: "lgw-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "lgw"),
     },
     /// EC2 network-ACL ID.
@@ -1482,7 +1408,6 @@ None),
         segments: ["ec2", "NetworkAcl"],
         kind: "Id",
         valid_sample: "acl-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "acl"),
     },
     /// EC2 transit-gateway-attachment ID.
@@ -1490,7 +1415,6 @@ None),
         segments: ["ec2", "TransitGatewayAttachment"],
         kind: "Id",
         valid_sample: "tgw-attach-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "tgw-attach"),
     },
     /// EC2 flow-log ID.
@@ -1498,7 +1422,6 @@ None),
         segments: ["ec2", "FlowLog"],
         kind: "Id",
         valid_sample: "fl-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "fl"),
     },
     /// EC2 IPAM ID.
@@ -1506,7 +1429,6 @@ None),
         segments: ["ec2", "Ipam"],
         kind: "Id",
         valid_sample: "ipam-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "ipam"),
     },
     /// EC2 subnet/route-table-association ID.
@@ -1514,7 +1436,6 @@ None),
         segments: ["ec2", "SubnetRouteTableAssociation"],
         kind: "Id",
         valid_sample: "rtbassoc-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "rtbassoc"),
     },
     /// EC2 security-group-rule ID.
@@ -1522,7 +1443,6 @@ None),
         segments: ["ec2", "SecurityGroupRule"],
         kind: "Id",
         valid_sample: "sgr-12345678",
-
         constructor: |identity| prefixed_resource_id(identity, "sgr"),
     },
         }
@@ -1575,6 +1495,23 @@ mod tests {
         )
     }
 
+    fn test_validated_string_constructor(identity: TypeIdentity) -> IdentityDefinition {
+        IdentityDefinition::string(
+            identity,
+            None,
+            None,
+            Some(legacy_validator(|value| match value {
+                Value::Concrete(ConcreteValue::String(value))
+                    if value.expose_plaintext() != "reserved" =>
+                {
+                    Ok(())
+                }
+                _ => Err("Expected a non-reserved name".into()),
+            })),
+            None,
+        )
+    }
+
     crate::define_aws_type_catalog! {
         enum TestCatalog {
             identity_constructor: test_catalog_identity,
@@ -1591,8 +1528,7 @@ mod tests {
                     segments: ["service", "ValidatedResource"],
                     kind: "Name",
                     valid_sample: "validated-example",
-                    has_validator: true,
-                    constructor: test_string_constructor,
+                    constructor: test_validated_string_constructor,
                 },
                 Refinement => test_refinement {
                     refines: TestCatalog::Own,
@@ -1802,7 +1738,6 @@ mod tests {
     #[test]
     fn validator_declarations_match_constructor_shapes_and_the_registry_contract() {
         let expected = HashSet::from([
-            AwsType::Arn,
             AwsType::Region,
             AwsType::AvailabilityZone,
             AwsType::S3LifecycleDate,
@@ -1815,8 +1750,6 @@ mod tests {
             AwsType::OrganizationsAccountEmail,
             AwsType::IamRoleArn,
             AwsType::IamPolicyArn,
-            AwsType::KmsKeyId,
-            AwsType::KmsKeyArn,
             AwsType::Ec2AmazonSideAsn,
             AwsType::Ec2VpnGatewayAmazonSideAsn,
             AwsType::Ec2FlowLogMaxAggregationInterval,
@@ -1829,7 +1762,7 @@ mod tests {
         ]);
         assert_eq!(
             expected.len(),
-            24,
+            21,
             "the semantic-only catalog validator contract changed"
         );
 
@@ -2221,7 +2154,7 @@ mod tests {
 
     #[test]
     fn catalog_metadata_snapshot() {
-        const EXPECTED: &str = r#"Arn|aws||Arn|arn:aws:s3:::example-bucket|true
+        const EXPECTED: &str = r#"Arn|aws||Arn|arn:aws:s3:::example-bucket|false
 ResourceId|aws||ResourceId|resource-12345678|false
 AccountId|aws||AccountId|123456789012|false
 Region|aws||Region|ap-northeast-1|true
@@ -2234,9 +2167,9 @@ IamRoleId|aws|iam/Role|Id|AROA1234567890EXAMPLE|false
 IamRoleArn|aws|iam/Role|Arn|arn:aws:iam::123456789012:role/example-role|true
 IamPolicyArn|aws|iam/Policy|Arn|arn:aws:iam::123456789012:policy/example-policy|true
 IamOidcProviderArn|aws|iam/OidcProvider|Arn|arn:aws:iam::123456789012:oidc-provider/example.com|false
-KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|true
+KmsKeyId|aws|kms/Key|Id|12345678-1234-1234-1234-123456789abc|false
 KmsKeyReference|aws|kms/Key|Reference|alias/aws/sqs|false
-KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|true
+KmsKeyArn|aws|kms/Key|Arn|arn:aws:kms:ap-northeast-1:123456789012:key/12345678-1234-1234-1234-123456789abc|false
 IpamPoolId|aws|ec2/IpamPool|Id|ipam-pool-12345678|false
 Route53HostedZoneId|aws|route53/HostedZone|Id|Z2FDTNDATAQYW2|false
 DnsRecordType|aws|route53/RecordSet|Type|CNAME|false
@@ -2342,8 +2275,8 @@ SecurityGroupRuleId|aws|ec2/SecurityGroupRule|Id|sgr-12345678|false"#;
             "a portable-only definition needs no semantic callback"
         );
         assert!(
-            !TestCatalog::ValidatedOwn.has_validator(),
-            "legacy flags do not invent a callback"
+            TestCatalog::ValidatedOwn.has_validator(),
+            "callback presence comes from the constructor's typed definition"
         );
         assert_eq!(
             TestCatalog::Refinement.constructor_path(),

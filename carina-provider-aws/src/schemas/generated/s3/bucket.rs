@@ -36,7 +36,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.attribute_type()))
+            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.definition()))
                 .with_description("ARN of the bucket. (read-only)")
                 .with_provider_name("Arn")
                 .build(),
@@ -60,7 +60,7 @@ pub fn s3_bucket_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("hosted_zone_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Route53HostedZoneId.attribute_type()))
+            AttributeSchema::provider_populated("hosted_zone_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Route53HostedZoneId.definition()))
                 .with_description("Route 53 Hosted Zone ID for the bucket's region. (read-only)")
                 .with_provider_name("HostedZoneId")
                 .build(),

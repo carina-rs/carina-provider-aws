@@ -102,7 +102,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_master_key_id", carina_aws_types::with_member_reference(AttributeType::string(), carina_aws_types::kms_key_reference()))
+            AttributeSchema::optional("kms_master_key_id", carina_aws_types::with_member_reference(AttributeType::string(), carina_aws_types::AwsType::KmsKeyReference.definition()))
                 .with_description("The ID of an AWS KMS customer master key (CMK) to use for server-side encryption (SSE-KMS). Use `alias/aws/sqs` for the AWS-managed key.")
                 .with_provider_name("KmsMasterKeyId")
                 .build(),
@@ -120,7 +120,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("queue_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SqsQueueArn.attribute_type()))
+            AttributeSchema::provider_populated("queue_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SqsQueueArn.definition()))
                 .with_description("The Amazon Resource Name (ARN) of the queue. (read-only)")
                 .with_provider_name("QueueArn")
                 .build(),

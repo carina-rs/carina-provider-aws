@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1"];
 
@@ -20,14 +20,14 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
         .with_description("Describes a security group rule.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("cidr_ip", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_cidr()))
+            AttributeSchema::optional("cidr_ip", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Ipv4Cidr.definition()))
                 .create_only()
                 .with_description("The IPv4 address range, in CIDR format. Amazon Web Services canonicalizes IPv4 and IPv6 CIDRs. For example, if you specify 100.68.0.18/18 for the CIDR...")
                 .with_provider_name("CidrIp")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("cidr_ipv6", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv6_cidr()))
+            AttributeSchema::optional("cidr_ipv6", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Ipv6Cidr.definition()))
                 .create_only()
                 .with_description("The IPv6 CIDR range.")
                 .with_provider_name("CidrIpv6")
@@ -48,7 +48,7 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("group_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.attribute_type()))
+            AttributeSchema::optional("group_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.definition()))
                 .create_only()
                 .with_description("The ID of the security group.")
                 .with_provider_name("GroupId")
@@ -62,14 +62,14 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("source_prefix_list_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::PrefixListId.attribute_type()))
+            AttributeSchema::optional("source_prefix_list_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::PrefixListId.definition()))
                 .create_only()
                 .with_description("The ID of the source prefix list.")
                 .with_provider_name("SourcePrefixListId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("source_security_group_owner_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type()))
+            AttributeSchema::optional("source_security_group_owner_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.definition()))
                 .create_only()
                 .with_description("The Amazon Web Services account ID for the source security group, if the source security group is in a different account. The rule grants full ICMP, U...")
                 .with_provider_name("SourceSecurityGroupOwnerId")
@@ -83,14 +83,14 @@ pub fn ec2_security_group_ingress_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("source_security_group_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.attribute_type()))
+            AttributeSchema::optional("source_security_group_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupId.definition()))
                 .create_only()
                 .with_description("The ID of the source security group.")
                 .with_provider_name("SourceSecurityGroupId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("security_group_rule_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupRuleId.attribute_type()))
+            AttributeSchema::provider_populated("security_group_rule_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SecurityGroupRuleId.definition()))
                 .with_description("The ID of the security group rule. (read-only)")
                 .with_provider_name("SecurityGroupRuleId")
                 .build(),

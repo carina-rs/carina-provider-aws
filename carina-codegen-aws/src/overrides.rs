@@ -31,36 +31,7 @@ pub fn resource_arn_identity(resource: &str) -> Option<AwsType> {
         .map(|(_, _, row)| *row)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreIdentity {
-    Ipv4Address,
-    Ipv6Address,
-    Ipv4Cidr,
-    Ipv6Cidr,
-    Email,
-}
-
-impl CoreIdentity {
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Ipv4Address => "types::ipv4_address()",
-            Self::Ipv6Address => "types::ipv6_address()",
-            Self::Ipv4Cidr => "types::ipv4_cidr()",
-            Self::Ipv6Cidr => "types::ipv6_cidr()",
-            Self::Email => "types::email()",
-        }
-    }
-    pub fn attribute_type(self) -> carina_core::schema::AttributeType {
-        use carina_core::schema::types;
-        match self {
-            Self::Ipv4Address => types::ipv4_address(),
-            Self::Ipv6Address => types::ipv6_address(),
-            Self::Ipv4Cidr => types::ipv4_cidr(),
-            Self::Ipv6Cidr => types::ipv6_cidr(),
-            Self::Email => types::email(),
-        }
-    }
-}
+pub use carina_aws_types::CoreIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StringProfile {

@@ -417,15 +417,13 @@ pub(super) fn intersect<T: Ord + Copy>(left: Bounds<T>, right: Bounds<T>) -> Res
     if left.is_none() && right.is_none() {
         return Ok(None);
     }
-    let (a, b) = left.unwrap_or((None, None));
-    let (c, d) = right.unwrap_or((None, None));
-    let min = a.into_iter().chain(c).max();
-    let max = b.into_iter().chain(d).min();
+    let bounds = carina_core::schema::intersect_bounds(left, right);
+    let (min, max) = bounds.unwrap_or((None, None));
     anyhow::ensure!(
         !matches!((min,max),(Some(a),Some(b)) if a>b),
         "empty constraint intersection"
     );
-    Ok(Some((min, max)))
+    Ok(bounds)
 }
 
 /// An added pattern is always a separate portable input predicate. It never
@@ -498,15 +496,10 @@ pub(super) fn derive(
         };
         length = intersect(length, extra_length).with_context(|| format!("{resource}.{path}"))?;
     }
-    for extra in input_patterns(rules) {
-        carina_core::schema::InputPath::new(path.to_string()).with_context(|| {
-            format!(
-                "{resource}.{path}: pattern tightening requires an addressable InputRule target"
-            )
-        })?;
-        CompiledPattern::try_new(&extra)
-            .with_context(|| format!("{resource}.{path}: invalid InputRule pattern"))?;
-    }
+    let validated_input_patterns = input_patterns(rules)
+        .into_iter()
+        .map(|p| super::ValidatedInputPattern::new(resource, path, p))
+        .collect::<Result<Vec<_>>>()?;
     let mut value = string_refinement(pattern.as_ref(), length);
     for rule in rules {
         value = decorate(value, rule).with_context(|| format!("{resource}.{path}"))?;
@@ -517,6 +510,7 @@ pub(super) fn derive(
             None => correction.documentation().into(),
         });
     }
+    value.validated_input_patterns = validated_input_patterns;
     Ok(value)
 }
 
@@ -528,10 +522,13 @@ pub(super) fn decorate(
         TypeOverride::Identity(row)
         | TypeOverride::EnumIdentity(row)
         | TypeOverride::NamedValues { identity: row, .. } => {
-            let named = row.attribute_type();
+            let named = row.definition();
             anyhow::ensure!(
                 matches!(
-                    (value.attribute_type.raw_shape(), named.raw_shape()),
+                    (
+                        value.attribute_type.raw_shape(),
+                        named.as_attribute_type().raw_shape()
+                    ),
                     (
                         RawShape::String { .. },
                         RawShape::String { .. } | RawShape::Enum { .. }
@@ -548,7 +545,7 @@ pub(super) fn decorate(
                     .map_err(anyhow::Error::msg)
                     .with_context(|| format!("identity {row:?}"))?;
             value.type_code = if matches!(
-                named.raw_shape(),
+                named.as_attribute_type().raw_shape(),
                 RawShape::Enum {
                     values: Some(_),
                     ..
@@ -568,14 +565,14 @@ pub(super) fn decorate(
                 )
             } else {
                 format!(
-                    "carina_aws_types::with_member_identity({}, carina_aws_types::AwsType::{row:?}.attribute_type())",
+                    "carina_aws_types::with_member_identity({}, carina_aws_types::AwsType::{row:?}.definition())",
                     value.type_code
                 )
             };
             if let TypeOverride::NamedValues { values, .. } = rule {
                 value = allowed_values(value, values)?;
                 if matches!(
-                    named.raw_shape(),
+                    named.as_attribute_type().raw_shape(),
                     RawShape::Enum {
                         values: Some(_),
                         ..
@@ -599,16 +596,13 @@ pub(super) fn decorate(
                 matches!(value.attribute_type.raw_shape(), RawShape::String { .. }),
                 "core identity requires a String carrier"
             );
-            value.attribute_type = carina_aws_types::try_with_member_identity(
-                value.attribute_type,
-                core.attribute_type(),
-            )
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("core identity {core:?}"))?;
+            value.attribute_type =
+                carina_aws_types::try_with_member_identity(value.attribute_type, core.definition())
+                    .map_err(anyhow::Error::msg)
+                    .with_context(|| format!("core identity {core:?}"))?;
             value.type_code = format!(
-                "carina_aws_types::with_member_identity({}, {})",
-                value.type_code,
-                core.code()
+                "carina_aws_types::with_member_identity({}, carina_aws_types::CoreIdentity::{core:?}.definition())",
+                value.type_code
             );
         }
         TypeOverride::Identities(rows) => {
@@ -620,6 +614,7 @@ pub(super) fn decorate(
                         type_code: value.type_code.clone(),
                         attribute_type: value.attribute_type.clone(),
                         documentation: None,
+                        validated_input_patterns: Vec::new(),
                     },
                     &TypeOverride::Identity(*row),
                 )?;
@@ -718,13 +713,14 @@ pub(super) fn validate_allowed_values(
     allowed: &[&str],
 ) -> Result<Vec<String>> {
     anyhow::ensure!(!allowed.is_empty(), "empty allowed-value intersection");
+    let validator = carina_aws_types::MemberStringValidator::new(base)?;
     for value in allowed {
         anyhow::ensure!(
             source.is_none_or(|values| values.iter().any(|old| old == value)),
             "override value {value:?} is absent from the Smithy/declared value set"
         );
         anyhow::ensure!(
-            carina_aws_types::member_string_accepts(base, value),
+            validator.accepts(value),
             "override value {value:?} is rejected by the derived String constraints"
         );
     }

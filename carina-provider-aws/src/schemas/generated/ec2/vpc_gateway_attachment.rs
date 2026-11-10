@@ -21,7 +21,7 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
                     "internet_gateway_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::InternetGatewayId.attribute_type(),
+                        carina_aws_types::AwsType::InternetGatewayId.definition(),
                     ),
                 )
                 .create_only()
@@ -34,7 +34,7 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
                     "vpc_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::VpcId.attribute_type(),
+                        carina_aws_types::AwsType::VpcId.definition(),
                     ),
                 )
                 .create_only()
@@ -47,7 +47,7 @@ pub fn ec2_vpc_gateway_attachment_config() -> AwsSchemaConfig {
                     "vpn_gateway_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::VpnGatewayId.attribute_type(),
+                        carina_aws_types::AwsType::VpnGatewayId.definition(),
                     ),
                 )
                 .create_only()

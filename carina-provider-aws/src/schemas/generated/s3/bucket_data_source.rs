@@ -10,7 +10,7 @@ use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 pub fn arn() -> AttributeType {
     carina_aws_types::with_member_identity(
         AttributeType::string(),
-        carina_aws_types::AwsType::S3BucketArn.attribute_type(),
+        carina_aws_types::AwsType::S3BucketArn.definition(),
     )
 }
 
@@ -34,7 +34,7 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                     "arn",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::S3BucketArn.attribute_type(),
+                        carina_aws_types::AwsType::S3BucketArn.definition(),
                     ),
                 )
                 .with_description("ARN of the bucket.")
@@ -84,7 +84,7 @@ pub fn s3_bucket_data_source_config() -> AwsSchemaConfig {
                     "hosted_zone_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::Route53HostedZoneId.attribute_type(),
+                        carina_aws_types::AwsType::Route53HostedZoneId.definition(),
                     ),
                 )
                 .with_description("Route 53 Hosted Zone ID for the bucket's region.")

@@ -45,7 +45,7 @@ fn sqs_codegen_rust_uses_exact_value_paths_and_preserves_carriers() {
         "carina_aws_types::with_int_range(AttributeType::int(), Some(1024), Some(1048576))",
         "carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(20))",
         "carina_aws_types::with_int_range(AttributeType::int(), Some(60), Some(86400))",
-        "carina_aws_types::AwsType::SqsQueueArn.attribute_type()",
+        "carina_aws_types::AwsType::SqsQueueArn.definition()",
         "carina_aws_types::AwsType::SqsQueueDeduplicationScope.attribute_type()",
         "carina_aws_types::AwsType::SqsQueueFifoThroughputLimit.attribute_type()",
         // Native/protocol schema tests check the helper leaves' exact types

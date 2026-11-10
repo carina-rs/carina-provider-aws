@@ -19,28 +19,28 @@ pub fn ec2_vpc_peering_connection_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC peering connection.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("peer_owner_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type()))
+            AttributeSchema::optional("peer_owner_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.definition()))
                 .create_only()
                 .with_description("The Amazon Web Services account ID of the owner of the accepter VPC. Default: Your Amazon Web Services account ID")
                 .with_provider_name("PeerOwnerId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("peer_vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::required("peer_vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the VPC with which you are creating the VPC peering connection. You must specify this parameter in the request.")
                 .with_provider_name("PeerVpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the requester VPC. You must specify this parameter in the request.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpc_peering_connection_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcPeeringConnectionId.attribute_type()))
+            AttributeSchema::provider_populated("vpc_peering_connection_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcPeeringConnectionId.definition()))
                 .with_description("The ID of the VPC peering connection. (read-only)")
                 .with_provider_name("VpcPeeringConnectionId")
                 .build(),

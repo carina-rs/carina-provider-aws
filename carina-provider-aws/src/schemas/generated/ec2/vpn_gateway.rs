@@ -21,14 +21,14 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
         .with_description("Describes a virtual private gateway.")
         .with_coexisting_replacement()
         .attribute(
-            AttributeSchema::optional("amazon_side_asn", carina_aws_types::with_member_identity(AttributeType::int(), carina_aws_types::AwsType::Ec2VpnGatewayAmazonSideAsn.attribute_type()))
+            AttributeSchema::optional("amazon_side_asn", carina_aws_types::with_member_identity(AttributeType::int(), carina_aws_types::AwsType::Ec2VpnGatewayAmazonSideAsn.definition()))
                 .create_only()
                 .with_description("A private Autonomous System Number (ASN) for the Amazon side of a BGP session. If you're using a 16-bit ASN, it must be in the 64512 to 65534 range. I...")
                 .with_provider_name("AmazonSideAsn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZone.attribute_type()))
+            AttributeSchema::optional("availability_zone", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZone.definition()))
                 .create_only()
                 .with_description("The Availability Zone for the virtual private gateway.")
                 .with_provider_name("AvailabilityZone")
@@ -42,7 +42,7 @@ pub fn ec2_vpn_gateway_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpn_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpnGatewayId.attribute_type()))
+            AttributeSchema::provider_populated("vpn_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpnGatewayId.definition()))
                 .with_description("The ID of the virtual private gateway. (read-only)")
                 .with_provider_name("VpnGatewayId")
                 .build(),

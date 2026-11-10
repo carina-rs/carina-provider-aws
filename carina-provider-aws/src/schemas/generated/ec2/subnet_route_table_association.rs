@@ -24,7 +24,7 @@ pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
                     "route_table_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::RouteTableId.attribute_type(),
+                        carina_aws_types::AwsType::RouteTableId.definition(),
                     ),
                 )
                 .create_only()
@@ -37,7 +37,7 @@ pub fn ec2_subnet_route_table_association_config() -> AwsSchemaConfig {
                     "subnet_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::SubnetId.attribute_type(),
+                        carina_aws_types::AwsType::SubnetId.definition(),
                     ),
                 )
                 .create_only()

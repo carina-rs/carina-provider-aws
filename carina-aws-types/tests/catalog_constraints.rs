@@ -42,7 +42,7 @@ fn metadata(ty: &AttributeType) -> Option<Value> {
 }
 
 #[test]
-fn identity_662_round7_01_standalone_policies_keep_baseline_bounds_and_patterns() {
+fn standalone_policies_keep_baseline_bounds_and_patterns() {
     use carina_core::resource::{ConcreteValue, Value as InputValue};
     use carina_core::schema::{CompiledPattern, PatternMatch, PatternSpec, ValidatedConfigSchema};
     let expected: Value =
@@ -70,7 +70,10 @@ fn identity_662_round7_01_standalone_policies_keep_baseline_bounds_and_patterns(
             }
 
             assert_eq!(actual, declaration, "{row:?}");
-            for candidate in [ty.clone(), with_member_identity(AttributeType::int(), ty)] {
+            for candidate in [
+                ty.clone(),
+                with_member_identity(AttributeType::int(), row.definition()),
+            ] {
                 let schema =
                     ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), candidate)]))
                         .unwrap();
@@ -104,7 +107,11 @@ fn identity_662_round7_01_standalone_policies_keep_baseline_bounds_and_patterns(
             declaration["pattern"] = json!("^[0-9]{12}$");
         }
         if *row == AwsType::ResourceId {
-            declaration["pattern"] = json!("^[a-z]+-[0-9a-f]{8,}$");
+            declaration["pattern"] = json!("^[a-z0-9]+-[0-9a-f]{8,}$");
+        }
+        if *row == AwsType::Arn {
+            declaration["pattern"] =
+                json!(carina_aws_types::arn_regex(r"[^:]+:[^:\n]*:[^:\n]*:.*$"));
         }
         assert_eq!(
             actual, declaration,
@@ -127,7 +134,7 @@ fn identity_662_round7_01_standalone_policies_keep_baseline_bounds_and_patterns(
         }
         for candidate in [
             ty.clone(),
-            with_member_identity(AttributeType::string(), ty),
+            with_member_identity(AttributeType::string(), row.definition()),
         ] {
             let schema =
                 ValidatedConfigSchema::validate(BTreeMap::from([("value".into(), candidate)]))
@@ -163,7 +170,7 @@ fn identity_662_round7_01_standalone_policies_keep_baseline_bounds_and_patterns(
 }
 
 #[test]
-fn identity_662_round9_pattern_identities_keep_portable_constraints_without_callbacks() {
+fn pattern_identities_keep_portable_constraints_without_callbacks() {
     for row in [
         AwsType::Route53HostedZoneId,
         AwsType::AcmCertificateArn,
@@ -171,7 +178,7 @@ fn identity_662_round9_pattern_identities_keep_portable_constraints_without_call
     ] {
         for ty in [
             row.attribute_type(),
-            with_member_identity(AttributeType::string(), row.attribute_type()),
+            with_member_identity(AttributeType::string(), row.definition()),
         ] {
             let RawShape::String {
                 identity_layer,
@@ -203,8 +210,11 @@ fn identity_662_round9_pattern_identities_keep_portable_constraints_without_call
 }
 
 #[test]
-fn identity_662_round5_05_named_closed_enum_keeps_its_set() {
-    let ty = with_member_identity(AttributeType::string(), cloudfront_hosted_zone_id());
+fn named_closed_enum_keeps_its_set() {
+    let ty = with_member_identity(
+        AttributeType::string(),
+        AwsType::CloudFrontHostedZoneId.definition(),
+    );
     let RawShape::Enum {
         values: Some(values),
         dsl_aliases,
@@ -218,7 +228,7 @@ fn identity_662_round5_05_named_closed_enum_keeps_its_set() {
 }
 
 #[test]
-fn identity_662_round9_prefixed_ids_share_one_identity_pattern() {
+fn prefixed_ids_share_one_identity_pattern() {
     for row in AwsType::ALL {
         if row.identity().segments.first().map(String::as_str) != Some("ec2")
             || row.identity().kind != "Id"
@@ -231,7 +241,7 @@ fn identity_662_round9_prefixed_ids_share_one_identity_pattern() {
         if suffix.len() < 8 || !suffix.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
-        let ty = with_member_identity(AttributeType::string(), row.attribute_type());
+        let ty = with_member_identity(AttributeType::string(), row.definition());
         let RawShape::String { identity_layer, .. } = ty.raw_shape() else {
             continue;
         };

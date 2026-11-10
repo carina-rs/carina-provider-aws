@@ -27,7 +27,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("kms_key_id", carina_aws_types::with_member_reference(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(256))))), carina_aws_types::kms_key_arn_reference()))
+            AttributeSchema::optional("kms_key_id", carina_aws_types::with_member_reference(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(0), Some(256))))), carina_aws_types::kms_key_arn_reference_definition()))
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the KMS key to use when encrypting log data. For more information, see Amazon Resource Names.")
                 .with_provider_name("kmsKeyId")
@@ -49,7 +49,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("retention_in_days", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.attribute_type()))
+            AttributeSchema::optional("retention_in_days", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.definition()))
                 .with_description("The number of days to retain the log events in the log group. If unset, events never expire. The provider applies changes via PutRetentionPolicy / Del...")
                 .with_provider_name("retentionInDays")
                 .build(),

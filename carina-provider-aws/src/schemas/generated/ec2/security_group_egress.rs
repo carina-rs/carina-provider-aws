@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 
 const VALID_IP_PROTOCOL: &[&str] = &["tcp", "udp", "icmp", "icmpv6", "-1"];
 
@@ -24,7 +24,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "cidr_ip",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        types::ipv4_cidr(),
+                        carina_aws_types::CoreIdentity::Ipv4Cidr.definition(),
                     ),
                 )
                 .create_only()
@@ -37,7 +37,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "cidr_ipv6",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        types::ipv6_cidr(),
+                        carina_aws_types::CoreIdentity::Ipv6Cidr.definition(),
                     ),
                 )
                 .create_only()
@@ -57,7 +57,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "destination_prefix_list_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::PrefixListId.attribute_type(),
+                        carina_aws_types::AwsType::PrefixListId.definition(),
                     ),
                 )
                 .create_only()
@@ -86,7 +86,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "group_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::SecurityGroupId.attribute_type(),
+                        carina_aws_types::AwsType::SecurityGroupId.definition(),
                     ),
                 )
                 .create_only()
@@ -130,7 +130,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "source_security_group_owner_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::AccountId.attribute_type(),
+                        carina_aws_types::AwsType::AccountId.definition(),
                     ),
                 )
                 .create_only()
@@ -159,7 +159,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "destination_security_group_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::SecurityGroupId.attribute_type(),
+                        carina_aws_types::AwsType::SecurityGroupId.definition(),
                     ),
                 )
                 .create_only()
@@ -172,7 +172,7 @@ pub fn ec2_security_group_egress_config() -> AwsSchemaConfig {
                     "security_group_rule_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::SecurityGroupRuleId.attribute_type(),
+                        carina_aws_types::AwsType::SecurityGroupRuleId.definition(),
                     ),
                 )
                 .with_description("The ID of the security group rule. (read-only)")

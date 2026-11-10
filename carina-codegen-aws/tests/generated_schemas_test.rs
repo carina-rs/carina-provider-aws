@@ -27,7 +27,7 @@ mod generated;
 mod identity_dispatch;
 
 #[test]
-fn identity_662_round7_07_arn_helpers_match_the_attribute_declaration() {
+fn arn_helpers_match_the_attribute_declaration() {
     use carina_core::schema::{AttributeType, RawShape};
     fn metadata(ty: &AttributeType) -> String {
         let RawShape::String {
@@ -79,7 +79,7 @@ fn identity_662_round7_07_arn_helpers_match_the_attribute_declaration() {
 }
 
 #[test]
-fn identity_662_round6_02_role_path_rule_is_create_only() {
+fn role_path_rule_is_create_only() {
     use carina_core::schema::{InputPredicate, InputRuleScope};
     let config = generated::configs()
         .into_iter()
@@ -97,7 +97,7 @@ fn identity_662_round6_02_role_path_rule_is_create_only() {
 }
 
 #[test]
-fn identity_662_round6_04_bucket_hosted_zone_id_rejects_40_characters() {
+fn bucket_hosted_zone_id_rejects_40_characters() {
     use carina_core::schema::ValidatedConfigSchema;
     use std::collections::BTreeMap;
     let mut views = 0;
@@ -130,7 +130,7 @@ fn identity_662_round6_04_bucket_hosted_zone_id_rejects_40_characters() {
 }
 
 #[test]
-fn identity_662_round5_03_flow_log_enum_metadata_uses_real_top_level_values() {
+fn flow_log_enum_metadata_uses_real_top_level_values() {
     let (_, entries) = generated::ec2::flow_log::enum_valid_values();
     let values = entries
         .iter()
@@ -151,7 +151,7 @@ fn identity_662_round5_03_flow_log_enum_metadata_uses_real_top_level_values() {
 }
 
 #[test]
-fn identity_662_generated_schemas_compile_and_admit() {
+fn generated_schemas_compile_and_admit() {
     let configs = generated::configs();
     assert!(!configs.is_empty());
     for config in configs {
@@ -163,7 +163,7 @@ fn identity_662_generated_schemas_compile_and_admit() {
 }
 
 #[test]
-fn identity_662_round4_account_name_rule_and_smithy_constraints_both_apply() {
+fn account_name_rule_and_smithy_constraints_both_apply() {
     use carina_core::schema::{CompiledPattern, InputPredicate, InputRuleScope, RawShape};
     let config = generated::configs()
         .into_iter()
@@ -210,7 +210,7 @@ fn identity_662_round4_account_name_rule_and_smithy_constraints_both_apply() {
 }
 
 #[test]
-fn identity_662_round4_log_group_class_preserves_main_values() {
+fn log_group_class_preserves_main_values() {
     let config = generated::configs()
         .into_iter()
         .find(|config| config.resource_type_name == "logs.LogGroup")
@@ -232,7 +232,7 @@ fn identity_662_round4_log_group_class_preserves_main_values() {
 }
 
 #[test]
-fn identity_662_round9_email_keeps_builtin_identity_and_smithy_member_layers() {
+fn email_keeps_builtin_identity_and_smithy_member_layers() {
     use carina_core::schema::{RawShape, TypeIdentity};
     let config = generated::configs()
         .into_iter()

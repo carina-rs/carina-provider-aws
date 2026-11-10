@@ -120,6 +120,24 @@ pub fn reference_type_code(resource: &str, path: &str) -> Option<&'static str> {
     }
 }
 
+/// Typed constructor and emitted expression come from the same classification.
+pub fn member_definition(
+    resource: &str,
+    path: &str,
+) -> Option<(carina_aws_types::IdentityDefinition, &'static str)> {
+    match classification(resource, path) {
+        Some(Classification::Reference { arn_only: true }) => Some((
+            carina_aws_types::kms_key_arn_reference_definition(),
+            "carina_aws_types::kms_key_arn_reference_definition()",
+        )),
+        Some(Classification::Reference { arn_only: false }) => Some((
+            carina_aws_types::AwsType::KmsKeyReference.definition(),
+            "carina_aws_types::AwsType::KmsKeyReference.definition()",
+        )),
+        _ => None,
+    }
+}
+
 /// Synthetic fields still carry schema evidence through their update layout.
 /// This covers the handwritten S3 Rules override before it hides nested shapes.
 pub fn validate_synthetic_type(

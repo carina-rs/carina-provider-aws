@@ -1,8 +1,107 @@
-use carina_core::schema::{AttributeType, RawShape};
+use crate::IdentityDefinition;
+use carina_core::schema::{
+    AttributeType, CompiledPattern, CustomValidator, RawShape, TypeIdentity,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberIdentityError {
+    IdentityConflict {
+        existing: Box<TypeIdentity>,
+        requested: Box<TypeIdentity>,
+    },
+    ConflictingDefinition(Box<TypeIdentity>),
+    OpenEnumConstraints,
+    Invalid(String),
+}
+impl std::fmt::Display for MemberIdentityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdentityConflict {
+                existing,
+                requested,
+            } => write!(f, "cannot replace identity {existing} with {requested}"),
+            Self::ConflictingDefinition(id) => {
+                write!(f, "conflicting identity definition for {id}")
+            }
+            Self::OpenEnumConstraints => f.write_str(
+                "open Enum bases cannot enforce identity or member pattern/length constraints",
+            ),
+            Self::Invalid(message) => f.write_str(message),
+        }
+    }
+}
+impl std::error::Error for MemberIdentityError {}
+impl From<String> for MemberIdentityError {
+    fn from(s: String) -> Self {
+        Self::Invalid(s)
+    }
+}
+impl From<&str> for MemberIdentityError {
+    fn from(s: &str) -> Self {
+        Self::Invalid(s.into())
+    }
+}
+
+fn check_existing_identity(
+    base: &AttributeType,
+    named: &AttributeType,
+) -> Result<(), MemberIdentityError> {
+    let existing = match base.raw_shape() {
+        RawShape::String { identity_layer, .. } => identity_layer.identity,
+        RawShape::Int { identity_layer, .. } => identity_layer.identity,
+        _ => None,
+    };
+    let Some(existing) = existing else {
+        return Ok(());
+    };
+    let requested = match named.raw_shape() {
+        RawShape::String { identity_layer, .. } => identity_layer.identity,
+        RawShape::Int { identity_layer, .. } => identity_layer.identity,
+        RawShape::Enum { identity, .. } | RawShape::Reference { identity, .. } => Some(identity),
+        _ => None,
+    }
+    .ok_or("named definition has no identity")?;
+    if existing != requested {
+        return Err(MemberIdentityError::IdentityConflict {
+            existing: Box::new(existing.clone()),
+            requested: Box::new(requested.clone()),
+        });
+    }
+    let same = match (base.raw_shape(), named.raw_shape()) {
+        (
+            RawShape::String {
+                identity_layer: a, ..
+            },
+            RawShape::String {
+                identity_layer: b, ..
+            },
+        ) => {
+            a.pattern == b.pattern
+                && a.length == b.length
+                && a.to_dsl == b.to_dsl
+                && a.validate.is_some() == b.validate.is_some()
+        }
+        (
+            RawShape::Int {
+                identity_layer: a, ..
+            },
+            RawShape::Int {
+                identity_layer: b, ..
+            },
+        ) => a.range == b.range && a.validate.is_some() == b.validate.is_some(),
+        _ => false,
+    };
+    if !same {
+        return Err(MemberIdentityError::ConflictingDefinition(Box::new(
+            existing.clone(),
+        )));
+    }
+    Ok(())
+}
 
 /// Preserve the complete reusable identity and attach the slot's constraints.
 /// Identity pattern/length/range and member pattern/length/range stay distinct.
-pub fn with_member_identity(base: AttributeType, named: AttributeType) -> AttributeType {
+pub fn with_member_identity(base: AttributeType, named: IdentityDefinition) -> AttributeType {
     try_with_member_identity(base, named).expect("codegen validated the identity intersection")
 }
 
@@ -10,20 +109,11 @@ pub fn with_member_identity(base: AttributeType, named: AttributeType) -> Attrib
 /// the resource/path instead of becoming a generated-schema startup panic.
 pub fn try_with_member_identity(
     base: AttributeType,
-    named: AttributeType,
-) -> Result<AttributeType, String> {
+    named: IdentityDefinition,
+) -> Result<AttributeType, MemberIdentityError> {
     use carina_core::schema::{IntIdentityLayer, IntMemberConstraints};
-    match named.raw_shape() {
-        RawShape::String { member_layer, .. }
-            if member_layer.pattern.is_some() || member_layer.length.is_some() =>
-        {
-            return Err("named String definition must not contain member constraints".into());
-        }
-        RawShape::Int { member_layer, .. } if member_layer.range.is_some() => {
-            return Err("named Int definition must not contain member constraints".into());
-        }
-        _ => {}
-    }
+    let named = named.into_attribute_type();
+    check_existing_identity(&base, &named)?;
     Ok(match (base.raw_shape(), named.raw_shape()) {
         (
             RawShape::Int {
@@ -179,7 +269,9 @@ pub fn try_with_member_identity(
 }
 
 /// Project declaration-local constraints without donating a named definition.
-fn string_slot(ty: &AttributeType) -> Result<carina_core::schema::StringMemberConstraints, String> {
+fn string_slot(
+    ty: &AttributeType,
+) -> Result<carina_core::schema::StringMemberConstraints, MemberIdentityError> {
     use carina_core::schema::StringMemberConstraints;
     let RawShape::String {
         identity_layer,
@@ -210,17 +302,24 @@ fn enum_base(
     source: &AttributeType,
     definition: &AttributeType,
     selected: Option<&[String]>,
-) -> Result<AttributeType, String> {
-    let slot = string_slot(source)?;
-    if selected.is_none() && (slot.parts().pattern.is_some() || slot.parts().length.is_some()) {
-        return Err("an open enum cannot carry Smithy member constraints: core forbids a member layer in an Enum base".into());
+) -> Result<AttributeType, MemberIdentityError> {
+    let constrained = |ty: &AttributeType| {
+        matches!(ty.raw_shape(),
+        RawShape::String {identity_layer:i,member_layer:m}
+            if i.pattern.is_some() || i.length.is_some() || m.pattern.is_some() || m.length.is_some())
+    };
+    if selected.is_none() && (constrained(source) || constrained(definition)) {
+        return Err(MemberIdentityError::OpenEnumConstraints);
     }
     if let Some(values) = selected {
+        let source_validator = MemberStringValidator::new(source)?;
+        let definition_validator = MemberStringValidator::new(definition)?;
         for value in values {
-            if !member_string_accepts(source, value) || !member_string_accepts(definition, value) {
+            if !source_validator.accepts(value) || !definition_validator.accepts(value) {
                 return Err(format!(
                     "enum value {value:?} violates the derived or identity constraints"
-                ));
+                )
+                .into());
             }
         }
         // Protocol 27 represents a closed enum by its exact checked set.
@@ -229,16 +328,9 @@ fn enum_base(
         return Ok(AttributeType::string());
     }
     // Definition-only base; named identity/presentation belongs to the Enum.
-    let RawShape::String {
-        identity_layer,
-        member_layer,
-    } = definition.raw_shape()
-    else {
+    let RawShape::String { identity_layer, .. } = definition.raw_shape() else {
         return Err("enum definition base must be String".into());
     };
-    if member_layer.pattern.is_some() || member_layer.length.is_some() {
-        return Err("enum identity definition contains a member layer".into());
-    }
     Ok(AttributeType::refined_string(
         None,
         identity_layer.pattern.cloned(),
@@ -252,11 +344,12 @@ fn intersect_values(
     candidates: &[String],
     other: Option<&[String]>,
     nominal: Option<&carina_core::schema::CustomValidator>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, MemberIdentityError> {
+    let validator = MemberStringValidator::new(base)?;
     let selected = candidates
         .iter()
         .filter(|v| other.is_none_or(|values| values.contains(v)))
-        .filter(|v| member_string_accepts(base, v))
+        .filter(|v| validator.accepts(v))
         .filter(|v| {
             nominal.is_none_or(|check| {
                 let input: carina_core::resource::Value = carina_core::resource::Value::Concrete(
@@ -384,60 +477,78 @@ pub fn with_member_values(ty: AttributeType, allowed: &[&str]) -> AttributeType 
     )
 }
 
-pub fn member_string_accepts(base: &AttributeType, value: &str) -> bool {
-    let RawShape::String {
-        identity_layer,
-        member_layer,
-    } = base.raw_shape()
-    else {
-        return false;
-    };
-    let count = value.chars().count() as u64;
-    let bounds_ok = |bounds: Option<(Option<u64>, Option<u64>)>| {
-        bounds.is_none_or(|(min, max)| {
-            min.is_none_or(|n| count >= n) && max.is_none_or(|n| count <= n)
+/// A String policy whose two patterns are compiled once before a value loop.
+pub struct MemberStringValidator<'a> {
+    lengths: [Option<(Option<u64>, Option<u64>)>; 2],
+    patterns: Vec<CompiledPattern>,
+    semantic: Option<&'a CustomValidator>,
+}
+impl<'a> MemberStringValidator<'a> {
+    pub fn new(base: &'a AttributeType) -> Result<Self, MemberIdentityError> {
+        let RawShape::String {
+            identity_layer: i,
+            member_layer: m,
+        } = base.raw_shape()
+        else {
+            return Err("String carrier required".into());
+        };
+        let patterns = [i.pattern, m.pattern]
+            .into_iter()
+            .flatten()
+            .map(CompiledPattern::try_new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| MemberIdentityError::Invalid(e.to_string()))?;
+        Ok(Self {
+            lengths: [i.length, m.length],
+            patterns,
+            semantic: i.validate,
         })
-    };
-    let pattern_ok = |pattern: Option<&carina_core::schema::PatternSpec>| {
-        pattern.is_none_or(|p| {
-            carina_core::schema::CompiledPattern::try_new(p)
-                .expect("validated pattern")
-                .is_match(value)
-        })
-    };
-    bounds_ok(identity_layer.length)
-        && bounds_ok(member_layer.length)
-        && pattern_ok(identity_layer.pattern)
-        && pattern_ok(member_layer.pattern)
-        && identity_layer.validate.is_none_or(|check| {
-            let input: carina_core::resource::Value = carina_core::resource::Value::Concrete(
-                carina_core::resource::ConcreteValue::String(value.into()),
-            );
-            check(&input).is_ok()
-        })
+    }
+    pub fn accepts(&self, value: &str) -> bool {
+        let count = value.chars().count() as u64;
+        self.lengths.iter().all(|b| {
+            b.is_none_or(|(min, max)| {
+                min.is_none_or(|n| count >= n) && max.is_none_or(|n| count <= n)
+            })
+        }) && self.patterns.iter().all(|p| p.is_match(value))
+            && self.semantic.is_none_or(|check| {
+                let input: carina_core::resource::Value = carina_core::resource::Value::Concrete(
+                    carina_core::resource::ConcreteValue::String(value.into()),
+                );
+                check(&input).is_ok()
+            })
+    }
 }
 
 /// Preserve the declared String constraints when selecting comparison semantics.
-pub fn with_member_reference(base: AttributeType, reference: AttributeType) -> AttributeType {
-    let slot = string_slot(&base).expect("a reference requires one String member pattern");
-    let source = slot.parts().pattern;
-    let source_length = slot.parts().length;
+pub fn with_member_reference(base: AttributeType, reference: IdentityDefinition) -> AttributeType {
+    try_with_member_reference(base, reference)
+        .expect("codegen validated the reference intersection")
+}
+
+pub fn try_with_member_reference(
+    base: AttributeType,
+    reference: IdentityDefinition,
+) -> Result<AttributeType, MemberIdentityError> {
+    let reference = reference.into_attribute_type();
+    check_existing_identity(&base, &reference)?;
+    let slot = string_slot(&base)?;
     let RawShape::Reference {
         identity, length, ..
     } = reference.raw_shape()
     else {
-        panic!("reference declaration")
+        return Err("reference definition required".into());
     };
-    let (a, b) = source_length.unwrap_or((None, None));
-    let (c, d) = length.unwrap_or((None, None));
-    let length = if source_length.is_some() || length.is_some() {
-        Some((a.into_iter().chain(c).max(), b.into_iter().chain(d).min()))
-    } else {
-        None
-    };
-    // The reference's additional grammar is a portable InputRule::Matches,
-    // bound by codegen. Only the Smithy pattern occupies this slot.
-    AttributeType::reference(identity.clone(), source.cloned(), length)
+    let length = carina_core::schema::intersect_bounds(slot.parts().length, length);
+    if length.is_some_and(|(a, b)| matches!((a,b),(Some(a),Some(b)) if a>b)) {
+        return Err("empty reference length intersection".into());
+    }
+    // Codegen binds the reference's extra pattern as a portable input rule.
+    Ok(AttributeType::reference(
+        identity.clone(),
+        slot.parts().pattern.cloned(),
+        length,
+    ))
 }
 
 #[cfg(test)]
@@ -445,10 +556,10 @@ mod tests {
     use super::*;
     use carina_core::schema::{PatternMatch, PatternSpec};
     #[test]
-    fn identity_662_standalone_constraints_are_not_donated_to_members() {
-        let named = crate::iam_role_arn();
+    fn standalone_constraints_are_not_donated_to_members() {
+        let named = crate::AwsType::IamRoleArn.definition();
         assert!(matches!(
-            named.raw_shape(),
+            named.as_attribute_type().raw_shape(),
             RawShape::String {
                 identity_layer: carina_core::schema::StringIdentityParts {
                     pattern: Some(_),
@@ -491,10 +602,10 @@ mod tests {
     }
 
     #[test]
-    fn identity_662_integer_binding_keeps_the_declared_range_and_callback() {
+    fn integer_binding_keeps_the_declared_range_and_callback() {
         let member = with_member_identity(
             AttributeType::refined_int(None, Some((Some(10), Some(100)))),
-            crate::logs_log_group_retention_in_days(),
+            crate::AwsType::LogsLogGroupRetentionInDays.definition(),
         );
         assert!(matches!(
             member.raw_shape(),

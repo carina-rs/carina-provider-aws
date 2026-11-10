@@ -5,7 +5,7 @@
 //! DO NOT EDIT MANUALLY - regenerate with smithy-codegen
 
 use super::AwsSchemaConfig;
-use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema, types};
+use carina_core::schema::{AttributeSchema, AttributeType, ResourceSchema};
 use carina_provider_protocol::types::ValidatorType;
 
 const VALID_DOMAIN: &[&str] = &["standard", "vpc"];
@@ -21,7 +21,7 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
         .with_description("Describes an Elastic IP address, or a carrier IP address.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("address", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_address()))
+            AttributeSchema::optional("address", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Ipv4Address.definition()))
                 .create_only()
                 .with_description("The Elastic IP address to recover or an IPv4 address from an address pool.")
                 .with_provider_name("Address")
@@ -42,13 +42,13 @@ pub fn ec2_eip_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("allocation_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AllocationId.attribute_type()))
+            AttributeSchema::provider_populated("allocation_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AllocationId.definition()))
                 .with_description("The ID representing the allocation of the address. (read-only)")
                 .with_provider_name("AllocationId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("public_ip", carina_aws_types::with_member_identity(AttributeType::string(), types::ipv4_address()))
+            AttributeSchema::provider_populated("public_ip", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Ipv4Address.definition()))
                 .with_description("The Elastic IP address. (read-only)")
                 .with_provider_name("PublicIp")
                 .build(),

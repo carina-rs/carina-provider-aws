@@ -928,7 +928,7 @@ fn field_group_sentences_share_cardinality_and_safe_code_spans() {
 }
 
 #[test]
-fn identity_662_round9_docs_distinguish_identity_and_member_constraints() {
+fn docs_distinguish_identity_and_member_constraints() {
     use carina_core::schema::{StringIdentityLayer, StringMemberConstraints};
     let ty = AttributeType::string_member(
         StringIdentityLayer::new(

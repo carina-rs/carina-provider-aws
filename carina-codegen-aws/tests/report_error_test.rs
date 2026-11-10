@@ -1,7 +1,7 @@
 use std::{path::Path, process::Command};
 
 #[test]
-fn identity_662_round7_09_report_failure_does_not_mask_codegen_error() {
+fn report_failure_does_not_mask_codegen_error() {
     let cache = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()

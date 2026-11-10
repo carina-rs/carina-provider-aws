@@ -42,14 +42,14 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.attribute_type())))
+            AttributeSchema::required("subnet_ids", AttributeType::list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.definition())))
                 .create_only()
                 .with_description("The IDs of one or more subnets. You can specify only one subnet per Availability Zone. You must specify at least one subnet, but we recommend that you...")
                 .with_provider_name("SubnetIds")
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("transit_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::TransitGatewayId.attribute_type()))
+            AttributeSchema::required("transit_gateway_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::TransitGatewayId.definition()))
                 .create_only()
                 .identity()
                 .with_description("The ID of the transit gateway.")
@@ -57,7 +57,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .identity()
                 .with_description("The ID of the VPC.")

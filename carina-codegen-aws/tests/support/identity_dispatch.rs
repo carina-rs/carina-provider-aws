@@ -157,7 +157,7 @@ fn wire_identity(row: carina_aws_types::AwsType) -> TypeIdentity {
 }
 
 #[test]
-fn identity_662_round9_guest_dispatch_retains_only_semantic_validation() {
+fn guest_dispatch_retains_only_semantic_validation() {
     use carina_aws_types::AwsType;
     let cache = cache();
     let identity = wire_identity(AwsType::IamRoleArn);
@@ -174,7 +174,7 @@ fn identity_662_round9_guest_dispatch_retains_only_semantic_validation() {
 }
 
 #[test]
-fn identity_662_round9_wire_retains_identity_and_member_constraints_distinctly() {
+fn wire_retains_identity_and_member_constraints_distinctly() {
     let cache = cache();
     for row in [
         carina_aws_types::AwsType::Route53HostedZoneId,
@@ -221,7 +221,7 @@ fn identity_662_round9_wire_retains_identity_and_member_constraints_distinctly()
 }
 
 #[test]
-fn identity_662_round8_full_guest_schema_cache_admits() {
+fn full_guest_schema_cache_admits() {
     ProviderSchemaCache::from_provider(&SchemaProvider {
         include_every_schema: true,
     })
@@ -285,7 +285,7 @@ impl carina_core::provider::ProviderFactory for TransportFactory {
 }
 
 #[test]
-fn identity_662_round9_wire_host_enforces_structure_then_dispatches_semantics() {
+fn wire_host_enforces_structure_then_dispatches_semantics() {
     let guest = cache();
     let wire = serde_json::from_str(&provider_schema_to_json(guest.witness()).unwrap()).unwrap();
     let host = carina_core::protocol_convert::protocol_to_provider_schema_witness(

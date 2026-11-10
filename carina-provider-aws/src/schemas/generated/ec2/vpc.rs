@@ -21,7 +21,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         .with_description("Describes a VPC.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2VpcCidrBlock.attribute_type()))
+            AttributeSchema::optional("cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2VpcCidrBlock.definition()))
                 .create_only()
                 .with_description("The IPv4 network range for the VPC, in CIDR notation. For example, 10.0.0.0/16. We modify the specified CIDR block to its canonical form; for example,...")
                 .with_provider_name("CidrBlock")
@@ -48,7 +48,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
         )
         // Read contract: CreateVpc accepts the IPAM pool ID, but DescribeVpcs returns only the allocated CIDR association
         .attribute(
-            AttributeSchema::optional("ipv4_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.attribute_type()))
+            AttributeSchema::optional("ipv4_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.definition()))
                 .create_only()
                 .write_only()
                 .with_description("The ID of an IPv4 IPAM pool you want to use for allocating this VPC's CIDR. For more information, see What is IPAM? in the Amazon VPC IPAM User Guide.")
@@ -63,7 +63,7 @@ pub fn ec2_vpc_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::provider_populated("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .with_description("The ID of the VPC. (read-only)")
                 .with_provider_name("VpcId")
                 .build(),

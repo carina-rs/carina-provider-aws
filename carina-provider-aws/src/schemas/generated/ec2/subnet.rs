@@ -27,21 +27,21 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZone.attribute_type()))
+            AttributeSchema::optional("availability_zone", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZone.definition()))
                 .create_only()
                 .with_description("The Availability Zone or Local Zone for the subnet. Default: Amazon Web Services selects one for you. If you create more than one subnet in your VPC, ...")
                 .with_provider_name("AvailabilityZone")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("availability_zone_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZoneId.attribute_type()))
+            AttributeSchema::optional("availability_zone_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AvailabilityZoneId.definition()))
                 .create_only()
                 .with_description("The AZ ID or the Local Zone ID of the subnet.")
                 .with_provider_name("AvailabilityZoneId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2SubnetIpv4CidrBlock.attribute_type()))
+            AttributeSchema::optional("cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2SubnetIpv4CidrBlock.definition()))
                 .create_only()
                 .with_description("The IPv4 network range for the subnet, in CIDR notation. For example, 10.0.0.0/24. We modify the specified CIDR block to its canonical form; for examp...")
                 .with_provider_name("CidrBlock")
@@ -61,7 +61,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         )
         // Read contract: CreateSubnet accepts the IPv4 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs
         .attribute(
-            AttributeSchema::optional("ipv4_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.attribute_type()))
+            AttributeSchema::optional("ipv4_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.definition()))
                 .create_only()
                 .write_only()
                 .with_description("An IPv4 IPAM pool ID for the subnet.")
@@ -76,7 +76,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv6_cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2SubnetIpv6CidrBlock.attribute_type()))
+            AttributeSchema::optional("ipv6_cidr_block", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Ec2SubnetIpv6CidrBlock.definition()))
                 .create_only()
                 .with_description("The IPv6 network range for the subnet, in CIDR notation. This parameter is required for an IPv6 only subnet.")
                 .with_provider_name("Ipv6CidrBlock")
@@ -84,7 +84,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
         )
         // Read contract: CreateSubnet accepts the IPv6 IPAM pool ID, but DescribeSubnets returns only allocated CIDRs
         .attribute(
-            AttributeSchema::optional("ipv6_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.attribute_type()))
+            AttributeSchema::optional("ipv6_ipam_pool_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IpamPoolId.definition()))
                 .create_only()
                 .write_only()
                 .with_description("An IPv6 IPAM pool ID for the subnet.")
@@ -99,7 +99,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("ipv6_netmask_length", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(0), Some(128))))), carina_aws_types::AwsType::Ec2SubnetIpv6NetmaskLength.attribute_type()))
+            AttributeSchema::optional("ipv6_netmask_length", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(0), Some(128))))), carina_aws_types::AwsType::Ec2SubnetIpv6NetmaskLength.definition()))
                 .create_only()
                 .with_description("An IPv6 netmask length for the subnet.")
                 .with_provider_name("Ipv6NetmaskLength")
@@ -112,7 +112,7 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("outpost_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
+            AttributeSchema::optional("outpost_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.definition()))
                 .create_only()
                 .with_description("The Amazon Resource Name (ARN) of the Outpost. If you specify an Outpost ARN, you must also specify the Availability Zone of the Outpost subnet.")
                 .with_provider_name("OutpostArn")
@@ -132,14 +132,14 @@ pub fn ec2_subnet_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.attribute_type()))
+            AttributeSchema::required("vpc_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::VpcId.definition()))
                 .create_only()
                 .with_description("The ID of the VPC.")
                 .with_provider_name("VpcId")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("subnet_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.attribute_type()))
+            AttributeSchema::provider_populated("subnet_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SubnetId.definition()))
                 .with_description("The ID of the subnet. (read-only)")
                 .with_provider_name("SubnetId")
                 .build(),

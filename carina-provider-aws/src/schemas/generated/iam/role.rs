@@ -14,7 +14,7 @@ pub fn arn() -> AttributeType {
             carina_core::schema::StringIdentityLayer::new(None, None, None, None),
             carina_core::schema::StringMemberConstraints::new(None, Some((Some(20), Some(2048)))),
         ),
-        carina_aws_types::AwsType::IamRoleArn.attribute_type(),
+        carina_aws_types::AwsType::IamRoleArn.definition(),
     )
 }
 
@@ -57,7 +57,7 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("role_name", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_+=,.@\\-]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(64))))), carina_aws_types::AwsType::IamRoleName.attribute_type()))
+            AttributeSchema::required("role_name", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_+=,.@\\-]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(64))))), carina_aws_types::AwsType::IamRoleName.definition()))
                 .create_only()
                 .identity()
                 .with_description("The name of the role to create. IAM user, group, role, and policy names must be unique within the account. Names are not distinguished by case. For ex...")
@@ -65,13 +65,13 @@ pub fn iam_role_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(20), Some(2048))))), carina_aws_types::AwsType::IamRoleArn.attribute_type()))
+            AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(20), Some(2048))))), carina_aws_types::AwsType::IamRoleArn.definition()))
                 .with_description("The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and how to use them in policies, see IAM identifiers in the IAM Us... (read-only)")
                 .with_provider_name("Arn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("role_id", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_]+$", carina_core::schema::PatternMatch::Full)), Some((Some(16), Some(128))))), carina_aws_types::AwsType::IamRoleId.attribute_type()))
+            AttributeSchema::provider_populated("role_id", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[A-Za-z0-9_]+$", carina_core::schema::PatternMatch::Full)), Some((Some(16), Some(128))))), carina_aws_types::AwsType::IamRoleId.definition()))
                 .with_description("The stable and unique string identifying the role. For more information about IDs, see IAM identifiers in the IAM User Guide. (read-only)")
                 .with_provider_name("RoleId")
                 .build(),

@@ -36,6 +36,10 @@ pub struct SourceCorrectionSite {
     pub correction: SourceCorrection,
 }
 
+// Compatibility policy approved for #662, following #638 (8e5dd9e). That
+// history cites AWS GovCloud/China ARN documentation and offline SDK partition
+// metadata tests. It records no real Organizations API measurement of this
+// widening, so no measured date, region, or checked directions are available.
 pub const SOURCE_CORRECTIONS: &[SourceCorrectionSite] = &[
     SourceCorrectionSite {
         resource: "organizations.Account",
@@ -66,7 +70,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identity_662_round2_source_correction_can_only_rewrite_the_partition() {
+    fn source_correction_can_only_rewrite_the_partition() {
         let suffix = r"organizations::[0-9]{12}:account\/o-[a-z0-9]{10,32}\/[0-9]{12}$";
         let corrected = SourceCorrection::ArnPartition
             .apply(&format!("^arn:aws:{suffix}"))

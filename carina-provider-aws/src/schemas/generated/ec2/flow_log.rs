@@ -34,14 +34,14 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         .with_description("Describes a flow log.")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::optional("deliver_logs_permission_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleArn.attribute_type()))
+            AttributeSchema::optional("deliver_logs_permission_arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleArn.definition()))
                 .create_only()
                 .with_description("The ARN of the IAM role that allows Amazon EC2 to publish flow logs to the log destination. This parameter is required if the destination type is clou...")
                 .with_provider_name("DeliverLogsPermissionArn")
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_destination", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.attribute_type()))
+            AttributeSchema::optional("log_destination", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::Arn.definition()))
                 .create_only()
                 .with_description("The destination for the flow log data. The meaning of this parameter depends on the destination type. If the destination type is cloud-watch-logs, spe...")
                 .with_provider_name("LogDestination")
@@ -69,7 +69,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("max_aggregation_interval", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::Ec2FlowLogMaxAggregationInterval.attribute_type()))
+            AttributeSchema::optional("max_aggregation_interval", carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::Ec2FlowLogMaxAggregationInterval.definition()))
                 .create_only()
                 .with_description("The maximum interval of time during which a flow of packets is captured and aggregated into a flow log record. The possible values are 60 seconds (1 m...")
                 .with_provider_name("MaxAggregationInterval")

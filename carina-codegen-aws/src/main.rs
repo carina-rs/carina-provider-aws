@@ -22,9 +22,7 @@ use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use carina_aws_types::{AwsType, arn_regex, dsl_enum_value};
 use carina_codegen_aws::description::Description;
-use carina_codegen_aws::kms_references::{
-    self, PathSegment, reference_type_code, validate_smithy_type,
-};
+use carina_codegen_aws::kms_references::{self, PathSegment, validate_smithy_type};
 use carina_codegen_aws::resource_defs::{self, ReplacementClass, ResourceDef};
 use carina_docgen::example::{self, DocExample, ExampleKind};
 use carina_docgen::{
@@ -40,13 +38,17 @@ use carina_codegen_aws::overrides::{
     CoreIdentity, DataSourceType, Representation, StringProfile, TypeOverride,
 };
 #[cfg(test)]
+mod data_source_types_tests;
+#[cfg(test)]
+mod enum_members_tests;
+#[cfg(test)]
+mod input_patterns_tests;
+#[cfg(test)]
 mod member_constraints_tests;
 #[cfg(test)]
-mod round5_tests;
+mod pattern_translation_tests;
 #[cfg(test)]
-mod round6_tests;
-#[cfg(test)]
-mod round7_tests;
+mod reference_members_tests;
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]
 mod test_support;
@@ -176,26 +178,37 @@ impl<'a> TypeDeclarations<'a> {
     fn get(&self, name: &str) -> Option<&TypeOverride> {
         self.members.get(name)
     }
-    fn add_input_pattern(&self, resource: &str, path: &str, pattern: PatternSpec) -> Result<()> {
-        carina_core::schema::InputPath::new(path.to_owned()).with_context(|| {
+    fn add_input_pattern(&self, validated: ValidatedInputPattern) {
+        let mut patterns = self.input_patterns.borrow_mut();
+        let patterns = patterns.entry(validated.path.as_str().into()).or_default();
+        let spec = validated.pattern.as_ref();
+        if !patterns.contains(spec) {
+            patterns.push(spec.clone());
+        }
+    }
+}
+
+struct ValidatedInputPattern {
+    path: carina_core::schema::InputPath,
+    pattern: carina_core::schema::CompiledPattern,
+}
+impl ValidatedInputPattern {
+    fn new(resource: &str, path: &str, pattern: PatternSpec) -> Result<Self> {
+        let path = carina_core::schema::InputPath::new(path.to_owned()).with_context(|| {
             format!(
                 "{resource}.{path}: pattern tightening requires an addressable InputRule target"
             )
         })?;
-        carina_core::schema::CompiledPattern::try_new(&pattern)
+        let pattern = carina_core::schema::CompiledPattern::try_new(&pattern)
             .with_context(|| format!("{resource}.{path}: invalid InputRule pattern"))?;
-        let mut patterns = self.input_patterns.borrow_mut();
-        let patterns = patterns.entry(path.into()).or_default();
-        if !patterns.contains(&pattern) {
-            patterns.push(pattern);
-        }
-        Ok(())
+        Ok(Self { path, pattern })
     }
 }
 
 struct ValueTypeOverride {
     type_code: String,
     documentation: Option<String>,
+    validated_input_patterns: Vec<ValidatedInputPattern>,
     attribute_type: AttributeType,
 }
 impl ValueTypeOverride {
@@ -204,6 +217,7 @@ impl ValueTypeOverride {
             type_code: code.into(),
             attribute_type: attribute_type_from_code(code)?,
             documentation: None,
+            validated_input_patterns: Vec::new(),
         })
     }
 }
@@ -336,6 +350,7 @@ fn string_refinement(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Valu
     ValueTypeOverride {
         type_code,
         documentation: None,
+        validated_input_patterns: Vec::new(),
         attribute_type: AttributeType::string_member(
             carina_core::schema::StringIdentityLayer::new(None, None, None, None),
             carina_core::schema::StringMemberConstraints::new(pattern.cloned(), length),
@@ -373,6 +388,7 @@ fn resource_value_override(resource: &str, property_path: &str) -> Option<ValueT
                 type_code: "AttributeType::int()".into(),
                 attribute_type: AttributeType::int(),
                 documentation: None,
+                validated_input_patterns: Vec::new(),
             },
             rule,
         )
@@ -434,6 +450,7 @@ fn synthetic_extra_attribute_type(
         type_code: representation.code().into(),
         attribute_type: attribute_type_from_code(representation.code())?,
         documentation: None,
+        validated_input_patterns: Vec::new(),
     };
     if let Some(rule) = resource_type_overrides()
         .get(&(resource, field_name.to_snake_case().as_str()))
@@ -512,6 +529,7 @@ fn string_list_value_override(
             ListElements::AllowDuplicates,
         ),
         documentation: element.documentation,
+        validated_input_patterns: Vec::new(),
     }))
 }
 /// Information about a detected enum type
@@ -3136,17 +3154,20 @@ fn member_string_value(
         .or_else(|| infer_string_type(field));
     let rules = rule.into_iter().collect::<Vec<_>>();
     let mut value = string_members::derive(model, member, resource, path, &rules)?;
-    for pattern in string_members::input_patterns(&rules) {
-        declarations.add_input_pattern(resource, path, pattern)?;
+    for pattern in std::mem::take(&mut value.validated_input_patterns) {
+        declarations.add_input_pattern(pattern);
     }
-    if let Some(code) = reference_type_code(resource, path) {
-        let reference = attribute_type_from_code(code)?;
+    if let Some((reference, code)) = kms_references::member_definition(resource, path) {
         if let RawShape::Reference {
             pattern: Some(extra),
             ..
-        } = reference.raw_shape()
+        } = reference.as_attribute_type().raw_shape()
         {
-            declarations.add_input_pattern(resource, path, extra.clone())?;
+            declarations.add_input_pattern(ValidatedInputPattern::new(
+                resource,
+                path,
+                extra.clone(),
+            )?);
         }
         if let (
             RawShape::String {
@@ -3154,13 +3175,16 @@ fn member_string_value(
                 ..
             },
             RawShape::Reference { length: extra, .. },
-        ) = (value.attribute_type.raw_shape(), reference.raw_shape())
-        {
+        ) = (
+            value.attribute_type.raw_shape(),
+            reference.as_attribute_type().raw_shape(),
+        ) {
             string_members::intersect(source, extra)
                 .with_context(|| format!("{resource}.{path}"))?;
         }
         value.attribute_type =
-            carina_aws_types::with_member_reference(value.attribute_type, reference);
+            carina_aws_types::try_with_member_reference(value.attribute_type, reference)
+                .with_context(|| format!("{resource}.{path}"))?;
         value.type_code = format!(
             "carina_aws_types::with_member_reference({}, {code})",
             value.type_code
@@ -3215,9 +3239,9 @@ fn enum_member_value(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let base = string_members::derive(model, member, resource, path, &tightenings)?;
-    for pattern in string_members::input_patterns(&tightenings) {
-        declarations.add_input_pattern(resource, path, pattern)?;
+    let mut base = string_members::derive(model, member, resource, path, &tightenings)?;
+    for pattern in std::mem::take(&mut base.validated_input_patterns) {
+        declarations.add_input_pattern(pattern);
     }
     let mut identity_override = enum_identity_override(resource, parent, field);
     if let Some(
@@ -3280,7 +3304,9 @@ fn enum_member_value(
     }
     // A finite closed enum can express the exact intersection without a
     // constrained base (which protocol v24 cannot transport).
-    values.retain(|value| carina_aws_types::member_string_accepts(&base.attribute_type, value));
+    let validator = carina_aws_types::MemberStringValidator::new(&base.attribute_type)?;
+    values.retain(|value| validator.accepts(value));
+    drop(validator);
     anyhow::ensure!(
         !values.is_empty(),
         "{resource}.{path}: empty enum intersection"
@@ -3290,13 +3316,16 @@ fn enum_member_value(
         !declarations.to_dsl_overrides.contains_key(snake.as_str()),
         "{resource}.{path}: executable enum alias overrides are unsupported; use enum_aliases data"
     );
-    let named = identity_override.map(|row| row.attribute_type());
+    let named = identity_override.map(|row| row.definition());
     let mut alias_definitions = declarations
         .enum_aliases
         .get(snake.as_str())
         .cloned()
         .unwrap_or_default();
-    if let Some(RawShape::Enum { dsl_aliases, .. }) = named.as_ref().map(AttributeType::raw_shape) {
+    if let Some(RawShape::Enum { dsl_aliases, .. }) = named
+        .as_ref()
+        .map(|named| named.as_attribute_type().raw_shape())
+    {
         alias_definitions.extend(
             dsl_aliases
                 .iter()
@@ -3341,7 +3370,7 @@ fn enum_member_value(
     );
     let code = if let Some(row) = identity_override {
         format!(
-            "carina_aws_types::with_member_identity({code}, carina_aws_types::AwsType::{row:?}.attribute_type())"
+            "carina_aws_types::with_member_identity({code}, carina_aws_types::AwsType::{row:?}.definition())"
         )
     } else {
         code
@@ -3350,6 +3379,7 @@ fn enum_member_value(
         type_code: code,
         attribute_type,
         documentation: None,
+        validated_input_patterns: Vec::new(),
     };
     Ok(Some((value, info)))
 }
@@ -3448,6 +3478,7 @@ fn resolve_member_value(
                                 ListElements::AllowDuplicates,
                             ),
                             documentation: None,
+                            validated_input_patterns: Vec::new(),
                         },
                         None,
                     ));
@@ -3503,6 +3534,7 @@ fn resolve_member_value(
                 carina_core::schema::IntMemberConstraints::new(range),
             ),
             documentation: None,
+            validated_input_patterns: Vec::new(),
         };
         if let Some(rule) = resource_type_overrides()
             .get(&(ctx.resource_name, ctx.property_path.as_str()))
@@ -3583,6 +3615,7 @@ fn resolve_type_shape(
                     ListElements::AllowDuplicates,
                 ),
                 documentation: None,
+                validated_input_patterns: Vec::new(),
             }
         }
         Some(ShapeKind::Map) => {
@@ -3604,6 +3637,7 @@ fn resolve_type_shape(
                     length,
                 ),
                 documentation: None,
+                validated_input_patterns: Vec::new(),
             }
         }
         Some(ShapeKind::Structure) => {
@@ -3620,6 +3654,7 @@ fn resolve_type_shape(
                     type_code: tags.code(),
                     attribute_type: tags.attribute_type(),
                     documentation: None,
+                    validated_input_patterns: Vec::new(),
                 }
             } else if name == "AttributeBooleanValue" {
                 ValueTypeOverride::from_constructor("AttributeType::bool()")?
@@ -3786,6 +3821,7 @@ fn generate_struct_value(
             field_groups.to_vec(),
         ),
         documentation: None,
+        validated_input_patterns: Vec::new(),
     })
 }
 
@@ -7592,6 +7628,7 @@ fn data_source_type(
                 ListElements::AllowDuplicates,
             ),
             documentation: None,
+            validated_input_patterns: Vec::new(),
         });
     }
     if source.representation == Representation::IdentityStoreName
@@ -7632,6 +7669,7 @@ fn data_source_type(
             ),
             attribute_type: AttributeType::struct_("IdentityStoreUserName", values),
             documentation: None,
+            validated_input_patterns: Vec::new(),
         });
     }
     if source.representation != Representation::String {
@@ -7639,6 +7677,7 @@ fn data_source_type(
             type_code: source.representation.code().into(),
             attribute_type: attribute_type_from_code(source.representation.code())?,
             documentation: None,
+            validated_input_patterns: Vec::new(),
         };
         return match &source.decoration {
             Some(rule) => {
@@ -8244,6 +8283,7 @@ fn discover_markdown_type(
                 carina_core::schema::IntMemberConstraints::new(range),
             ),
             documentation: None,
+            validated_input_patterns: Vec::new(),
         };
         if let Some(rule) = resource_type_overrides()
             .get(&(resource_name, property_path))
@@ -10204,6 +10244,7 @@ mod tests {
                 ValueTypeOverride {
                     type_code: original.clone(),
                     documentation: None,
+                    validated_input_patterns: Vec::new(),
                     attribute_type: AttributeType::refined_int(
                         None,
                         Some((Some(minimum), Some(maximum))),
@@ -10284,6 +10325,7 @@ mod tests {
             let value = bound_int_override(&model, target, "Count", ValueTypeOverride {
                 type_code: "AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(9223372036854775807)))))".to_string(),
                 documentation: None,
+            validated_input_patterns: Vec::new(),
                 attribute_type: AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(1), Some(i64::MAX))))),
             });
             assert!(
@@ -10347,7 +10389,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identity_662_round9_new_input_predicates_emit_typed_literals() {
+    fn new_input_predicates_emit_typed_literals() {
         use carina_core::schema::{
             InputLiteral, InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleScope,
         };
@@ -10471,9 +10513,7 @@ mod tests {
             assert_ne!(attr.type_code, PLAIN_STRING_TYPE_CODE, "{path}");
         }
         let generated = generate_resource(&resource, &model).unwrap();
-        assert!(
-            generated.contains("carina_aws_types::AwsType::Route53HostedZoneId.attribute_type()")
-        );
+        assert!(generated.contains("carina_aws_types::AwsType::Route53HostedZoneId.definition()"));
         assert!(generated.contains("Some(4000)"), "{generated}");
         assert!(
             generated.contains("StructField::required(\"dns_name\", AttributeType::string_member(")
@@ -10624,7 +10664,7 @@ mod tests {
         let resource = resource_defs::s3_resources().remove(0);
         let schema = generate_resource(&resource, &model).unwrap();
         assert!(
-            schema.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.attribute_type()))"#),
+            schema.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::S3BucketArn.definition()))"#),
             "{schema}"
         );
         let attributes = collect_resource_attributes(&resource, &model).unwrap();
@@ -10633,10 +10673,7 @@ mod tests {
             .iter()
             .find(|attr| attr.snake_name == "arn")
             .unwrap();
-        assert!(
-            arn.type_code
-                .contains("AwsType::S3BucketArn.attribute_type()")
-        );
+        assert!(arn.type_code.contains("AwsType::S3BucketArn.definition()"));
         let schema_display = synthetic_extra_attribute_type(
             &resource,
             &model,
@@ -10848,7 +10885,7 @@ mod tests {
             .expect("retention attribute");
         assert_eq!(
             retention.type_code,
-            "carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.attribute_type())"
+            "carina_aws_types::with_member_identity(AttributeType::int_member(carina_core::schema::IntIdentityLayer::new(None, None), carina_core::schema::IntMemberConstraints::new(Some((Some(-2147483648), Some(2147483647))))), carina_aws_types::AwsType::LogsLogGroupRetentionInDays.definition())"
         );
         assert_eq!(retention.send_type, SendFieldType::Int);
         let generated = generate_resource(&resource, &model).expect("generate Logs schema");
@@ -10924,7 +10961,7 @@ mod tests {
         for (field, constructor) in [
             (
                 "role_name",
-                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.definition())",
             ),
             (
                 "path",
@@ -10958,7 +10995,7 @@ mod tests {
         );
         assert!(
             generated.contains(
-                "AttributeSchema::required(\"role_name\", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type()))"
+                "AttributeSchema::required(\"role_name\", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.definition()))"
             ),
             "{generated}"
         );
@@ -11030,15 +11067,15 @@ mod tests {
             ("account_name", "AttributeType::string_member("),
             (
                 "role_name",
-                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.definition())",
             ),
             (
                 "email",
-                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.attribute_type())",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.definition())",
             ),
             (
                 "id",
-                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type())",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.definition())",
             ),
             (
                 "arn",
@@ -11078,7 +11115,7 @@ mod tests {
             .expect("management account output must share the Organizations Email type");
         assert_eq!(
             output.type_code,
-            "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.attribute_type())"
+            "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::OrganizationsAccountEmail.definition())"
         );
         for resource in [
             "organizations.Other",
@@ -11163,7 +11200,7 @@ mod tests {
             ),
             (
                 "master_account_id",
-                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type())",
+                "carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.definition())",
             ),
         ] {
             let attr = attrs.iter().find(|attr| attr.snake_name == field).unwrap();
@@ -13592,7 +13629,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_662_round4_input_patterns_reject_provider_outputs_and_bind_scope() {
+    fn input_patterns_reject_provider_outputs_and_bind_scope() {
         use carina_core::schema::InputRuleScope;
         let patterns = BTreeMap::from([(
             "label".into(),
@@ -13829,12 +13866,12 @@ mod tests {
         );
         assert!(
             generated.contains(
-                r#"AttributeSchema::provider_populated("account_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.attribute_type()))"#
+                r#"AttributeSchema::provider_populated("account_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::AccountId.definition()))"#
             ),
             "account_id must use aws_account_id(): {generated}"
         );
         assert!(
-            generated.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::StsCallerIdentityArn.attribute_type()))"#),
+            generated.contains(r#"AttributeSchema::provider_populated("arn", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::StsCallerIdentityArn.definition()))"#),
             "arn must use arn(): {generated}"
         );
         assert!(
@@ -13914,14 +13951,14 @@ mod tests {
         // arns is List<iam_role_arn>
         assert!(
             generated.contains(
-                "AttributeSchema::provider_populated(\"arns\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleArn.attribute_type())))"
+                "AttributeSchema::provider_populated(\"arns\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleArn.definition())))"
             ),
             "arns must be List(iam_role_arn): {generated}"
         );
         // names is an unordered list of the shared, named role-name type.
         assert!(
             generated.contains(
-                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())))"
+                "AttributeSchema::provider_populated(\"names\", AttributeType::unordered_list(carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.definition())))"
             ),
             "names must be List(refined String): {generated}"
         );
@@ -13974,7 +14011,7 @@ mod tests {
         let generated =
             generate_data_source(&unrelated, &model, false).expect("unrelated data source");
         assert!(
-            !generated.contains("carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.attribute_type())")
+            !generated.contains("carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::IamRoleName.definition())")
                 && !generated.contains("carina_aws_types::iam_path_prefix()"),
             "{generated}"
         );
@@ -15216,7 +15253,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             sans.type_code,
-            "AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(253))))), carina_aws_types::AwsType::AcmCertificateSubjectAlternativeName.attribute_type()), false, Some((Some(1), Some(100))), carina_core::schema::ListElements::AllowDuplicates)"
+            "AttributeType::refined_list(carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(253))))), carina_aws_types::AwsType::AcmCertificateSubjectAlternativeName.definition()), false, Some((Some(1), Some(100))), carina_core::schema::ListElements::AllowDuplicates)"
         );
         let generated = generate_resource(&resource, &model).unwrap();
         assert!(
@@ -15224,7 +15261,7 @@ mod tests {
             "{generated}"
         );
         assert!(
-            generated.contains("carina_aws_types::AwsType::AcmCertificateArn.attribute_type()"),
+            generated.contains("carina_aws_types::AwsType::AcmCertificateArn.definition()"),
             "{generated}"
         );
         assert!(
@@ -15261,7 +15298,7 @@ mod tests {
             generate_resource(&resource, &markdown_read_shape_override_model()).unwrap();
         assert_eq!(
             generated
-                .matches("carina_aws_types::AwsType::AcmCertificateValidationUrl.attribute_type()")
+                .matches("carina_aws_types::AwsType::AcmCertificateValidationUrl.definition()")
                 .count(),
             4,
             "{generated}"
@@ -16606,7 +16643,7 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("failed to generate resource");
 
         assert!(
-            generated.contains("\"email\", carina_aws_types::with_member_identity(AttributeType::string(), types::email()))"),
+            generated.contains("\"email\", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::CoreIdentity::Email.definition()))"),
             "organizations.account.email should be types::email(): {generated}"
         );
         assert!(

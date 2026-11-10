@@ -23,7 +23,7 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
                     "vpc_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::VpcId.attribute_type(),
+                        carina_aws_types::AwsType::VpcId.definition(),
                     ),
                 )
                 .create_only()
@@ -36,7 +36,7 @@ pub fn ec2_route_table_config() -> AwsSchemaConfig {
                     "route_table_id",
                     carina_aws_types::with_member_identity(
                         AttributeType::string(),
-                        carina_aws_types::AwsType::RouteTableId.attribute_type(),
+                        carina_aws_types::AwsType::RouteTableId.definition(),
                     ),
                 )
                 .with_description("The ID of the route table. (read-only)")
