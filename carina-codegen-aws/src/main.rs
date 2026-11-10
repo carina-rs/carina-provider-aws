@@ -182,10 +182,69 @@ fn pattern_spec_code(pattern: &PatternSpec) -> String {
     )
 }
 
+fn input_literal_code(literal: &carina_core::schema::InputLiteral) -> String {
+    use carina_core::schema::InputLiteral;
+    match literal {
+        InputLiteral::Bool(value) => format!("carina_core::schema::InputLiteral::Bool({value})"),
+        InputLiteral::Int(value) => format!("carina_core::schema::InputLiteral::Int({value})"),
+        InputLiteral::Float(value) => format!(
+            "carina_core::schema::InputLiteral::Float(carina_core::FiniteF64::new({:?}).expect(\"finite input literal\"))",
+            value.get()
+        ),
+        InputLiteral::String(value) => {
+            format!("carina_core::schema::InputLiteral::String({value:?}.into())")
+        }
+        InputLiteral::Enum {
+            identity,
+            api_value,
+        } => format!(
+            "carina_core::schema::InputLiteral::Enum {{ identity: carina_core::schema::TypeIdentity::new({:?}, Vec::<String>::from([{}]), {:?}), api_value: {api_value:?}.into() }}",
+            identity.provider.as_deref(),
+            identity
+                .segments
+                .iter()
+                .map(|segment| format!("{segment:?}.into()"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            identity.kind,
+        ),
+    }
+}
+
+fn input_condition_code(condition: &carina_core::schema::InputCondition) -> String {
+    use carina_core::schema::InputCondition;
+    match condition {
+        InputCondition::Always => "carina_core::schema::InputCondition::Always".to_string(),
+        InputCondition::Present(path) => format!(
+            "carina_core::schema::InputCondition::Present(carina_core::schema::InputPath::new({:?}).expect(\"valid input path\"))",
+            path.as_str(),
+        ),
+        InputCondition::Equals { path, literal } => format!(
+            "carina_core::schema::InputCondition::Equals {{ path: carina_core::schema::InputPath::new({:?}).expect(\"valid input path\"), literal: {} }}",
+            path.as_str(),
+            input_literal_code(literal),
+        ),
+        InputCondition::Not(inner) => format!(
+            "carina_core::schema::InputCondition::Not(Box::new({}))",
+            input_condition_code(inner),
+        ),
+    }
+}
+
 /// Serialize core's portable declarations without introducing provider-specific
-/// predicates or changing their scope, target, codes, or pattern semantics.
+/// predicates or changing their scope, target, codes, conditions or pattern semantics.
 fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
-    use carina_core::schema::{CharSet, InputPredicate, InputRuleScope, InputRuleTarget};
+    use carina_core::schema::{
+        CharSet, InputCondition, InputPredicate, InputRuleParts, InputRuleScope, InputRuleTarget,
+    };
+
+    let InputRuleParts {
+        scope,
+        target,
+        code,
+        condition,
+        predicate,
+    } = rule.parts();
 
     let charset = |set: &CharSet| {
         format!(
@@ -199,15 +258,18 @@ fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
             value.as_str(),
         )
     };
-    let scope = match rule.scope() {
+    let scope = match scope {
         InputRuleScope::CreateOnly => "CreateOnly",
         InputRuleScope::EveryWrite => "EveryWrite",
     };
-    let target = match rule.target() {
-        InputRuleTarget::Value(_) => "Value",
-        InputRuleTarget::MapKeys(_) => "MapKeys",
+    let (target, path) = match target {
+        InputRuleTarget::Value(path) => ("Value", path),
+        InputRuleTarget::MapKeys(path) => ("MapKeys", path),
     };
-    let predicate = match rule.predicate() {
+    let predicate = match predicate {
+        InputPredicate::Present => "Present".to_string(),
+        InputPredicate::Absent => "Absent".to_string(),
+        InputPredicate::Equals(literal) => format!("Equals({})", input_literal_code(literal)),
         InputPredicate::Length { min, max } => format!("Length {{ min: {min:?}, max: {max:?} }}"),
         InputPredicate::AllowedChars(set) => format!("AllowedChars({})", charset(set)),
         InputPredicate::FirstChar(set) => format!("FirstChar({})", charset(set)),
@@ -233,16 +295,23 @@ fn input_rule_code(rule: &carina_core::schema::InputRule) -> String {
             format!("NotMatches({})", pattern_spec_code(pattern))
         }
     };
-    format!(
+    let mut generated = format!(
         "carina_core::schema::InputRule::new(\
          carina_core::schema::InputRuleScope::{scope}, \
          carina_core::schema::InputRuleTarget::{target}(\
          carina_core::schema::InputPath::new({:?}).expect(\"valid input path\")), \
          carina_core::schema::InputRuleCode::new({:?}).expect(\"valid input rule code\"), \
          carina_core::schema::InputPredicate::{predicate})",
-        rule.path().as_str(),
-        rule.code().as_str(),
-    )
+        path.as_str(),
+        code.as_str(),
+    );
+    if condition != &InputCondition::Always {
+        generated.push_str(&format!(
+            ".with_condition({})",
+            input_condition_code(condition)
+        ));
+    }
+    generated
 }
 
 /// Anonymous strings share their Rust literal encoding and schema metadata.
@@ -3484,11 +3553,14 @@ fn bound_int_override(
         return value;
     };
     let RawShape::Int {
-        identity, range, ..
+        identity_layer,
+        member_layer,
     } = value.attribute_type.raw_shape()
     else {
         return value;
     };
+    let identity = identity_layer.identity;
+    let range = carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
     // A closed Int set already enforces the carrier when every member fits.
     // Preserve its constructor, callback and allowed-value documentation.
     if let Some(identity) = identity
@@ -3506,10 +3578,10 @@ fn bound_int_override(
     let bounded =
         carina_aws_types::with_int_range(value.attribute_type.clone(), bounds.min, bounds.max);
     if let RawShape::Int {
-        range: bounded_range,
-        ..
+        identity_layer,
+        member_layer,
     } = bounded.raw_shape()
-        && range == bounded_range
+        && range == carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range)
     {
         return value;
     }
@@ -5121,8 +5193,12 @@ fn nested_sdk_i32_paths(model: &SmithyModel, target: &str, constructor: &str) ->
     fn authored(ty: &AttributeType, path: &mut Vec<String>, paths: &mut Vec<Vec<String>>) {
         match ty.raw_shape() {
             RawShape::Int {
-                identity, range, ..
+                identity_layer,
+                member_layer,
             } => {
+                let identity = identity_layer.identity;
+                let range =
+                    carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range);
                 let bounded = range.is_some_and(|(min, max)| {
                     min.is_some_and(|min| min >= i64::from(i32::MIN))
                         && max.is_some_and(|max| max <= i64::from(i32::MAX))
@@ -9238,6 +9314,46 @@ mod tests {
     }
 
     #[test]
+    fn resource_input_rules_preserve_nested_conditions() {
+        use carina_core::schema::{
+            InputCondition, InputLiteral, InputPath, InputPredicate, InputRule, InputRuleCode,
+            InputRuleScope,
+        };
+
+        let model = string_fixture_model(&[("Description", true)], &[("Description", true)]);
+        let mut resource = provider_fixture_resource("iam.Role", "", &["Description"], vec![]);
+        let rule = InputRule::value(
+            InputRuleScope::EveryWrite,
+            InputPath::new("description").unwrap(),
+            InputRuleCode::new("test.description.conditional_length").unwrap(),
+            InputPredicate::Length {
+                min: Some(1),
+                max: None,
+            },
+        )
+        .with_condition(InputCondition::Not(Box::new(InputCondition::Equals {
+            path: InputPath::new("description").unwrap(),
+            literal: InputLiteral::String("skip \"guard\"".into()),
+        })));
+        let expected_condition = concat!(
+            "carina_core::schema::InputCondition::Not(Box::new(",
+            "carina_core::schema::InputCondition::Equals { path: ",
+            r#"carina_core::schema::InputPath::new("description").expect("valid input path"), "#,
+            r#"literal: carina_core::schema::InputLiteral::String("skip \"guard\"".into()) }))"#,
+        );
+        let expected = format!(".with_condition({expected_condition})");
+        let emitted = input_rule_code(&rule);
+        assert!(emitted.ends_with(&expected), "{emitted}");
+
+        resource.input_rules.push(rule);
+        let generated = generate_resource(&resource, &model).unwrap();
+        assert!(
+            generated.contains(&format!(".input_rule({emitted})")),
+            "{generated}"
+        );
+    }
+
+    #[test]
     fn map_length_tag_strings_preserve_literal_backslashes() {
         let model = carina_smithy::parse(r##"{
             "smithy":"2.0", "shapes": {
@@ -9671,7 +9787,10 @@ mod tests {
         assert_eq!(retention.type_code, original);
         assert!(matches!(
             retention.attribute_type.raw_shape(),
-            RawShape::Int { range: None, .. }
+            RawShape::Int {
+                identity_layer: carina_core::schema::IntIdentityParts { range: None, .. },
+                ..
+            }
         ));
 
         for (minimum, maximum) in [(0, 100), (i64::from(i32::MIN), i64::from(i32::MAX))] {
@@ -9767,9 +9886,17 @@ mod tests {
                 documentation: None,
                 attribute_type: AttributeType::refined_int(None, Some((Some(1), Some(i64::MAX)))),
             });
-            assert!(matches!(value.attribute_type.raw_shape(), RawShape::Int {
-                range: Some((Some(1), Some(actual))), ..
-            } if actual == maximum));
+            let RawShape::Int {
+                identity_layer,
+                member_layer,
+            } = value.attribute_type.raw_shape()
+            else {
+                panic!("bounded Int")
+            };
+            assert_eq!(
+                carina_core::schema::intersect_bounds(identity_layer.range, member_layer.range),
+                Some((Some(1), Some(maximum)))
+            );
         }
     }
 
@@ -9814,9 +9941,12 @@ mod tests {
             .is_none()
         );
         let markdown = lifecycle_markdown_fixture();
-        assert!(markdown.contains("`Int (range: 1..=100)`"), "{markdown}");
         assert!(
-            markdown.contains("`Int (range: 1..=2147483647)`"),
+            markdown.contains("`Int (member constraints: range: 1..=100)`"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("`Int (member constraints: range: 1..=2147483647)`"),
             "{markdown}"
         );
         assert!(markdown.contains("`String (len: 0..=255)`"), "{markdown}");
@@ -9889,9 +10019,13 @@ mod tests {
                 "{resource}.{path}"
             );
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = value.attribute_type.raw_shape()
             else {

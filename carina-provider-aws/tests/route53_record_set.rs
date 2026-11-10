@@ -93,9 +93,13 @@ async fn route53_dns_fields_refine_grammar_without_introducing_nominal_sinks() {
         for path in ["name", "alias_target.dns_name"] {
             let dns = field(&schema, path);
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = dns.as_type().raw_shape()
             else {
@@ -298,7 +302,11 @@ fn route53_record_values_are_bounded_strings_in_a_nonempty_list() {
         let records = field(&schema, "resource_records");
         let item = records.list_element().unwrap();
         let RawShape::String {
-            identity, length, ..
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity, length, ..
+                },
+            ..
         } = item.as_type().raw_shape()
         else {
             panic!("String value");
@@ -323,9 +331,13 @@ fn route53_hosted_zone_id_reuses_the_existing_catalog_row() {
     for schema in schemas() {
         let id = field(&schema, "hosted_zone_id");
         let RawShape::String {
-            identity: Some(identity),
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = id.as_type().raw_shape()
         else {

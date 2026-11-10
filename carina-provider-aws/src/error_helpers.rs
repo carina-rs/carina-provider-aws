@@ -128,33 +128,29 @@ impl AwsItemFailures {
     }
 
     fn classification(&self) -> AwsErrorClass {
-        if self
-            .iter()
-            .all(|failure| failure.code().is_some_and(is_not_found_error_code))
-        {
-            AwsErrorClass::NotFound
-        } else if self.iter().all(|failure| {
-            failure.code().is_some_and(|code| {
-                is_not_found_error_code(code)
-                    || Transience::of_code(Some(code)) == Transience::Transient
-            })
-        }) {
-            AwsErrorClass::Transient
-        } else {
-            AwsErrorClass::Permanent
+        // An uncoded rejection prevents retrying the whole batch, even if the
+        // remaining codes would allow it. Keep the selected code diagnostic.
+        if self.iter().any(|failure| failure.code().is_none()) {
+            return AwsErrorClass::Permanent;
         }
+        let code = self.code();
+        AwsErrorClass::classify(code, Transience::of_code(code), None, None)
     }
 
     fn code(&self) -> Option<&str> {
         self.iter()
             .filter_map(AwsItemFailure::code)
             .min_by_key(|&code| {
-                let tier = if is_not_found_error_code(code) {
-                    2
-                } else if Transience::of_code(Some(code)) == Transience::Transient {
-                    1
-                } else {
-                    0
+                let tier = match AwsErrorClass::classify(
+                    Some(code),
+                    Transience::of_code(Some(code)),
+                    None,
+                    None,
+                ) {
+                    AwsErrorClass::Permanent => 0,
+                    AwsErrorClass::DependencyBlocked => 1,
+                    AwsErrorClass::Transient => 2,
+                    AwsErrorClass::NotFound => 3,
                 };
                 (tier, code)
             })
@@ -177,7 +173,57 @@ impl std::error::Error for AwsItemFailures {}
 enum AwsErrorClass {
     NotFound,
     Transient,
+    DependencyBlocked,
     Permanent,
+}
+
+impl AwsErrorClass {
+    /// Classify AWS metadata once, before diagnostics are made opaque.
+    /// Item failures have no operation or message fallback.
+    fn classify(
+        code: Option<&str>,
+        transience: Transience,
+        operation: Option<&str>,
+        message: Option<&str>,
+    ) -> Self {
+        if code.is_some_and(is_not_found_error_code) {
+            Self::NotFound
+        } else if transience == Transience::Transient {
+            Self::Transient
+        } else if code == Some("DependencyViolation")
+            || (operation
+                .and_then(|operation| operation.rsplit_once('.'))
+                .is_some_and(|(_, name)| {
+                    // Detaching an attachment and releasing an address are
+                    // delete operations too; the context text is irrelevant.
+                    name.starts_with("Delete")
+                        || name.starts_with("Detach")
+                        || name.starts_with("Release")
+                })
+                && message.is_some_and(|message| {
+                    [
+                        "has dependent object",
+                        "has a dependent object",
+                        "resource has dependencies",
+                        "mapped public address",
+                    ]
+                    .iter()
+                    .any(|marker| message.contains(marker))
+                }))
+        {
+            Self::DependencyBlocked
+        } else {
+            Self::Permanent
+        }
+    }
+
+    fn retryability(self) -> Retryability {
+        match self {
+            Self::Transient => Retryability::Transient,
+            Self::DependencyBlocked => Retryability::DependencyBlocked,
+            Self::NotFound | Self::Permanent => Retryability::Unclassified,
+        }
+    }
 }
 
 /// Attach all per-item AWS diagnostics beneath a provider-authored context.
@@ -207,10 +253,7 @@ fn item_failure_error<E: DecidedOperationError>(
     class: AwsErrorClass,
 ) -> ProviderError {
     let code = failures.code().map(str::to_owned);
-    let retryability = match class {
-        AwsErrorClass::Transient => Retryability::Transient,
-        AwsErrorClass::NotFound | AwsErrorClass::Permanent => Retryability::Unclassified,
-    };
+    let retryability = class.retryability();
     let mut error = api_error_with_code(context, code, None, class, retryability, failures)
         .with_operation(E::NAME);
     if let Some(request_id) = request_id {
@@ -482,18 +525,16 @@ where
     let aws_message = AwsServiceMessage::new(err.message().map(str::to_owned), &err);
     let request_id = err.request_id().map(str::to_owned);
     let transience = Transience::of(&err);
+    let class = if status == Some(404) {
+        AwsErrorClass::NotFound
+    } else {
+        AwsErrorClass::classify(code.as_deref(), transience, Some(E::NAME), err.message())
+    };
     // SDK retryability is independent of kind: a NotFound response can still
     // carry a transient modeled error, code, or HTTP status.
     let retryability = match transience {
         Transience::Transient => Retryability::Transient,
-        Transience::Permanent => Retryability::Unclassified,
-    };
-    let class = if code.as_deref().is_some_and(is_not_found_error_code) || status == Some(404) {
-        AwsErrorClass::NotFound
-    } else if transience == Transience::Transient {
-        AwsErrorClass::Transient
-    } else {
-        AwsErrorClass::Permanent
+        Transience::Permanent => class.retryability(),
     };
     let cause = make_cause(aws_message, err);
 
@@ -577,6 +618,7 @@ mod tests {
     use carina_aws_types::sdk::iam::operation::list_roles::ListRolesError;
     use carina_aws_types::sdk::iam::types::error::ServiceFailureException;
     use carina_core::provider::HostError as CoreProviderError;
+    use carina_core::test_utils::provider_text::BindProviderText as _;
 
     #[test]
     fn item_failure_preserves_optional_aws_data() {
@@ -674,7 +716,7 @@ mod tests {
                     None,
                     Some("DependencyViolation"),
                 ],
-                Some("DependencyViolation"),
+                Some("InvalidParameterValue"),
                 AwsErrorClass::Permanent,
             ),
             (
@@ -764,7 +806,7 @@ mod tests {
             ),
             (
                 ["DependencyViolation", "InvalidParameterValue"],
-                "DependencyViolation",
+                "InvalidParameterValue",
                 false,
             ),
             (
@@ -787,9 +829,7 @@ mod tests {
                 );
                 assert_eq!(error.kind(), ProviderErrorKind::ApiError, "{codes:?}");
                 assert_eq!(error.is_transient(), transient, "{codes:?}");
-                if !codes.contains(&"DependencyViolation") {
-                    assert!(!error.is_delete_dependency(), "{codes:?}");
-                }
+                assert!(!error.is_delete_dependency(), "{codes:?}");
                 let error =
                     carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(
                         error,
@@ -806,8 +846,7 @@ mod tests {
                     error.retryability(),
                 )
             });
-            // Core derives dependency from the bound cause text, which contains
-            // every item's code; both orderings must produce the same classification.
+            // Every item's code remains diagnostic; only the provider's class decides.
             assert_eq!(first, reversed, "{codes:?}");
         }
     }
@@ -921,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn partial_item_failure_is_permanent_even_for_not_found_or_transient_codes() {
+    fn partial_item_failure_is_unclassified_even_for_retryable_codes_or_messages() {
         use carina_aws_types::sdk::ec2::operation::create_flow_logs::CreateFlowLogsError;
         use carina_core::provider::ProviderErrorKind;
 
@@ -929,26 +968,30 @@ mod tests {
             "InvalidVpcID.NotFound",
             "RequestLimitExceeded",
             "InvalidParameterValue",
+            "DependencyViolation",
         ] {
-            let item = unsuccessful_item(None, Some(code), Some("AWS diagnostic"));
+            let item = unsuccessful_item(None, Some(code), Some("Rate exceeded"));
             let error = api_error_with_partial_item_failure::<CreateFlowLogsError>(
                 "CreateFlowLogs created 1 flow log(s), but another item failed",
                 AwsItemFailures::from_items(&[item]).unwrap(),
                 Some("partial-request"),
             );
             assert_eq!(error.kind(), ProviderErrorKind::ApiError, "{code}");
-            assert!(!error.is_transient(), "{code}");
+            assert_eq!(error.retryability(), Retryability::Unclassified, "{code}");
+            assert!(!error.is_delete_dependency(), "{code}");
             let error =
                 carina_core::test_utils::provider_text::BindProviderText::into_host_for_test(error);
             let wire = error.to_wire();
+            assert_eq!(error.retryability(), Retryability::Unclassified, "{code}");
+            assert!(!error.is_delete_dependency(), "{code}");
             assert_eq!(wire.code.as_deref(), Some(code));
             assert_eq!(wire.operation.as_deref(), Some("ec2.CreateFlowLogs"));
             assert_eq!(wire.request_id.as_deref(), Some("partial-request"));
             assert!(error.detail().cause().is_some_and(|cause| {
                 cause.is::<AwsItemFailures>()
-                    && cause.to_string() == format!("{code}: AWS diagnostic")
+                    && cause.to_string() == format!("{code}: Rate exceeded")
             }));
-            assert!(!wire.message.contains("AWS diagnostic"));
+            assert!(!wire.message.contains("Rate exceeded"));
         }
     }
 
@@ -1011,11 +1054,6 @@ mod tests {
                 assert_eq!(
                     item_error.retryability(),
                     sdk_error.retryability(),
-                    "{code}"
-                );
-                assert_eq!(
-                    item_error.is_throttled(),
-                    sdk_error.is_throttled(),
                     "{code}"
                 );
                 assert_eq!(
@@ -1083,6 +1121,234 @@ mod tests {
                         .as_service_error()
                         .is_some())
             );
+        }
+    }
+
+    #[test]
+    fn api_error_with_meta_classifies_dependency_violation() {
+        use carina_aws_types::sdk::ec2::operation::delete_vpc::DeleteVpcError;
+
+        let error = api_error_with_meta(
+            "Failed to delete VPC",
+            operation_service_error_with_meta(
+                400,
+                Some("DependencyViolation"),
+                Some("still in use"),
+                DeleteVpcError::generic,
+            ),
+        );
+        assert!(error.is_delete_dependency());
+        assert_eq!(error.retryability(), Retryability::DependencyBlocked);
+        assert!(!error.is_transient());
+        let error = error.into_host_for_test();
+        assert!(error.is_delete_dependency());
+        assert_eq!(error.retryability(), Retryability::DependencyBlocked);
+    }
+
+    #[test]
+    fn item_dependency_class_comes_from_the_selected_code_only() {
+        for (codes, expected_code, dependency) in [
+            (
+                ["DependencyViolation", "DependencyViolation"],
+                "DependencyViolation",
+                true,
+            ),
+            (
+                ["InvalidFlowLogId.NotFound", "DependencyViolation"],
+                "DependencyViolation",
+                true,
+            ),
+            (
+                ["RequestLimitExceeded", "DependencyViolation"],
+                "DependencyViolation",
+                true,
+            ),
+            (
+                ["InvalidParameterValue", "DependencyViolation"],
+                "InvalidParameterValue",
+                false,
+            ),
+            (
+                ["DependencyViolation", "InvalidParameterValue"],
+                "InvalidParameterValue",
+                false,
+            ),
+            (
+                ["AccessDenied", "DependencyViolation"],
+                "AccessDenied",
+                false,
+            ),
+        ] {
+            let items =
+                codes.map(|code| unsuccessful_item(None, Some(code), Some("Rate exceeded")));
+            let error = api_error_with_item_failure::<DeleteFlowLogsError>(
+                "Failed batch",
+                AwsItemFailures::from_items(&items).unwrap(),
+                None,
+            );
+            let expected = if dependency {
+                Retryability::DependencyBlocked
+            } else {
+                Retryability::Unclassified
+            };
+            assert_eq!(error.retryability(), expected, "{codes:?}");
+            assert_eq!(error.is_delete_dependency(), dependency, "{codes:?}");
+            let error = error.into_host_for_test();
+            assert_eq!(error.retryability(), expected, "{codes:?}");
+            assert_eq!(error.is_delete_dependency(), dependency, "{codes:?}");
+            assert_eq!(
+                error.to_wire().code.as_deref(),
+                Some(expected_code),
+                "{codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn delete_dependency_messages_are_scoped_to_delete_operations() {
+        use carina_aws_types::sdk::ec2::operation::{
+            delete_vpc::DeleteVpcError, describe_vpcs::DescribeVpcsError,
+            detach_internet_gateway::DetachInternetGatewayError,
+            release_address::ReleaseAddressError,
+        };
+
+        for message in [
+            "VPC has dependent object",
+            "VPC has a dependent object",
+            "resource has dependencies",
+            "VPC has some mapped public address(es)",
+        ] {
+            let errors = [
+                api_error_with_meta(
+                    "Failed to delete VPC",
+                    operation_service_error_with_meta(
+                        400,
+                        Some("InvalidParameterValue"),
+                        Some(message),
+                        DeleteVpcError::generic,
+                    ),
+                ),
+                api_error_with_meta(
+                    "Failed to detach internet gateway",
+                    operation_service_error_with_meta(
+                        400,
+                        Some("InvalidParameterValue"),
+                        Some(message),
+                        DetachInternetGatewayError::generic,
+                    ),
+                ),
+                api_error_with_meta(
+                    "Failed to release address",
+                    operation_service_error_with_meta(
+                        400,
+                        Some("InvalidParameterValue"),
+                        Some(message),
+                        ReleaseAddressError::generic,
+                    ),
+                ),
+            ];
+            for error in errors {
+                assert_eq!(
+                    error.retryability(),
+                    Retryability::DependencyBlocked,
+                    "{message}"
+                );
+                assert!(
+                    error.into_host_for_test().is_delete_dependency(),
+                    "{message}"
+                );
+            }
+            let read_error = api_error_with_meta(
+                "Failed to delete VPC",
+                operation_service_error_with_meta(
+                    400,
+                    Some("InvalidParameterValue"),
+                    Some(message),
+                    DescribeVpcsError::generic,
+                ),
+            );
+            assert_eq!(
+                read_error.retryability(),
+                Retryability::Unclassified,
+                "{message}"
+            );
+            assert!(
+                !read_error.into_host_for_test().is_delete_dependency(),
+                "{message}"
+            );
+            let item_error = api_error_with_item_failure::<DeleteFlowLogsError>(
+                "Failed batch",
+                AwsItemFailures::from_items(&[unsuccessful_item(
+                    None,
+                    Some("InvalidParameterValue"),
+                    Some(message),
+                )])
+                .unwrap(),
+                None,
+            );
+            assert_eq!(
+                item_error.retryability(),
+                Retryability::Unclassified,
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn detach_context_inherits_only_the_classified_cause() {
+        use carina_aws_types::sdk::ec2::operation::{
+            detach_internet_gateway::DetachInternetGatewayError,
+            detach_vpn_gateway::DetachVpnGatewayError,
+        };
+
+        for (code, expected) in [
+            ("AccessDenied", Retryability::Unclassified),
+            ("DependencyViolation", Retryability::DependencyBlocked),
+            ("RequestLimitExceeded", Retryability::Transient),
+        ] {
+            let errors = [
+                api_error_with_meta(
+                    "Failed to detach internet gateway",
+                    operation_service_error_with_meta(
+                        400,
+                        Some(code),
+                        Some("AWS failure"),
+                        DetachInternetGatewayError::generic,
+                    ),
+                ),
+                api_error_with_meta(
+                    "Failed to detach VPN gateway",
+                    operation_service_error_with_meta(
+                        400,
+                        Some(code),
+                        Some("AWS failure"),
+                        DetachVpnGatewayError::generic,
+                    ),
+                ),
+            ];
+            for cause in errors {
+                let error = ProviderError::api_error_caused_by("Failed to detach gateway", cause);
+                assert_eq!(error.retryability(), expected, "{code}");
+                assert_eq!(
+                    error.is_delete_dependency(),
+                    expected == Retryability::DependencyBlocked,
+                    "{code}"
+                );
+                assert_eq!(
+                    error
+                        .clone()
+                        .with_retryability(Retryability::Unclassified)
+                        .retryability(),
+                    Retryability::Unclassified
+                );
+                let error = error.into_host_for_test();
+                assert_eq!(error.retryability(), expected, "{code}");
+                assert_eq!(
+                    error.is_delete_dependency(),
+                    expected == Retryability::DependencyBlocked,
+                    "{code}"
+                );
+            }
         }
     }
 

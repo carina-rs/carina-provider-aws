@@ -4,7 +4,11 @@ use carina_provider_aws::schemas::generated::sts;
 #[test]
 fn caller_identity_arn_identity_is_provider_scoped() {
     let t = sts::caller_identity::arn();
-    let RawShape::String { identity, .. } = t.raw_shape() else {
+    let RawShape::String {
+        identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+        ..
+    } = t.raw_shape()
+    else {
         panic!("sts::caller_identity::arn() should be refined String");
     };
     assert_eq!(

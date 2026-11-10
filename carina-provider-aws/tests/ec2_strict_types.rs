@@ -111,7 +111,10 @@ fn ec2_flow_log_group_accepts_existing_aws_groups_and_checks_cloudwatch_name_bou
     let schema = schema("FlowLog");
     assert!(matches!(
         field(&schema, "log_group_name").as_type().raw_shape(),
-        RawShape::String { identity: None, .. }
+        RawShape::String {
+            identity_layer: carina_core::schema::StringIdentityParts { identity: None, .. },
+            ..
+        }
     ));
 }
 
@@ -284,8 +287,11 @@ fn ec2_vpc_and_subnet_ipv4_netmasks_are_anonymous_16_through_28() {
             assert!(matches!(
                 ty.as_type().raw_shape(),
                 RawShape::Int {
-                    identity: None,
-                    range: Some((Some(16), Some(28))),
+                    identity_layer: carina_core::schema::IntIdentityParts {
+                        identity: None,
+                        range: Some((Some(16), Some(28))),
+                        ..
+                    },
                     ..
                 }
             ));
@@ -510,11 +516,19 @@ fn ec2_new_named_validators_survive_protocol_21_without_changing_carriers() {
             let ty = field(&schema, path);
             let actual = match ty.as_type().raw_shape() {
                 RawShape::String {
-                    identity: Some(identity),
+                    identity_layer:
+                        carina_core::schema::StringIdentityParts {
+                            identity: Some(identity),
+                            ..
+                        },
                     ..
                 }
                 | RawShape::Int {
-                    identity: Some(identity),
+                    identity_layer:
+                        carina_core::schema::IntIdentityParts {
+                            identity: Some(identity),
+                            ..
+                        },
                     ..
                 } => identity,
                 other => panic!("{resource}.{path}: wrong carrier {other:?}"),

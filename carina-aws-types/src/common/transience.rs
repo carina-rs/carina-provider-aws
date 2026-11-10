@@ -96,7 +96,7 @@ impl Transience {
     pub fn of_provider_error(error: &ProviderError) -> Self {
         match error.retryability() {
             Retryability::Transient => Self::Transient,
-            Retryability::Unclassified => Self::Permanent,
+            Retryability::Unclassified | Retryability::DependencyBlocked => Self::Permanent,
         }
     }
 }
@@ -251,6 +251,15 @@ mod tests {
             Transience::of_provider_error(&unclassified),
             Transience::Permanent
         );
+    }
+
+    #[test]
+    fn dependency_block_is_permanent_for_resend() {
+        let error = ProviderError::api_error("resource still in use")
+            .with_retryability(Retryability::DependencyBlocked);
+        assert!(error.is_delete_dependency());
+        assert!(!error.is_transient());
+        assert_eq!(Transience::of_provider_error(&error), Transience::Permanent);
     }
 
     #[test]

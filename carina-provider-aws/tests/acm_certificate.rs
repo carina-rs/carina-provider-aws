@@ -52,9 +52,13 @@ fn acm_domain_name_enforces_the_request_common_name_octet_limit() {
     for schema in acm_schemas() {
         let domain = field(&schema, "domain_name");
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = domain.as_type().raw_shape()
         else {
@@ -205,9 +209,13 @@ fn acm_sans_and_read_domains_allow_253_octets_and_63_octet_labels() {
         {
             let domain = field(&schema, path);
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = domain.as_type().raw_shape()
             else {
@@ -256,9 +264,13 @@ fn acm_sans_and_read_domains_allow_253_octets_and_63_octet_labels() {
 fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
     let shared_dns_name = carina_aws_types::route53_dns_name();
     let RawShape::String {
-        identity: shared_identity,
-        pattern: shared_pattern,
-        length: shared_length,
+        identity_layer:
+            carina_core::schema::StringIdentityParts {
+                identity: shared_identity,
+                pattern: shared_pattern,
+                length: shared_length,
+                ..
+            },
         ..
     } = shared_dns_name.raw_shape()
     else {
@@ -305,9 +317,13 @@ fn acm_validation_records_accept_dns_underscores_and_terminal_dots() {
                 let overlong_label = format!("_{}.example.com.", "a".repeat(63));
                 assert!(record.validate(&string(&overlong_label)).is_err());
                 let RawShape::String {
-                    identity,
-                    pattern,
-                    length,
+                    identity_layer:
+                        carina_core::schema::StringIdentityParts {
+                            identity,
+                            pattern,
+                            length,
+                            ..
+                        },
                     ..
                 } = record.as_type().raw_shape()
                 else {
@@ -336,8 +352,12 @@ fn acm_http_redirects_require_absolute_urls_without_forcing_https() {
                 let path = format!("{prefix}.http_redirect.{leaf}");
                 let url = field(&schema, &path);
                 let RawShape::String {
-                    identity: Some(identity),
-                    length,
+                    identity_layer:
+                        carina_core::schema::StringIdentityParts {
+                            identity: Some(identity),
+                            length,
+                            ..
+                        },
                     ..
                 } = url.as_type().raw_shape()
                 else {
@@ -395,7 +415,11 @@ fn acm_certificate_arn_has_a_catalog_identity_and_certificate_resource_grammar()
     for schema in acm_schemas() {
         let arn = field(&schema, "certificate_arn");
         let RawShape::String {
-            identity: Some(identity),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    ..
+                },
             ..
         } = arn.as_type().raw_shape()
         else {

@@ -235,7 +235,11 @@ fn base_cidr_identities_are_bare_and_core_rejects_edges_from_them() {
         ),
     ] {
         let RawShape::String {
-            identity: Some(identity),
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity: Some(identity),
+                    ..
+                },
             ..
         } = base.raw_shape()
         else {
@@ -315,7 +319,11 @@ fn origin_main_cidr_inventory_enumerates_every_generated_cidr_attribute() {
     ) {
         match ty.raw_shape() {
             RawShape::String {
-                identity: Some(identity),
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: Some(identity),
+                        ..
+                    },
                 ..
             } if identity.provider.is_none()
                 && identity.segments.is_empty()

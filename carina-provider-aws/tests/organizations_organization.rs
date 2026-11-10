@@ -24,9 +24,13 @@ fn organizations_organization_id_is_anonymous_and_validates_smithy_bounds() {
     for schema in organizations_organization_schemas() {
         let id = schema.effective_attribute("id").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = id.field_type().raw_shape()
         else {
@@ -79,9 +83,13 @@ fn organizations_organization_account_outputs_use_matching_catalog_identities() 
         ] {
             let expected = row.attribute_type();
             let RawShape::String {
-                identity: expected_identity,
-                pattern: expected_pattern,
-                length: expected_length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity: expected_identity,
+                        pattern: expected_pattern,
+                        length: expected_length,
+                        ..
+                    },
                 ..
             } = expected.raw_shape()
             else {
@@ -90,9 +98,13 @@ fn organizations_organization_account_outputs_use_matching_catalog_identities() 
             let attribute = schema.effective_attribute(field).unwrap();
             assert!(attribute.is_read_only());
             let RawShape::String {
-                identity,
-                pattern,
-                length,
+                identity_layer:
+                    carina_core::schema::StringIdentityParts {
+                        identity,
+                        pattern,
+                        length,
+                        ..
+                    },
                 ..
             } = attribute.field_type().raw_shape()
             else {
@@ -197,9 +209,13 @@ fn organizations_organization_email_uses_output_bounds_without_creation_only_res
     for schema in organizations_organization_schemas() {
         let email = schema.effective_attribute("master_account_email").unwrap();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    ..
+                },
             ..
         } = email.field_type().raw_shape()
         else {

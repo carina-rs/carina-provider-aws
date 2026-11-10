@@ -34,10 +34,14 @@ mod tests {
     fn route53_dns_name_preserves_anonymous_bounds_and_decoded_label_grammar() {
         let attr = route53_dns_name();
         let RawShape::String {
-            identity,
-            pattern,
-            length,
-            validate,
+            identity_layer:
+                carina_core::schema::StringIdentityParts {
+                    identity,
+                    pattern,
+                    length,
+                    validate,
+                    ..
+                },
             ..
         } = attr.raw_shape()
         else {

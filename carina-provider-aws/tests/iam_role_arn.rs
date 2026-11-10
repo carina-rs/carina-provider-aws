@@ -26,7 +26,11 @@ fn arn_rejects_non_role_iam_arn() {
 #[test]
 fn arn_identity_is_provider_scoped() {
     let t = carina_provider_aws::schemas::generated::iam::role::arn();
-    let carina_core::schema::RawShape::String { identity, .. } = t.raw_shape() else {
+    let carina_core::schema::RawShape::String {
+        identity_layer: carina_core::schema::StringIdentityParts { identity, .. },
+        ..
+    } = t.raw_shape()
+    else {
         panic!("arn() should be refined String");
     };
     assert_eq!(
