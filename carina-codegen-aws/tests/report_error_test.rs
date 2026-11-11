@@ -1,8 +1,10 @@
 use std::process::Command;
 
+include!("support/smithy_models.rs");
+
 #[test]
 fn report_failure_does_not_mask_codegen_error() {
-    let cache = carina_codegen_aws::smithy_model_dir().join("iam.json");
+    let cache = smithy_model_dir().join("iam.json");
     if !cache.exists() {
         return;
     }

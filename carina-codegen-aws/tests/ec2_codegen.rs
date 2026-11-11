@@ -3,9 +3,11 @@ use std::process::Command;
 
 use heck::ToSnakeCase;
 
+include!("support/smithy_models.rs");
+
 fn generate(resource: &str, format: &str) -> Option<(tempfile::TempDir, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let models = carina_codegen_aws::smithy_model_dir();
+    let models = smithy_model_dir();
     if !models.join("ec2.json").exists() {
         eprintln!("Skipping EC2 generation: populate the Smithy model cache first");
         return None;

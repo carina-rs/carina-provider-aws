@@ -1,5 +1,7 @@
 use super::*;
 
+include!("../tests/support/smithy_models.rs");
+
 fn text(source: &str) -> (SmithyModel, carina_smithy::ShapeRef) {
     let model = carina_smithy::parse(
         &serde_json::json!({"smithy":"2.0","shapes":{
@@ -78,7 +80,7 @@ fn decoded_representation_keeps_its_tightening() {
 
 #[test]
 fn unused_bucket_resource_arn_helper_is_not_emitted() {
-    let path = carina_codegen_aws::smithy_model_dir().join("s3.json");
+    let path = smithy_model_dir().join("s3.json");
     if !path.exists() {
         return;
     }

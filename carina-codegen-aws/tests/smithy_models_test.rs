@@ -1,8 +1,10 @@
 use carina_smithy::*;
 use std::path::PathBuf;
 
+include!("support/smithy_models.rs");
+
 fn fixture_path(name: &str) -> PathBuf {
-    carina_codegen_aws::smithy_model_dir().join(format!("{name}.json"))
+    smithy_model_dir().join(format!("{name}.json"))
 }
 
 /// Load a Smithy model from the fixtures directory.
