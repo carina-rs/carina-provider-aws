@@ -11,6 +11,9 @@ use carina_provider_protocol::types::ValidatorType;
 const VALID_LOG_DESTINATION_TYPE: &[&str] = &["cloud-watch-logs", "kinesis-data-firehose", "s3"];
 
 const VALID_RESOURCE_TYPE: &[&str] = &[
+    "CoreNetwork",
+    "CoreNetworkAttachment",
+    "CoreNetworkEdge",
     "NetworkInterface",
     "RegionalNatGateway",
     "Subnet",
@@ -83,7 +86,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("resource_type", AttributeType::enum_(carina_core::schema::enum_identity("ResourceType", Some("aws.ec2.FlowLog")), Some(vec!["NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()]), vec![("NetworkInterface".to_string(), "network_interface".to_string()), ("RegionalNatGateway".to_string(), "regional_nat_gateway".to_string()), ("Subnet".to_string(), "subnet".to_string()), ("TransitGateway".to_string(), "transit_gateway".to_string()), ("TransitGatewayAttachment".to_string(), "transit_gateway_attachment".to_string()), ("VPC".to_string(), "vpc".to_string())], None, None))
+            AttributeSchema::required("resource_type", AttributeType::enum_(carina_core::schema::enum_identity("ResourceType", Some("aws.ec2.FlowLog")), Some(vec!["CoreNetwork".to_string(), "CoreNetworkAttachment".to_string(), "CoreNetworkEdge".to_string(), "NetworkInterface".to_string(), "RegionalNatGateway".to_string(), "Subnet".to_string(), "TransitGateway".to_string(), "TransitGatewayAttachment".to_string(), "VPC".to_string()]), vec![("CoreNetwork".to_string(), "core_network".to_string()), ("CoreNetworkAttachment".to_string(), "core_network_attachment".to_string()), ("CoreNetworkEdge".to_string(), "core_network_edge".to_string()), ("NetworkInterface".to_string(), "network_interface".to_string()), ("RegionalNatGateway".to_string(), "regional_nat_gateway".to_string()), ("Subnet".to_string(), "subnet".to_string()), ("TransitGateway".to_string(), "transit_gateway".to_string()), ("TransitGatewayAttachment".to_string(), "transit_gateway_attachment".to_string()), ("VPC".to_string(), "vpc".to_string())], None, None))
                 .create_only()
                 .with_description("The type of resource to monitor.")
                 .with_provider_name("ResourceType")
@@ -105,7 +108,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
         .attribute(
             AttributeSchema::optional("traffic_type", AttributeType::enum_(carina_core::schema::enum_identity("TrafficType", Some("aws.ec2.FlowLog")), Some(vec!["ACCEPT".to_string(), "ALL".to_string(), "REJECT".to_string()]), vec![("ACCEPT".to_string(), "accept".to_string()), ("ALL".to_string(), "all".to_string()), ("REJECT".to_string(), "reject".to_string())], None, None))
                 .create_only()
-                .with_description("The type of traffic to monitor (accepted traffic, rejected traffic, or all traffic). This parameter is not supported for transit gateway resource type...")
+                .with_description("The type of traffic to monitor (accepted traffic, rejected traffic, or all traffic). This parameter is not supported for transit gateway or Cloud WAN ...")
                 .with_provider_name("TrafficType")
                 .build(),
         )

@@ -140,6 +140,9 @@ fn flow_log_enum_metadata_uses_real_top_level_values() {
     assert_eq!(
         values,
         [
+            "CoreNetwork",
+            "CoreNetworkAttachment",
+            "CoreNetworkEdge",
             "NetworkInterface",
             "RegionalNatGateway",
             "Subnet",
