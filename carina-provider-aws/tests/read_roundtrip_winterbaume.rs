@@ -451,6 +451,7 @@ impl MockService for LogGroupTagsDeniedService {
 
 struct AcmService {
     key_algorithm: &'static str,
+    subject_alternative_names: &'static [&'static str],
 }
 
 // Exact read spellings observed in carina-test-004 on 2026-11-05. Only the
@@ -709,8 +710,10 @@ impl MockService for AcmService {
             "CertificateManager.DescribeCertificate" => MockResponse::json(
                 200,
                 format!(
-                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":["www.example.com","example.com"],"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"{key_algorithm}","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#,
+                    r#"{{"Certificate":{{"CertificateArn":"{CERTIFICATE_ARN}","DomainName":"example.com","SubjectAlternativeNames":{subject_alternative_names},"Status":"ISSUED","Type":"AMAZON_ISSUED","KeyAlgorithm":"{key_algorithm}","Options":{{"CertificateTransparencyLoggingPreference":"ENABLED","Export":"DISABLED"}}}}}}"#,
                     key_algorithm = self.key_algorithm,
+                    subject_alternative_names =
+                        serde_json::to_string(self.subject_alternative_names).unwrap(),
                 ),
             ),
             "CertificateManager.ListTagsForCertificate" => {
@@ -1587,9 +1590,41 @@ async fn unrelated_log_group_update_preserves_omitted_deletion_protection() {
 }
 
 #[tokio::test]
+async fn acm_apex_only_san_normalization_read_round_trip_has_no_diff() {
+    let provider = provider_from_service(AcmService {
+        key_algorithm: "RSA_2048",
+        subject_alternative_names: &["example.com"],
+    })
+    .await;
+    for name in ["example.com", "EXAMPLE.COM"] {
+        let mut desired = Resource::with_provider("aws", "acm.Certificate", "apex-only", None);
+        desired.set_attr("domain_name", string("example.com"));
+        desired.set_attr("subject_alternative_names", list(&[name]));
+        let desired = normalize_desired_for_test(desired).await;
+        assert!(desired.get_attr("subject_alternative_names").is_none());
+
+        let current = provider
+            .read(
+                &desired.id,
+                &applied_identifier(CERTIFICATE_ARN),
+                ReadRequest,
+            )
+            .await
+            .expect("read apex-only certificate from the scripted transport")
+            .into_state();
+        assert_eq!(
+            current.attributes.get("subject_alternative_names"),
+            Some(&list(&[]).to_snapshot())
+        );
+        assert_no_diff(desired, current);
+    }
+}
+
+#[tokio::test]
 async fn certificate_options_validation_method_create_read_diff_round_trip() {
     let provider = provider_from_service(AcmService {
         key_algorithm: "POST_QUANTUM_2048",
+        subject_alternative_names: &["www.example.com", "example.com"],
     })
     .await;
     let mut desired = Resource::with_provider("aws", "acm.Certificate", "roundtrip", None);
@@ -1646,6 +1681,7 @@ async fn acm_hyphenated_key_algorithm_read_round_trip_has_no_diff() {
     ] {
         let provider = provider_from_service(AcmService {
             key_algorithm: read,
+            subject_alternative_names: &["www.example.com", "example.com"],
         })
         .await;
         let mut desired = Resource::with_provider("aws", "acm.Certificate", "algorithm", None);
