@@ -6869,6 +6869,7 @@ fn generate_markdown_resource(
     model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
+    let input_rules = collect_resource_attributes(res, model)?.input_rules;
     let example = example.text_for("aws", res.name, ExampleKind::Resource)?;
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
@@ -7263,7 +7264,6 @@ fn generate_markdown_resource(
 
     write_markdown_type_definitions(&mut page, &all_enums, &struct_defs)?;
 
-    let input_rules = collect_resource_attributes(res, model)?.input_rules;
     page.input_rules_section(&input_rules)?;
 
     // Attribute Reference (read-only)
@@ -11534,6 +11534,26 @@ mod tests {
             generate_resource(&resource, &model).expect_err("recursive schemas must fail codegen");
         assert_eq!(
             error.to_string(),
+            "Recursive Smithy shape cycle: com.amazonaws.test#Choice -> com.amazonaws.test#Node -> com.amazonaws.test#Choice"
+        );
+    }
+
+    #[test]
+    fn smithy_union_recursive_markdown_reports_the_same_shape_cycle_as_rust() {
+        let (resource, _model) = union_fixture();
+        let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
+            .expect("parse recursive fixture");
+        let rust_error = generate_resource(&resource, &model)
+            .expect_err("recursive schemas must fail Rust codegen");
+        let markdown_error = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect_err("recursive schemas must fail Markdown codegen");
+        assert_eq!(markdown_error.to_string(), rust_error.to_string());
+        assert_eq!(
+            markdown_error.to_string(),
             "Recursive Smithy shape cycle: com.amazonaws.test#Choice -> com.amazonaws.test#Node -> com.amazonaws.test#Choice"
         );
     }

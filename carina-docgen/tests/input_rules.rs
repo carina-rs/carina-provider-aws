@@ -1,23 +1,8 @@
 use carina_core::schema::{
     Compiled, InputCondition, InputLiteral, InputPath, InputPredicate, InputRule, InputRuleCode,
-    InputRuleDisplay, InputRuleScope, InputRuleTarget, NonEmptyString, PatternForm,
+    InputRuleScope, InputRuleTarget, NonEmptyString,
 };
-use carina_docgen::{Heading, PageBuilder, TableCell};
-
-fn expected_section<R: PatternForm>(rules: &[InputRule<R>]) -> String {
-    let mut page = PageBuilder::<()>::new();
-    page.heading(Heading::plain(2, "Additional Input Constraints"))
-        .unwrap();
-    page.table(
-        ["Input rule"],
-        rules
-            .iter()
-            .map(|rule| [TableCell::code(InputRuleDisplay::new(rule).to_string())]),
-    )
-    .unwrap();
-    page.push_str("\n");
-    page.finish().unwrap()
-}
+use carina_docgen::PageBuilder;
 
 #[test]
 fn input_rules_section_preserves_core_text_targets_conditions_and_order() {
@@ -31,8 +16,8 @@ fn input_rules_section_preserves_core_text_targets_conditions_and_order() {
         InputRule::value(
             InputRuleScope::CreateOnly,
             InputPath::new("bucket").unwrap(),
-            InputRuleCode::new("test.bucket.not_ipv4").unwrap(),
-            InputPredicate::NotIpv4,
+            InputRuleCode::new("test.bucket.no_suffix_an").unwrap(),
+            InputPredicate::NoSuffix(NonEmptyString::new("-an").unwrap()),
         )
         .with_condition(InputCondition::Not(Box::new(InputCondition::Equals {
             path: InputPath::new("bucket_namespace").unwrap(),
@@ -52,7 +37,20 @@ fn input_rules_section_preserves_core_text_targets_conditions_and_order() {
     page.input_rules_section(&rules).unwrap();
     let markdown = page.finish().unwrap();
 
-    assert_eq!(markdown, expected_section(&rules));
+    assert_eq!(
+        markdown,
+        concat!(
+            "## Additional Input Constraints\n\n",
+            "| Input rule |\n",
+            "|------------|\n",
+            r#"| ``value at bucket: must not end with "bad`\|suffix" (on create)`` |"#,
+            "\n",
+            r#"| `value at bucket: must not end with "-an" when not (bucket_namespace equals "account-regional") (on create)` |"#,
+            "\n",
+            r#"| `map keys at tags: must not start with "aws:" (ignoring ASCII case) (on every write)` |"#,
+            "\n\n",
+        )
+    );
     assert!(
         markdown
             .contains(r#"| ``value at bucket: must not end with "bad`\|suffix" (on create)`` |"#)
@@ -69,7 +67,15 @@ fn input_rules_section_accepts_compiled_rules() {
     )];
     let mut page = PageBuilder::<()>::new();
     page.input_rules_section(&rules).unwrap();
-    assert_eq!(page.finish().unwrap(), expected_section(&rules));
+    assert_eq!(
+        page.finish().unwrap(),
+        concat!(
+            "## Additional Input Constraints\n\n",
+            "| Input rule |\n",
+            "|------------|\n",
+            "| `value at name: must not have IPv4 dotted-quad form (on every write)` |\n\n",
+        )
+    );
 }
 
 #[test]
