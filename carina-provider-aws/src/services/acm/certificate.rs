@@ -168,6 +168,9 @@ pub(crate) fn normalize_acm_certificate_inputs(input: &mut DesiredView<'_>) -> P
             None => false,
         }
     });
+    if names.iter().next().is_none() {
+        input.remove("subject_alternative_names");
+    }
     Ok(())
 }
 
@@ -999,10 +1002,7 @@ mod tests {
             carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource).unwrap();
         normalize_acm_certificate_inputs(&mut desired.view()).unwrap();
         desired.finish().unwrap();
-        assert_eq!(
-            resource.get_attr("subject_alternative_names"),
-            Some(&Value::Concrete(ConcreteValue::List(Vec::new())))
-        );
+        assert_eq!(resource.get_attr("subject_alternative_names"), None);
 
         let domain_name = Value::Concrete(ConcreteValue::String("Example.COM.".into()));
         let returned = Value::Concrete(ConcreteValue::List(vec![
@@ -1015,6 +1015,71 @@ mod tests {
                 ConcreteValue::String("www.example.com".into()),
             )]))
         );
+    }
+
+    #[test]
+    fn acm_san_normalization_stays_within_its_declaration() {
+        let schema = crate::schemas::generated::acm::certificate::acm_certificate_config()
+            .schema
+            .validate()
+            .unwrap();
+        let sans_type = schema
+            .effective_node_at_path(&["subject_alternative_names".to_string()])
+            .unwrap()
+            .value_type();
+        let list = |names: Vec<&str>| {
+            Value::Concrete(ConcreteValue::List(
+                names
+                    .into_iter()
+                    .map(|name| Value::Concrete(ConcreteValue::String(name.into())))
+                    .collect(),
+            ))
+        };
+        assert!(sans_type.validate(&list(vec![])).is_err());
+
+        for (names, expected) in [
+            (vec!["example.com"], None),
+            (vec!["EXAMPLE.COM"], None),
+            (
+                vec!["EXAMPLE.COM", "www.example.com"],
+                Some(list(vec!["www.example.com"])),
+            ),
+        ] {
+            let mut resource = dns_certificate_resource();
+            let authored = list(names);
+            sans_type.validate(&authored).unwrap();
+            resource.set_attr("subject_alternative_names", authored);
+
+            let mut desired =
+                carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource).unwrap();
+            normalize_acm_certificate_inputs(&mut desired.view()).unwrap();
+            desired.finish().unwrap();
+
+            let normalized = resource.get_attr("subject_alternative_names");
+            if let Some(value) = normalized {
+                sans_type.validate(value).unwrap();
+            }
+            assert_eq!(normalized, expected.as_ref());
+        }
+    }
+
+    #[test]
+    fn acm_request_treats_absent_empty_and_apex_only_sans_equally() {
+        let mut resource = dns_certificate_resource();
+        let absent = build_request_certificate(&resource, acm_schema()).unwrap();
+        assert!(absent.subject_alternative_names.is_none());
+
+        for names in [
+            Vec::new(),
+            vec![Value::Concrete(ConcreteValue::String("EXAMPLE.COM".into()))],
+        ] {
+            resource.set_attr(
+                "subject_alternative_names",
+                Value::Concrete(ConcreteValue::List(names)),
+            );
+            let request = build_request_certificate(&resource, acm_schema()).unwrap();
+            assert_eq!(request, absent);
+        }
     }
 
     /// carina#3061: the certificate ARN must be published under the

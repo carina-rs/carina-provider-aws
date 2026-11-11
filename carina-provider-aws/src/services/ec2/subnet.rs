@@ -162,6 +162,37 @@ fn canonical_ipv6_cidr(value: &str) -> Result<String, String> {
     if prefix > 128 {
         return Err("IPv6 prefix length must be between 0 and 128".to_string());
     }
+
+    // Ipv6Addr's Display uses dotted decimal for IPv4-mapped addresses,
+    // but the slot's validator admits only hex groups.
+    let segments = address.segments();
+    let mut longest = 0..0;
+    let mut start = 0;
+    for end in 0..=segments.len() {
+        if end == segments.len() || segments[end] != 0 {
+            // Keep the first longest run; never compress a single zero group.
+            if end - start > longest.len() {
+                longest = start..end;
+            }
+            start = end + 1;
+        }
+    }
+    let hex_groups = |groups: &[u16]| {
+        groups
+            .iter()
+            .map(|group| format!("{group:x}"))
+            .collect::<Vec<_>>()
+            .join(":")
+    };
+    let address = if longest.len() >= 2 {
+        format!(
+            "{}::{}",
+            hex_groups(&segments[..longest.start]),
+            hex_groups(&segments[longest.end..])
+        )
+    } else {
+        hex_groups(&segments)
+    };
     Ok(format!("{address}/{prefix}"))
 }
 
@@ -748,6 +779,50 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn ipv6_cidr_normalization_preserves_hex_groups_and_slot_validity() {
+        let schema = crate::schemas::generated::ec2::subnet::ec2_subnet_config()
+            .schema
+            .validate()
+            .unwrap();
+        let cidr_type = schema
+            .effective_node_at_path(&["ipv6_cidr_block".to_string()])
+            .unwrap()
+            .value_type();
+
+        for (authored, expected) in [
+            ("::ffff:102:304/64", "::ffff:102:304/64"),
+            ("::102:304/64", "::102:304/64"),
+            (
+                "2001:0DB8:0000:0000:0000:0000:0000:0000/64",
+                "2001:db8::/64",
+            ),
+            ("2001:0:0:1:0:0:1:1/64", "2001::1:0:0:1:1/64"),
+            ("2001:db8:0:1:2:3:4:5/64", "2001:db8:0:1:2:3:4:5/64"),
+            ("::/64", "::/64"),
+            ("::1/64", "::1/64"),
+        ] {
+            let mut resource = Resource::with_provider("aws", "ec2.Subnet", "test", None);
+            let authored = Value::Concrete(ConcreteValue::String(authored.into()));
+            cidr_type.validate(&authored).unwrap();
+            resource.set_attr("ipv6_cidr_block", authored);
+
+            let mut desired =
+                carina_plugin_sdk::NativeDesiredNormalization::from_core(&mut resource).unwrap();
+            normalize_subnet_ipv6_cidr_blocks(&mut desired.view()).unwrap();
+            desired.finish().unwrap();
+
+            let normalized = resource.get_attr("ipv6_cidr_block").unwrap();
+            // The slot includes validate_ec2_subnet_ipv6_cidr's custom validator.
+            cidr_type.validate(normalized).unwrap();
+            assert_eq!(
+                normalized,
+                &Value::Concrete(ConcreteValue::String(expected.into()))
+            );
+            assert_eq!(canonical_ipv6_cidr(expected).unwrap(), expected);
+        }
     }
 
     #[test]
