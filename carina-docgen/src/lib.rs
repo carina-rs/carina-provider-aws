@@ -19,6 +19,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::sync::Mutex;
 
+use carina_core::schema::{InputRule, InputRuleDisplay, PatternForm};
 use comrak::adapters::{HeadingAdapter, HeadingMeta};
 use comrak::nodes::{AstNode, NodeValue, Sourcepos};
 use comrak::options::Plugins;
@@ -218,6 +219,27 @@ where
     /// Write an ordinary heading and allocate its registry slug immediately.
     pub fn heading(&mut self, heading: Heading) -> Result<(), DocgenError> {
         self.write_heading(heading).map(|_| ())
+    }
+
+    /// Writes "## Additional Input Constraints" and a one-column "Input rule"
+    /// table, one row per rule in the given order. Each cell is a code span of
+    /// core `InputRuleDisplay` text. Writes nothing when `rules` is empty.
+    pub fn input_rules_section<R: PatternForm>(
+        &mut self,
+        rules: &[InputRule<R>],
+    ) -> Result<(), DocgenError> {
+        if rules.is_empty() {
+            return Ok(());
+        }
+        self.heading(Heading::plain(2, "Additional Input Constraints"))?;
+        self.table(
+            ["Input rule"],
+            rules
+                .iter()
+                .map(|rule| [TableCell::code(InputRuleDisplay::new(rule).to_string())]),
+        )?;
+        self.push_str("\n");
+        Ok(())
     }
 
     /// Write one read-only attribute, including its optional description.
