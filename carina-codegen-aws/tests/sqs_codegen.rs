@@ -3,7 +3,7 @@ use std::process::Command;
 
 fn generate(format: &str) -> Option<(tempfile::TempDir, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let models = root.join("carina-provider-aws/tests/fixtures/smithy");
+    let models = carina_codegen_aws::smithy_model_dir();
     if !models.join("sqs.json").exists() {
         eprintln!(
             "Skipping SQS generation: run scripts/download-smithy-models.sh to populate the model cache"

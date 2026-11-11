@@ -18,6 +18,7 @@ mkdir -p "$DOCS_DIR"
 
 # Download models if needed
 "$SCRIPT_DIR/download-smithy-models.sh"
+MODEL_DIR="$("$SCRIPT_DIR/smithy-models-dir.sh")"
 
 echo "Generating aws provider documentation..."
 echo "Output directory: $DOCS_DIR"
@@ -25,7 +26,7 @@ echo ""
 
 cd "$PROJECT_ROOT"
 cargo run -p carina-codegen-aws --bin smithy-codegen -- \
-  --model-dir "$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy" \
+  --model-dir "$MODEL_DIR" \
   --output-dir "$DOCS_DIR" \
   --examples-dir "$EXAMPLES_DIR" \
   --format markdown

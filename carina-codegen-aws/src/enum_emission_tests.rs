@@ -8,8 +8,7 @@ include!("../tests/support/enum_aliases.rs");
 
 #[test]
 fn every_generated_enum_has_the_docgen_aliases() {
-    let models =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../carina-provider-aws/tests/fixtures/smithy");
+    let models = carina_codegen_aws::smithy_model_dir();
     let mut resources = resource_defs::ec2_resources();
     resources.extend(resource_defs::s3_resources());
     resources.extend(resource_defs::sts_resources());

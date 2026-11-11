@@ -1,11 +1,8 @@
-use std::{path::Path, process::Command};
+use std::process::Command;
 
 #[test]
 fn report_failure_does_not_mask_codegen_error() {
-    let cache = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("carina-provider-aws/tests/fixtures/smithy/iam.json");
+    let cache = carina_codegen_aws::smithy_model_dir().join("iam.json");
     if !cache.exists() {
         return;
     }
