@@ -694,7 +694,7 @@ fn string_constraints(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Vec
 
 fn number_constraints<T: Display>(range: Bounds<T>) -> Vec<String> {
     let mut constraints = Vec::new();
-    if let Some(range) = range.filter(|(min, max)| min.is_some() || max.is_some()) {
+    if let Some(range) = range {
         constraints.push(format!("range: {}", format_refinement_bounds(range)));
     }
     constraints

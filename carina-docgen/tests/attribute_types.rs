@@ -193,7 +193,7 @@ fn half_open_refinements_use_core_interval_spelling() {
 }
 
 #[test]
-fn fully_unbounded_refinements_preserve_constraint_presence() {
+fn fully_unbounded_refinements_render_unbounded_for_every_kind() {
     for (ty, expected) in [
         (
             AttributeType::refined_string(None, None, Some((None, None)), None),
@@ -218,11 +218,11 @@ fn fully_unbounded_refinements_preserve_constraint_presence() {
         ),
         (
             AttributeType::refined_int(None, Some((None, None))),
-            "`Int`",
+            "`Int (range: unbounded)`",
         ),
         (
             AttributeType::refined_float(None, Some((None, None))),
-            "`Float`",
+            "`Float (range: unbounded)`",
         ),
     ] {
         let markdown = page(&ty, &mut Hooks::default()).unwrap();
@@ -364,10 +364,10 @@ fn inline_alias_cycles_keep_recursive_wording_across_render_calls() {
 }
 
 #[test]
-fn numeric_ranges_without_bounds_are_not_constraints() {
+fn absent_numeric_ranges_are_not_constraints() {
     for ty in [
-        AttributeType::refined_int(None, Some((None, None))),
-        AttributeType::refined_float(None, Some((None, None))),
+        AttributeType::refined_int(None, None),
+        AttributeType::refined_float(None, None),
     ] {
         let markdown = page(&ty, &mut Hooks::default()).unwrap();
         assert!(!markdown.contains("range:"), "{markdown}");
@@ -758,8 +758,14 @@ fn open_enums_preserve_numeric_base_ranges_before_validator_and_transform() {
             AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
             "range: 0.5..unbounded, ",
         ),
-        (AttributeType::refined_int(None, Some((None, None))), ""),
-        (AttributeType::refined_float(None, Some((None, None))), ""),
+        (
+            AttributeType::refined_int(None, Some((None, None))),
+            "range: unbounded, ",
+        ),
+        (
+            AttributeType::refined_float(None, Some((None, None))),
+            "range: unbounded, ",
+        ),
     ] {
         let ty = AttributeType::enum_with_base(
             TypeIdentity::bare("Name"),
