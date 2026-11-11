@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "carina-codegen-aws"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "carina-aws-types",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "carina-docgen"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "carina-core",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-aws"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-async",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "carina-provider-aws-wasm-tests"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "carina-core",
  "carina-plugin-host",
@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "carina-smithy"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
