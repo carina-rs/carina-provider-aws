@@ -329,7 +329,7 @@ fn pattern_constraints_use_core_display_and_preserve_modes_in_table_cells() {
         (&full, "`String (pattern: /^a$/ (Full))`"),
         (
             &substring,
-            "`String (pattern: /^a$/ (Substring: Preserve a|b\\nsearch semantics.))`",
+            r#"`String (pattern: /^a$/ (Substring: "Preserve a|b\nsearch semantics."))`"#,
         ),
     ] {
         let ty = AttributeType::refined_string(None, Some(spec.clone()), None, None);
@@ -957,11 +957,11 @@ fn scalar_code_spans_preserve_controls_backticks_and_table_pipes() {
     );
     let markdown = page(&ty, &mut Hooks::default()).unwrap();
     assert!(
-        markdown.starts_with("``String (pattern: /a|`b\\n\\t\\u{d}/ (Substring: Preserve the fixture regex search semantics.))``"),
+        markdown.starts_with(r#"``String (pattern: "a|`b\n\t\r" (Substring: Preserve the fixture regex search semantics.))``"#),
         "{markdown}"
     );
     assert!(
-        markdown.contains("| ``String (pattern: /a\\|`b\\n\\t\\u{d}/ (Substring: Preserve the fixture regex search semantics.))`` |"),
+        markdown.contains(r#"| ``String (pattern: "a\|`b\n\t\r" (Substring: Preserve the fixture regex search semantics.))`` |"#),
         "{markdown}"
     );
     let odd_slash = AttributeType::refined_string(

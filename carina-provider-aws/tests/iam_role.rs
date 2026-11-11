@@ -166,12 +166,8 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             "carina-588-source",
             Some("expected aws.iam.Role.Name, got String"),
         ),
-        (
-            "path",
-            "source.description",
-            "/carina-588/probe/",
-            Some("cannot assign String"),
-        ),
+        // Core #4365 defers overlapping anonymous bounds to resolved-value checks.
+        ("path", "source.description", "/carina-588/probe/", None),
         ("path", "source.role_id", "/carina-588/probe/", None),
     ] {
         let sink_fields = if field == "role_name" {
@@ -220,6 +216,12 @@ fn iam_role_name_is_nominal_and_path_accepts_string_references() {
             snapshot.schema_registry(),
             context,
         );
+        // Inference owns nominal errors that later admission does not repeat.
+        if let Some(error) = configuration.judged().report().first_error() {
+            let expected = expected_error.expect("valid references must pass expression inference");
+            assert!(error.to_string().contains(expected), "{error}");
+            continue;
+        }
         let result = carina_core::validation::validate_resource_ref_types(
             configuration.judged(),
             &HashSet::new(),
