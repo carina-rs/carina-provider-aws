@@ -8,6 +8,10 @@ This is the AWS provider for [Carina](https://github.com/carina-rs/carina), spli
 
 ## Build and Test Commands
 
+Use rustup 1.28.0+ and run `rustup toolchain install`; rustup reads the pinned
+toolchain, components, and targets from `rust-toolchain.toml` for local builds and
+CI. Keep `.github/wasm-toolchain` equal to its channel for provider-release.
+
 ```bash
 # Build
 cargo build

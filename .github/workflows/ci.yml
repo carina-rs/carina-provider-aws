@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - run: cargo check
       - name: Check AWS types without service features
@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: Test acceptance run registry
         run: bash acceptance-tests/shared/tests/run_registry_test.sh
@@ -48,16 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Read WASM toolchain
-        id: wasm-toolchain
-        run: |
-          toolchain=$(cat .github/wasm-toolchain)
-          printf 'toolchain=%s\n' "$toolchain" >> "$GITHUB_OUTPUT"
-          printf 'RUSTUP_TOOLCHAIN=%s\n' "$toolchain" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.wasm-toolchain.outputs.toolchain }}
-          targets: wasm32-wasip2
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: Build provider WASM
         run: cargo build -p carina-provider-aws --target wasm32-wasip2 --release
@@ -80,9 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -91,9 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - uses: ./.github/actions/rust-toolchain
       - run: cargo fmt --check
 
   carina-pin:
@@ -104,6 +91,14 @@ jobs:
       # The script clones carina itself (filtered) to verify the
       # pinned rev is consistent and >= .carina-core-min-rev.
       - run: ./scripts/check-carina-pin.sh
+
+  check-pinned-toolchain:
+    name: Check Pinned Rust Toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-pinned-toolchain.sh
+      - run: bash scripts/test-check-pinned-toolchain.sh
 
   provider-release-pin:
     name: Check provider-release Pin
@@ -118,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - run: bash scripts/check-test-utils-dev-only.sh
       - run: bash scripts/test-check-test-utils-dev-only.sh
@@ -139,7 +134,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: Generate documentation
         run: ./scripts/generate-docs.sh
@@ -157,7 +152,6 @@ jobs:
 
   wasm-build:
     name: WASM Build
-    # .github/wasm-toolchain avoids current stable's rust-lld SIGSEGVs on WASM (rust-lang/rust#150227).
     uses: carina-rs/provider-release/.github/workflows/build.yml@23f693069e0481ce3d49a6d55d1a0658ea113917
     with:
       provider: carina-provider-aws
@@ -172,9 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
       - name: Run schema codegen
         run: ./scripts/generate-schemas-smithy.sh
@@ -189,7 +181,7 @@ jobs:
 
   publish-dev:
     name: Publish to Carina Registry (dev)
-    needs: [check, test, validate-examples, clippy, fmt, carina-pin, provider-release-pin, test-utils-dev-only, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
+    needs: [check, test, validate-examples, clippy, fmt, carina-pin, check-pinned-toolchain, provider-release-pin, test-utils-dev-only, string-enum-aliases, docs-bundle, wasm-build, codegen-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

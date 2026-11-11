@@ -44,7 +44,12 @@ Per-resource reference documentation is in [`generated-docs/`](generated-docs/),
 
 ## Development
 
+Use rustup 1.28.0+; it reads the pinned toolchain, components, and targets from
+[`rust-toolchain.toml`](rust-toolchain.toml). Upgrade Rust by editing that file and
+keeping `.github/wasm-toolchain` equal to its channel for provider-release.
+
 ```console
+$ rustup toolchain install
 $ cargo test
 $ cargo build -p carina-provider-aws --target wasm32-wasip2 --release
 ```
