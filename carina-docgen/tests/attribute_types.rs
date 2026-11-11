@@ -119,13 +119,126 @@ fn page<'a, R: PatternForm>(
 }
 
 #[test]
+fn half_open_refinements_use_core_interval_spelling() {
+    let cases = [
+        (
+            AttributeType::refined_string(None, None, Some((None, Some(256))), None),
+            "`String (len: unbounded..=256)`",
+        ),
+        (
+            AttributeType::refined_string(None, None, Some((Some(1), None)), None),
+            "`String (len: 1..unbounded)`",
+        ),
+        (
+            AttributeType::refined_list(
+                AttributeType::bool(),
+                false,
+                Some((None, Some(256))),
+                ListElements::AllowDuplicates,
+            ),
+            "List\\<`Bool`\\> (items: unbounded..=256, unordered)",
+        ),
+        (
+            AttributeType::refined_list(
+                AttributeType::bool(),
+                false,
+                Some((Some(1), None)),
+                ListElements::AllowDuplicates,
+            ),
+            "List\\<`Bool`\\> (items: 1..unbounded, unordered)",
+        ),
+        (
+            AttributeType::refined_map(
+                AttributeType::string(),
+                AttributeType::bool(),
+                Some((None, Some(256))),
+            ),
+            "Map\\<`String`, `Bool`\\> (entries: unbounded..=256)",
+        ),
+        (
+            AttributeType::refined_map(
+                AttributeType::string(),
+                AttributeType::bool(),
+                Some((Some(1), None)),
+            ),
+            "Map\\<`String`, `Bool`\\> (entries: 1..unbounded)",
+        ),
+        (
+            AttributeType::refined_int(None, Some((None, Some(256)))),
+            "`Int (range: unbounded..=256)`",
+        ),
+        (
+            AttributeType::refined_int(None, Some((Some(1), None))),
+            "`Int (range: 1..unbounded)`",
+        ),
+        (
+            AttributeType::refined_float(None, Some((None, Some(FiniteF64::new(2.5).unwrap())))),
+            "`Float (range: unbounded..=2.5)`",
+        ),
+        (
+            AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
+            "`Float (range: 0.5..unbounded)`",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (ty, expected) in cases {
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        if !markdown.starts_with(expected) || !markdown.contains(&format!("| {expected} |")) {
+            failures.push(format!(
+                "expected {expected} inline and in a table:\n{markdown}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn fully_unbounded_refinements_preserve_constraint_presence() {
+    for (ty, expected) in [
+        (
+            AttributeType::refined_string(None, None, Some((None, None)), None),
+            "`String (len: unbounded)`",
+        ),
+        (
+            AttributeType::refined_list(
+                AttributeType::bool(),
+                false,
+                Some((None, None)),
+                ListElements::AllowDuplicates,
+            ),
+            "List\\<`Bool`\\> (items: unbounded, unordered)",
+        ),
+        (
+            AttributeType::refined_map(
+                AttributeType::string(),
+                AttributeType::bool(),
+                Some((None, None)),
+            ),
+            "Map\\<`String`, `Bool`\\> (entries: unbounded)",
+        ),
+        (
+            AttributeType::refined_int(None, Some((None, None))),
+            "`Int`",
+        ),
+        (
+            AttributeType::refined_float(None, Some((None, None))),
+            "`Float`",
+        ),
+    ] {
+        let markdown = page(&ty, &mut Hooks::default()).unwrap();
+        assert!(markdown.starts_with(expected), "{markdown}");
+        assert!(markdown.contains(&format!("| {expected} |")), "{markdown}");
+    }
+}
+
+#[test]
 fn maps_preserve_entry_bounds_constrained_keys_and_linked_values() {
     for (length, suffix) in [
         (Some((Some(2), Some(5))), " (entries: 2..=5)"),
-        (Some((Some(2), None)), " (entries: 2..)"),
-        (Some((None, Some(5))), " (entries: ..=5)"),
+        (Some((Some(2), None)), " (entries: 2..unbounded)"),
+        (Some((None, Some(5))), " (entries: unbounded..=5)"),
         (None, ""),
-        (Some((None, None)), " (entries: ..)"),
+        (Some((None, None)), " (entries: unbounded)"),
     ] {
         let ty = AttributeType::refined_map(
             AttributeType::refined_string(
@@ -291,13 +404,13 @@ fn lists_render_item_bounds_uniqueness_and_order() {
             false,
             ListElements::AllowDuplicates,
             Some((None, Some(8))),
-            "items: ..=8, unordered",
+            "items: unbounded..=8, unordered",
         ),
         (
             true,
             ListElements::Unique,
             Some((Some(1), None)),
-            "items: 1.., unique items, ordered",
+            "items: 1..unbounded, unique items, ordered",
         ),
         (
             false,
@@ -450,7 +563,7 @@ fn scalars_render_all_refinements_in_github_order() {
         ),
         (
             AttributeType::refined_string(None, None, Some((None, Some(8))), None),
-            "String (len: ..=8)",
+            "String (len: unbounded..=8)",
         ),
         (
             AttributeType::refined_string_with_validator(
@@ -463,7 +576,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 validator.clone(),
                 Some(DslTransform::HyphenToUnderscore),
             ),
-            "N (pattern: /^a$/ (Full), len: 1.., custom validator, DSL transform: HyphenToUnderscore)",
+            "N (pattern: /^a$/ (Full), len: 1..unbounded, custom validator, DSL transform: HyphenToUnderscore)",
         ),
         (
             AttributeType::refined_int_with_validator(
@@ -475,11 +588,11 @@ fn scalars_render_all_refinements_in_github_order() {
         ),
         (
             AttributeType::refined_int(None, Some((Some(1), None))),
-            "Int (range: 1..)",
+            "Int (range: 1..unbounded)",
         ),
         (
             AttributeType::refined_int(None, Some((None, Some(8)))),
-            "Int (range: ..=8)",
+            "Int (range: unbounded..=8)",
         ),
         (
             AttributeType::refined_float_with_validator(
@@ -487,7 +600,7 @@ fn scalars_render_all_refinements_in_github_order() {
                 Some((Some(FiniteF64::new(0.5).unwrap()), None)),
                 validator,
             ),
-            "F (range: 0.5.., custom validator)",
+            "F (range: 0.5..unbounded, custom validator)",
         ),
         (AttributeType::float(), "Float"),
         (AttributeType::bool(), "Bool"),
@@ -643,7 +756,7 @@ fn open_enums_preserve_numeric_base_ranges_before_validator_and_transform() {
         ),
         (
             AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
-            "range: 0.5.., ",
+            "range: 0.5..unbounded, ",
         ),
         (AttributeType::refined_int(None, Some((None, None))), ""),
         (AttributeType::refined_float(None, Some((None, None))), ""),
@@ -696,7 +809,7 @@ fn open_enums_ignore_base_callbacks_and_transforms() {
                 Some((Some(FiniteF64::new(0.5).unwrap()), None)),
                 validate.clone(),
             ),
-            "range: 0.5..",
+            "range: 0.5..unbounded",
         ),
     ] {
         for (enum_validate, to_dsl, metadata) in [
@@ -753,7 +866,7 @@ fn open_enums_preserve_nested_enum_scalar_refinements() {
         ),
         (
             AttributeType::refined_float(None, Some((Some(FiniteF64::new(0.5).unwrap()), None))),
-            "range: 0.5..",
+            "range: 0.5..unbounded",
         ),
     ] {
         let mut base = base;
