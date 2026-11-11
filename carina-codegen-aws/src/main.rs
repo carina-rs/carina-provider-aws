@@ -6869,6 +6869,7 @@ fn generate_markdown_resource(
     model: &SmithyModel,
     example: &DocExample,
 ) -> Result<String> {
+    let input_rules = collect_resource_attributes(res, model)?.input_rules;
     let example = example.text_for("aws", res.name, ExampleKind::Resource)?;
     let ns = res.service_namespace;
     let namespace = format!("aws.{}", res.name);
@@ -7263,41 +7264,7 @@ fn generate_markdown_resource(
 
     write_markdown_type_definitions(&mut page, &all_enums, &struct_defs)?;
 
-    // Use the Rust path's mutability classification and rule binding too.
-    // Avoid a second traversal for pages without pattern tightenings (including
-    // docs-only recursive shape fixtures).
-    if !type_overrides.input_constraints.borrow().is_empty() {
-        use carina_core::schema::{InputPredicate, InputRuleScope};
-        let collected = collect_resource_attributes(res, model)?;
-        page.heading(Heading::plain(2, "Additional Input Constraints"))?;
-        let rows = collected.input_rules.iter().filter_map(|rule| {
-            let (pattern, length) = match rule.predicate() {
-                InputPredicate::Matches(pattern) => (Some(pattern), None),
-                InputPredicate::Length { min, max } => (None, Some((*min, *max))),
-                _ => return None,
-            };
-            let scope = match rule.scope() {
-                InputRuleScope::CreateOnly => "Create only",
-                InputRuleScope::EveryWrite => "Create and update",
-            };
-            Some([
-                TableCell::code(rule.path().as_str()),
-                TableCell::text(scope),
-                scalar_display(
-                    ScalarDoc::String {
-                        pattern,
-                        length,
-                        validate: false,
-                        to_dsl: None,
-                    },
-                    None,
-                )
-                .table_cell(),
-            ])
-        });
-        page.table(["Attribute", "Applies on", "Additional constraint"], rows)?;
-        page.push_str("\n");
-    }
+    page.input_rules_section(&input_rules)?;
 
     // Attribute Reference (read-only)
     if !read_only_attrs.is_empty() {
@@ -10762,16 +10729,32 @@ mod tests {
                 },
                 "com.amazonaws.ec2#CreateInternetGatewayRequest": {"type": "structure", "members": {}},
                 "com.amazonaws.ec2#InternetGateway": {
-                  "type": "structure", "members": {"InternetGatewayId": {"target": "com.amazonaws.ec2#String"}}
+                  "type": "structure", "members": {
+                    "InternetGatewayId": {"target": "com.amazonaws.ec2#String"},
+                    "VpcId": {"target": "com.amazonaws.ec2#String"}
+                  }
                 },
                 "com.amazonaws.ec2#CreateNatGateway": {
                   "type": "operation", "input": {"target": "com.amazonaws.ec2#CreateNatGatewayRequest"}
                 },
                 "com.amazonaws.ec2#CreateNatGatewayRequest": {
-                  "type": "structure", "members": {"VpcId": {"target": "com.amazonaws.ec2#String"}}
+                  "type": "structure", "members": {
+                    "VpcId": {"target": "com.amazonaws.ec2#String"},
+                    "PrivateIpAddress": {"target": "com.amazonaws.ec2#String"},
+                    "AvailabilityZoneAddresses": {"target": "com.amazonaws.ec2#AvailabilityZoneAddressList"}
+                  }
                 },
                 "com.amazonaws.ec2#NatGateway": {
-                  "type": "structure", "members": {"NatGatewayId": {"target": "com.amazonaws.ec2#String"}}
+                  "type": "structure", "members": {
+                    "NatGatewayId": {"target": "com.amazonaws.ec2#String"},
+                    "VpcId": {"target": "com.amazonaws.ec2#String"}
+                  }
+                },
+                "com.amazonaws.ec2#AvailabilityZoneAddressList": {
+                  "type": "list", "member": {"target": "com.amazonaws.ec2#AvailabilityZoneAddress"}
+                },
+                "com.amazonaws.ec2#AvailabilityZoneAddress": {
+                  "type": "structure", "members": {"AvailabilityZone": {"target": "com.amazonaws.ec2#String"}}
                 },
                 "com.amazonaws.ec2#String": {"type": "string"}
               }
@@ -11318,7 +11301,7 @@ mod tests {
         .unwrap();
         for expected in [
             "`String (len: 1..=50)`",
-            r"`account_name` | Create and update | `String (pattern: /^[ -;=?-~]+\z/ (Full))`",
+            r"`value at account_name: must match /^[ -;=?-~]+\z/ (Full) (on every write)`",
             r"`IamRoleName (",
             "`OrganizationsAccountEmail (len: 6..=64, custom validator)`",
             r"`AwsAccountId (pattern:",
@@ -11556,6 +11539,26 @@ mod tests {
     }
 
     #[test]
+    fn smithy_union_recursive_markdown_reports_the_same_shape_cycle_as_rust() {
+        let (resource, _model) = union_fixture();
+        let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
+            .expect("parse recursive fixture");
+        let rust_error = generate_resource(&resource, &model)
+            .expect_err("recursive schemas must fail Rust codegen");
+        let markdown_error = generate_markdown_resource(
+            &resource,
+            &model,
+            &markdown_resource_example(resource.name),
+        )
+        .expect_err("recursive schemas must fail Markdown codegen");
+        assert_eq!(markdown_error.to_string(), rust_error.to_string());
+        assert_eq!(
+            markdown_error.to_string(),
+            "Recursive Smithy shape cycle: com.amazonaws.test#Choice -> com.amazonaws.test#Node -> com.amazonaws.test#Choice"
+        );
+    }
+
+    #[test]
     fn recursive_struct_schema_reports_its_direct_cycle() {
         let (resource, _model) = union_fixture();
         let mut model =
@@ -11579,16 +11582,33 @@ mod tests {
     }
 
     #[test]
-    fn smithy_union_recursive_structs_generate_docs_without_re_resolving_types() {
+    fn recursive_markdown_types_terminate_and_resolve_links() {
         let (resource, _model) = union_fixture();
         let model = carina_smithy::parse(include_str!("../tests/fixtures/recursive-unions.json"))
             .expect("parse recursive union and struct fixture");
-        let markdown = generate_markdown_resource(
-            &resource,
+        let mut enums = BTreeMap::new();
+        let mut structs = MarkdownTypes::default();
+        let display = discover_markdown_type(
             &model,
-            &markdown_resource_example(resource.name),
+            resource.name,
+            "com.amazonaws.test#Fixture",
+            "Fixture",
+            &HeadingPath::root("fixture"),
+            "fixture",
+            &format!("aws.{}", resource.name),
+            &TypeDeclarations::from_resource(&resource),
+            &HashMap::new(),
+            None,
+            &mut enums,
+            &mut structs,
+            &mut HashMap::new(),
         )
-        .expect("generate recursive docs");
+        .expect("discover recursive documentation types");
+        let mut page = PageBuilder::new();
+        display.write_to(&mut page);
+        page.push_str("\n\n");
+        write_markdown_type_definitions(&mut page, &enums, &structs).unwrap();
+        let markdown = page.finish().expect("generate recursive type docs");
         assert_eq!(
             markdown
                 .matches("- Exactly one of: `node`, `text`.")
@@ -11674,7 +11694,7 @@ mod tests {
                     },
                     "com.amazonaws.s3#LifecycleRequest": {
                         "type": "structure",
-                        "members": {}
+                        "members": {"Bucket": {"target": "smithy.api#String"}}
                     }
                 }
             }"##,
@@ -13481,14 +13501,19 @@ mod tests {
                 "com.amazonaws.ec2#CreateVpcRequest": {
                   "type": "structure",
                   "members": {
-                    "CidrBlock": { "target": "smithy.api#String", "traits": {} }
+                    "CidrBlock": { "target": "smithy.api#String", "traits": {} },
+                    "Ipv4IpamPoolId": { "target": "smithy.api#String" },
+                    "Ipv4NetmaskLength": { "target": "smithy.api#Integer" }
                   },
                   "traits": { "smithy.api#input": {} }
                 },
                 "com.amazonaws.ec2#Vpc": {
                   "type": "structure",
                   "members": {
-                    "VpcId": { "target": "smithy.api#String", "traits": {} }
+                    "VpcId": { "target": "smithy.api#String", "traits": {} },
+                    "CidrBlock": { "target": "smithy.api#String" },
+                    "EnableDnsHostnames": { "target": "smithy.api#Boolean" },
+                    "EnableDnsSupport": { "target": "smithy.api#Boolean" }
                   },
                   "traits": {}
                 }
@@ -14293,7 +14318,7 @@ mod tests {
                 },
                 "com.amazonaws.s3#PutObjectLockConfigurationRequest": {
                   "type": "structure",
-                  "members": {},
+                  "members": {"Bucket": {"target": "smithy.api#String"}},
                   "traits": { "smithy.api#input": {} }
                 }
               }
@@ -14962,11 +14987,71 @@ mod tests {
                 children: &["HostnameType"],
             },
         );
-        resource.name = "ec2.Vpc";
+        resource.name = "ec2.MarkdownFixture";
         resource.create_op = "CreateMarkdownFixture";
-        resource.read_structure = None;
+        resource.read_structure = Some("CreateMarkdownFixtureRequest");
         resource.derived_attributes.clear();
         resource
+    }
+
+    #[test]
+    fn markdown_input_rules_use_core_display_for_every_collected_rule() {
+        use carina_core::schema::{
+            InputPath, InputPredicate, InputRule, InputRuleCode, InputRuleDisplay, InputRuleScope,
+        };
+
+        let model = string_fixture_model(&[("Description", true)], &[("Description", true)]);
+        let mut resource = provider_fixture_resource("iam.Role", "", &["Description"], vec![]);
+        resource.input_rules = vec![InputRule::value(
+            InputRuleScope::CreateOnly,
+            InputPath::new("description").unwrap(),
+            InputRuleCode::new("test.description.not_ipv4").unwrap(),
+            InputPredicate::NotIpv4,
+        )];
+        resource.type_overrides = vec![(
+            "Description",
+            TypeOverride::StringPattern(PatternSpec::new("^(a|b)$", PatternMatch::Full)),
+        )];
+        let collected = collect_resource_attributes(&resource, &model).unwrap();
+        assert_eq!(collected.input_rules.len(), 2);
+        assert_eq!(collected.input_rules[0], resource.input_rules[0]);
+        assert_eq!(
+            collected.input_rules[1].code().as_str(),
+            "aws.additional_pattern.pattern_0"
+        );
+
+        let rust = generate_resource(&resource, &model).unwrap();
+        assert_eq!(rust.matches(".input_rule(").count(), 2);
+        let mut remaining = rust.as_str();
+        for rule in &collected.input_rules {
+            remaining = remaining
+                .split_once(&format!(".input_rule({})", input_rule_code(rule)))
+                .expect("Rust emission must carry each collected rule in order")
+                .1;
+        }
+
+        let example = markdown_resource_example(resource.name);
+        let markdown = generate_markdown_resource(&resource, &model, &example).unwrap();
+        let section = markdown
+            .split_once("## Additional Input Constraints\n\n")
+            .expect("both explicit and bound rules must be documented")
+            .1
+            .split("\n## ")
+            .next()
+            .unwrap()
+            .trim_end();
+        let mut expected = PageBuilder::<()>::new();
+        expected
+            .table(
+                ["Input rule"],
+                collected
+                    .input_rules
+                    .iter()
+                    .map(|rule| [TableCell::code(InputRuleDisplay::new(rule).to_string())]),
+            )
+            .unwrap();
+        assert_eq!(section, expected.finish().unwrap().trim_end());
+        carina_docgen::check_page(&markdown).unwrap();
     }
 
     #[test]
@@ -14974,7 +15059,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
@@ -14990,7 +15075,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
@@ -15000,7 +15085,7 @@ mod tests {
                 " Value | DSL Identifier |\n",
                 "|-------|----------------|\n",
                 "|",
-                " `TOP` | `aws.ec2.Vpc.Type.top` |\n",
+                " `TOP` | `aws.ec2.MarkdownFixture.Type.top` |\n",
             )),
             "{markdown}"
         );
@@ -15609,7 +15694,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
@@ -15676,7 +15761,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
@@ -15692,15 +15777,18 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
         assert!(markdown.contains("### type (Type)"), "{markdown}");
         assert!(markdown.contains("### options.type (Type)"), "{markdown}");
-        assert!(markdown.contains("`aws.ec2.Vpc.Type.top`"), "{markdown}");
         assert!(
-            markdown.contains("`aws.ec2.Vpc.Options.Type.nested`"),
+            markdown.contains("`aws.ec2.MarkdownFixture.Type.top`"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("`aws.ec2.MarkdownFixture.Options.Type.nested`"),
             "{markdown}"
         );
         assert!(markdown.contains("[Type](#optionstype-type)"), "{markdown}");
@@ -15711,7 +15799,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
         let enum_section = markdown
@@ -15736,7 +15824,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_struct_order_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
         let struct_section = markdown
@@ -15758,13 +15846,13 @@ mod tests {
         let without_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_nested_enum_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown without collision");
         let with_collision = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown with collision");
 
@@ -15796,7 +15884,7 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("resource markdown");
         assert!(!markdown.contains("CloudFormation Type"), "{markdown}");
@@ -15807,16 +15895,18 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &markdown_regression_model(),
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("generate markdown");
 
         assert!(
-            markdown.contains("`aws.ec2.Vpc.DomainValidation.ValidationMethod.dns`"),
+            markdown.contains("`aws.ec2.MarkdownFixture.DomainValidation.ValidationMethod.dns`"),
             "{markdown}"
         );
         assert!(
-            markdown.contains("`aws.ec2.Vpc.RenewalSummary.DomainValidation.ValidationMethod.dns`"),
+            markdown.contains(
+                "`aws.ec2.MarkdownFixture.RenewalSummary.DomainValidation.ValidationMethod.dns`"
+            ),
             "{markdown}"
         );
     }
@@ -15914,16 +16004,16 @@ mod tests {
         let markdown = generate_markdown_resource(
             &markdown_regression_resource(),
             &model,
-            &markdown_resource_example("ec2.Vpc"),
+            &markdown_resource_example("ec2.MarkdownFixture"),
         )
         .expect("distinct enums must generate unique headings");
         let ids = carina_docgen::heading_ids(&markdown);
         let unique: HashSet<_> = ids.iter().collect();
         assert_eq!(ids.len(), unique.len(), "{markdown}");
-        assert!(markdown.contains("`aws.ec2.Vpc.Options.Protocol.one`"));
-        assert!(markdown.contains("`aws.ec2.Vpc.Options.Protocol.two`"));
-        assert!(markdown.contains("`aws.ec2.Vpc.FirstProtocol.one`"));
-        assert!(markdown.contains("`aws.ec2.Vpc.SecondProtocol.one`"));
+        assert!(markdown.contains("`aws.ec2.MarkdownFixture.Options.Protocol.one`"));
+        assert!(markdown.contains("`aws.ec2.MarkdownFixture.Options.Protocol.two`"));
+        assert!(markdown.contains("`aws.ec2.MarkdownFixture.FirstProtocol.one`"));
+        assert!(markdown.contains("`aws.ec2.MarkdownFixture.SecondProtocol.one`"));
     }
 
     fn provider_code_panic_for_single_resource_with_model(

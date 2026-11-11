@@ -290,7 +290,7 @@ fn organizations_account_email_reference_types_require_annotation_or_matching_ou
 }
 
 #[test]
-fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strings() {
+fn organizations_account_reference_types_keep_role_names_nominal_and_defer_account_bounds() {
     let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
         Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
         SchemaRegistry::new(),
@@ -305,11 +305,8 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             "source.description",
             Some("expected aws.iam.Role.Name, got String"),
         ),
-        (
-            "account_name",
-            "source.description",
-            Some("cannot assign String"),
-        ),
+        // Core #4365 defers overlapping anonymous bounds to resolved-value checks.
+        ("account_name", "source.description", None),
     ] {
         let sink_fields = if field == "role_name" {
             format!("account_name = 'registry-prod'\nrole_name = {expression}")
@@ -360,6 +357,12 @@ fn organizations_account_reference_types_accept_iam_names_and_reject_plain_strin
             snapshot.schema_registry(),
             context,
         );
+        // Inference owns nominal errors that later admission does not repeat.
+        if let Some(error) = configuration.judged().report().first_error() {
+            let expected = expected_error.expect("valid references must pass expression inference");
+            assert!(error.to_string().contains(expected), "{error}");
+            continue;
+        }
         let result = carina_core::validation::validate_resource_ref_types(
             configuration.judged(),
             &HashSet::new(),

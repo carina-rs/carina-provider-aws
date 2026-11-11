@@ -91,7 +91,7 @@ fn sqs_codegen_docs_show_ranges_names_arns_and_dsl_enum_spellings() {
         "| `dead_letter_target_arn` | `SqsQueueArn (pattern:",
         "| `source_queue_arns` | List\\<`SqsQueueArn (pattern:",
         "`String (len: 1..=80)`",
-        "| `queue_name` | Create only | `String (pattern: /^(?:[A-Za-z0-9_-]{1,80}\\|[A-Za-z0-9_-]{1,75}\\.fifo)\\z/ (Full))` |",
+        r"| `value at queue_name: must match /^(?:[A-Za-z0-9_-]{1,80}\|[A-Za-z0-9_-]{1,75}\.fifo)\z/ (Full) (on create)` |",
         "SqsQueueArn",
         "message_group",
         "per_queue",
