@@ -40,32 +40,11 @@ jobs:
       - name: Test acceptance state helpers
         run: bash acceptance-tests/shell-tests/state_helpers.sh
       - run: cargo test --no-run
-      - name: DEBUG disk
-        if: always()
-        run: |
-          df -h / || true
-          du -sh target target/debug target/debug/deps target/debug/build 2>/dev/null || true
-          du -sh /tmp 2>/dev/null || true
-          ls -la /tmp | head -40 || true
       # Step limits bound test execution (real-time waits); preceding --no-run steps compile so cold caches cannot trip them.
       - run: cargo test
         timeout-minutes: 15
-      - name: DEBUG disk
-        if: always()
-        run: |
-          df -h / || true
-          du -sh target target/debug target/debug/deps target/debug/build 2>/dev/null || true
-          du -sh /tmp 2>/dev/null || true
-          ls -la /tmp | head -40 || true
       - name: Build AWS types tests with all features
         run: cargo test -p carina-aws-types --all-features --no-run
-      - name: DEBUG disk
-        if: always()
-        run: |
-          df -h / || true
-          du -sh target target/debug target/debug/deps target/debug/build 2>/dev/null || true
-          du -sh /tmp 2>/dev/null || true
-          ls -la /tmp | head -40 || true
       - name: Test AWS types with all features, including doctests
         run: cargo test -p carina-aws-types --all-features
         timeout-minutes: 10
