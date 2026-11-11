@@ -9,6 +9,7 @@ use carina_core::FiniteF64;
 use carina_core::schema::{
     CustomValidator, DslTransform, FieldGroup, FieldGroupKind, ListElements, PatternAttributeType,
     PatternForm, PatternSpec, PatternSpecDisplay, PatternStructField, RawShape, TypeIdentity,
+    format_refinement_bounds,
 };
 
 use crate::{PageBuilder, TypeDisplay};
@@ -248,7 +249,7 @@ pub fn list_display<K>(
 ) -> TypeDisplay<K> {
     let mut refinements = Vec::new();
     if let Some(length) = constraints.length {
-        refinements.push(format!("items: {}", bounds(length)));
+        refinements.push(format!("items: {}", format_refinement_bounds(length)));
     }
     if constraints.elements == ListElements::Unique {
         refinements.push("unique items".into());
@@ -278,7 +279,7 @@ pub fn map_display<K>(
     let display = match constraints.length {
         Some(length) => TypeDisplay::sequence([
             map,
-            TypeDisplay::text(format!(" (entries: {})", bounds(length))),
+            TypeDisplay::text(format!(" (entries: {})", format_refinement_bounds(length))),
         ]),
         None => map,
     };
@@ -680,30 +681,21 @@ pub fn render_field_groups<K: Clone + Eq + Hash + Debug>(
     page.push_str("\n");
 }
 
-// These formatting rules come from carina-provider-github's doc generator.
-fn bounds<T: Display>((min, max): (Option<T>, Option<T>)) -> String {
-    format!(
-        "{}..{}",
-        min.map(|value| value.to_string()).unwrap_or_default(),
-        max.map(|value| format!("={value}")).unwrap_or_default()
-    )
-}
-
 fn string_constraints(pattern: Option<&PatternSpec>, length: Bounds<u64>) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(pattern) = pattern {
         constraints.push(format!("pattern: {}", PatternSpecDisplay::new(pattern)));
     }
     if let Some(length) = length {
-        constraints.push(format!("len: {}", bounds(length)));
+        constraints.push(format!("len: {}", format_refinement_bounds(length)));
     }
     constraints
 }
 
 fn number_constraints<T: Display>(range: Bounds<T>) -> Vec<String> {
     let mut constraints = Vec::new();
-    if let Some(range) = range.filter(|(min, max)| min.is_some() || max.is_some()) {
-        constraints.push(format!("range: {}", bounds(range)));
+    if let Some(range) = range {
+        constraints.push(format!("range: {}", format_refinement_bounds(range)));
     }
     constraints
 }

@@ -10303,7 +10303,7 @@ mod tests {
     }
 
     #[test]
-    fn smithy_range_trait_without_min_or_max_renders_no_constraint() {
+    fn smithy_range_trait_without_min_or_max_renders_unbounded() {
         let model = carina_smithy::parse(
             r##"{
             "smithy": "2.0", "shapes": {
@@ -10344,7 +10344,7 @@ mod tests {
         page.table(["Type"], [[display.table_cell()]]).unwrap();
         assert_eq!(
             page.finish().unwrap(),
-            "`Int`\n\n| Type |\n|------|\n| `Int` |\n"
+            "`Int (range: unbounded)`\n\n| Type |\n|------|\n| `Int (range: unbounded)` |\n"
         );
     }
 
