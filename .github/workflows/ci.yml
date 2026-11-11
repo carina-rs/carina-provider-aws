@@ -28,7 +28,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-toolchain
@@ -39,9 +39,15 @@ jobs:
         run: bash acceptance-tests/shell-tests/trusted_local_provider.sh
       - name: Test acceptance state helpers
         run: bash acceptance-tests/shell-tests/state_helpers.sh
+      - run: cargo test --no-run
+      # Step limits bound test execution (real-time waits); preceding --no-run steps compile so cold caches cannot trip them.
       - run: cargo test
+        timeout-minutes: 15
+      - name: Build AWS types tests with all features
+        run: cargo test -p carina-aws-types --all-features --no-run
       - name: Test AWS types with all features, including doctests
         run: cargo test -p carina-aws-types --all-features
+        timeout-minutes: 10
 
   validate-examples:
     name: Validate Examples
