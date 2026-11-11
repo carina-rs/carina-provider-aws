@@ -22,7 +22,7 @@ fn organizations_account_schemas() -> [ValidatedResourceSchema; 2] {
 
 #[test]
 fn organizations_account_refinements_use_iam_role_identity_and_anonymous_account_name() {
-    // tests/fixtures/smithy/organizations.json: CreateAccountRequest members
+    // Pinned organizations.json: CreateAccountRequest members
     // target RoleName (effectively 1..64) and CreateAccountName (1..50).
     // AccountName must also satisfy account.json's PutAccountNameRequest.
     for schema in organizations_account_schemas() {

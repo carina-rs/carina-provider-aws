@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Download AWS Smithy model JSON files for testing.
-# Models are cached in carina-provider-aws/tests/fixtures/smithy/ and gitignored.
+# Models are cached by revision under tests/fixtures/smithy/ and gitignored.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FIXTURE_DIR="$SCRIPT_DIR/../carina-provider-aws/tests/fixtures/smithy"
+FIXTURE_DIR="$("$SCRIPT_DIR/smithy-models-dir.sh")"
+REV="${FIXTURE_DIR##*/}"
 
 mkdir -p "$FIXTURE_DIR"
 
-BASE_URL="https://raw.githubusercontent.com/aws/api-models-aws/main/models"
+BASE_URL="https://raw.githubusercontent.com/aws/api-models-aws/$REV/models"
 
 download() {
     local name="$1"
@@ -19,7 +20,15 @@ download() {
         echo "Already downloaded: $dest"
     else
         echo "Downloading $name model..."
-        curl -fsSL "$BASE_URL/$path" -o "$dest"
+        # Publish only complete downloads so a failed request cannot poison the cache.
+        local temporary
+        temporary="$(mktemp "$dest.XXXXXX")"
+        curl -fsSL "$BASE_URL/$path" -o "$temporary" || {
+            local curl_status=$?
+            rm -f "$temporary"
+            return "$curl_status"
+        }
+        mv "$temporary" "$dest"
         echo "  -> $dest ($(du -h "$dest" | cut -f1))"
     fi
 }

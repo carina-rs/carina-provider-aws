@@ -9262,7 +9262,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 // UTC seconds-only grammar. Do not narrow an output by guess.
                 (
                     ("iam.Role", "role_name"),
-                    // carina-provider-aws/tests/fixtures/smithy/iam.json:
+                    // Pinned iam.json:
                     // CreateRoleRequest$RoleName -> roleNameType, length 1..64,
                     // ^[\w+=,.@-]+$. All role-name input operations use this shape.
                     // Share the named type with Roles.names[] and AWSCC.
@@ -9278,7 +9278,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 ),
                 (
                     ("organizations.Account", "role_name"),
-                    // carina-provider-aws/tests/fixtures/smithy/organizations.json:
+                    // Pinned organizations.json:
                     // CreateAccountRequest$RoleName -> RoleName, length 0..64,
                     // ^[\w+=,.@-]{1,64}$. The pattern excludes empty strings,
                     // so this has the same effective 1..64 length and character
@@ -9292,7 +9292,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // In the same organizations.json:
                     // CreateAccountRequest$AccountName -> CreateAccountName,
                     // length 1..50; ^[\u0020-\u007E]+$.
-                    // carina-provider-aws/tests/fixtures/smithy/account.json:
+                    // Pinned account.json:
                     // PutAccountNameRequest$AccountName -> AccountName,
                     // length 1..50; ^[ -;=?-~]+$. The provider sends the same
                     // desired value to CreateAccount and PutAccountName, so

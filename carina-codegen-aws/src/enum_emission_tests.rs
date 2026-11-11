@@ -5,11 +5,11 @@ use std::collections::BTreeSet;
 type Aliases = BTreeMap<String, Vec<(String, String)>>;
 
 include!("../tests/support/enum_aliases.rs");
+include!("../tests/support/smithy_models.rs");
 
 #[test]
 fn every_generated_enum_has_the_docgen_aliases() {
-    let models =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../carina-provider-aws/tests/fixtures/smithy");
+    let models = smithy_model_dir();
     let mut resources = resource_defs::ec2_resources();
     resources.extend(resource_defs::s3_resources());
     resources.extend(resource_defs::sts_resources());

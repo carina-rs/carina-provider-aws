@@ -84,7 +84,7 @@ If the service is new, add the model download to `scripts/download-smithy-models
 download "organizations" "organizations/service/2016-11-28/organizations-2016-11-28.json"
 ```
 
-Models are cached in `carina-provider-aws/tests/fixtures/smithy/` and gitignored.
+Models use the pinned revision and cache described below in **Smithy Model Cache**.
 
 ### Step 2: Add ResourceDef
 
@@ -279,7 +279,24 @@ carina-provider-aws/src/
 
 ## Smithy Model Cache
 
-Downloaded models are cached in `carina-provider-aws/tests/fixtures/smithy/` with filenames like `ec2.json`, `organizations.json`. This directory is gitignored. Delete cached files to force re-download.
+[`smithy-models.rev`](./smithy-models.rev) is the sole source of the full
+40-character commit SHA of `aws/api-models-aws`. Downloads use that commit,
+and [`scripts/smithy-models-dir.sh`](./scripts/smithy-models-dir.sh) resolves
+`carina-provider-aws/tests/fixtures/smithy/<rev>/` for generators and Rust tests.
+This cache is gitignored; a changed pin selects a separate directory and never
+reads the old flat cache. Delete the resolved directory to force re-download.
+
+To bump the pin, edit `smithy-models.rev`, then run:
+
+```bash
+./scripts/generate-schemas-smithy.sh
+./scripts/generate-provider.sh
+./scripts/generate-docs.sh
+```
+
+Review the schemas, provider code, generated docs, and test goldens together.
+Commit the pin and all tracked schema, doc, and golden updates in one PR and
+list the model-driven changes. `generated-docs/` remains an uncommitted artifact.
 
 ## What Is and Isn't Generated
 
