@@ -396,6 +396,218 @@ fn unions_register_members_and_return_a_link() {
     }
 }
 
+fn singleton_int(value: i64) -> AttributeType {
+    AttributeType::refined_int(None, Some((Some(value), Some(value))))
+}
+
+fn assert_inline_cell(ty: AttributeType, expected: &str) {
+    let mut hooks = Hooks::default();
+    let markdown = page(&ty, &mut hooks).unwrap();
+    assert_eq!(
+        markdown,
+        format!("{expected}\n\n| Type |\n|------|\n| {expected} |\n")
+    );
+    assert!(hooks.declarations.is_empty());
+}
+
+fn assert_union_declaration(members: Vec<AttributeType>) {
+    let ty = AttributeType::union(members);
+    let mut hooks = Hooks::default();
+    let markdown = page(&ty, &mut hooks).unwrap();
+    assert_eq!(
+        markdown,
+        "[Union(Choice)](#definition)\n\n| Type |\n|------|\n| [Union(Choice)](#definition) |\n## Definition\n\n"
+    );
+    assert_eq!(hooks.declarations.len(), 1);
+    let DeclarationKind::Union { members } = &hooks.declarations[0].kind else {
+        panic!("union metadata");
+    };
+    let RawShape::Union(original) = ty.raw_shape() else {
+        panic!("union fixture");
+    };
+    assert!(std::ptr::eq(*members, original));
+}
+
+#[test]
+fn int_one_of_sorts_singletons_including_negative_values() {
+    assert_inline_cell(
+        AttributeType::union(vec![
+            singleton_int(300),
+            singleton_int(-60),
+            singleton_int(0),
+            singleton_int(120),
+        ]),
+        "`Int (one of: -60, 0, 120, 300)`",
+    );
+}
+
+#[test]
+fn int_one_of_deduplicates_values() {
+    assert_inline_cell(
+        AttributeType::union(vec![
+            singleton_int(120),
+            singleton_int(60),
+            singleton_int(120),
+            singleton_int(60),
+        ]),
+        "`Int (one of: 60, 120)`",
+    );
+}
+
+#[test]
+fn int_one_of_single_member_union_is_inline() {
+    assert_inline_cell(
+        AttributeType::union(vec![singleton_int(60)]),
+        "`Int (one of: 60)`",
+    );
+}
+
+#[test]
+fn int_one_of_preserves_i64_bound_spelling() {
+    assert_inline_cell(
+        AttributeType::union(vec![singleton_int(i64::MAX), singleton_int(i64::MIN)]),
+        "`Int (one of: -9223372036854775808, 9223372036854775807)`",
+    );
+}
+
+#[test]
+fn int_one_of_is_inline_inside_a_list() {
+    assert_inline_cell(
+        AttributeType::list(AttributeType::union(vec![
+            singleton_int(120),
+            singleton_int(60),
+        ])),
+        "List\\<`Int (one of: 60, 120)`\\> (ordered)",
+    );
+}
+
+#[test]
+fn int_one_of_is_inline_inside_a_map_value() {
+    assert_inline_cell(
+        AttributeType::map(AttributeType::union(vec![
+            singleton_int(120),
+            singleton_int(60),
+        ])),
+        "Map\\<`String`, `Int (one of: 60, 120)`\\>",
+    );
+}
+
+#[test]
+fn int_one_of_accepts_a_single_member_range_constraint() {
+    assert_inline_cell(
+        AttributeType::union(vec![AttributeType::int_member(
+            carina_core::schema::IntIdentityLayer::new(None, None),
+            carina_core::schema::IntMemberConstraints::new(Some((Some(60), Some(60)))),
+        )]),
+        "`Int (one of: 60)`",
+    );
+}
+
+#[test]
+fn int_one_of_nested_union_member_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::union(vec![singleton_int(120)]),
+    ]);
+}
+
+#[test]
+fn int_one_of_mixed_singleton_and_non_singleton_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::refined_int(None, Some((Some(120), Some(300)))),
+    ]);
+}
+
+#[test]
+fn int_one_of_non_singleton_range_keeps_declaration() {
+    assert_union_declaration(vec![AttributeType::refined_int(
+        None,
+        Some((Some(60), Some(120))),
+    )]);
+}
+
+#[test]
+fn int_one_of_member_with_identity_keeps_declaration() {
+    for member in [
+        AttributeType::refined_int(
+            Some(TypeIdentity::bare("Interval")),
+            Some((Some(120), Some(120))),
+        ),
+        AttributeType::refined_int_with_validator(
+            TypeIdentity::bare("Interval"),
+            Some((Some(120), Some(120))),
+            Arc::new(|_| Ok(())),
+        ),
+    ] {
+        assert_union_declaration(vec![singleton_int(60), member]);
+    }
+}
+
+#[test]
+fn int_one_of_member_with_only_min_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::refined_int(None, Some((Some(120), None))),
+    ]);
+}
+
+#[test]
+fn int_one_of_member_with_only_max_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::refined_int(None, Some((None, Some(120)))),
+    ]);
+}
+
+#[test]
+fn int_one_of_fully_open_range_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::refined_int(None, Some((None, None))),
+    ]);
+}
+
+#[test]
+fn int_one_of_member_without_a_range_keeps_declaration() {
+    assert_union_declaration(vec![singleton_int(60), AttributeType::int()]);
+}
+
+#[test]
+fn int_one_of_float_singleton_keeps_declaration() {
+    let value = FiniteF64::new(120.0).unwrap();
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::refined_float(None, Some((Some(value), Some(value)))),
+    ]);
+}
+
+#[test]
+fn int_one_of_string_member_keeps_declaration() {
+    assert_union_declaration(vec![singleton_int(60), AttributeType::string()]);
+}
+
+#[test]
+fn int_one_of_additional_member_constraint_keeps_declaration() {
+    assert_union_declaration(vec![
+        singleton_int(60),
+        AttributeType::int_member(
+            carina_core::schema::IntIdentityLayer::new(None, Some((Some(120), Some(120)))),
+            carina_core::schema::IntMemberConstraints::new(Some((Some(0), Some(300)))),
+        ),
+    ]);
+}
+
+#[test]
+fn int_one_of_empty_union_keeps_declaration() {
+    assert_union_declaration(vec![]);
+}
+
+#[test]
+fn int_one_of_standalone_singleton_keeps_range_wording() {
+    assert_inline_cell(singleton_int(60), "`Int (range: 60..=60)`");
+}
+
 #[test]
 fn lists_render_item_bounds_uniqueness_and_order() {
     for (ordered, elements, length, suffix) in [

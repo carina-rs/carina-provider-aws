@@ -7,9 +7,9 @@ use std::hash::Hash;
 use anyhow::{Result, bail};
 use carina_core::FiniteF64;
 use carina_core::schema::{
-    CustomValidator, DslTransform, FieldGroup, FieldGroupKind, ListElements, PatternAttributeType,
-    PatternForm, PatternSpec, PatternSpecDisplay, PatternStructField, RawShape, TypeIdentity,
-    format_refinement_bounds,
+    CustomValidator, DslTransform, FieldGroup, FieldGroupKind, IntIdentityParts, IntMemberParts,
+    ListElements, PatternAttributeType, PatternForm, PatternSpec, PatternSpecDisplay,
+    PatternStructField, RawShape, TypeIdentity, format_refinement_bounds,
 };
 
 use crate::{PageBuilder, TypeDisplay};
@@ -367,6 +367,92 @@ pub fn render_attribute_type<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     Ok(walk(ty, scope, hooks, registry, &mut HashSet::new())?.with_note(note))
 }
 
+// Temporary bridge until carina-rs/carina#4381 (typed int enum) lands; delete this classifier then.
+fn classify_int_one_of<R: PatternForm>(members: &[PatternAttributeType<R>]) -> Option<Vec<i64>> {
+    if members.is_empty() {
+        return None;
+    }
+    let mut values = Vec::with_capacity(members.len());
+    for member in members {
+        match member.raw_shape() {
+            RawShape::Int {
+                identity_layer:
+                    IntIdentityParts {
+                        identity,
+                        range,
+                        // Core validators require an identity, rejected below.
+                        validate: _,
+                    },
+                member_layer:
+                    IntMemberParts {
+                        range: member_range,
+                    },
+            } => {
+                if identity.is_some() {
+                    return None;
+                }
+                let range = match (range, member_range) {
+                    (Some(range), None) | (None, Some(range)) => range,
+                    (None, None) | (Some(_), Some(_)) => return None,
+                };
+                let (Some(min), Some(max)) = range else {
+                    return None;
+                };
+                if min != max {
+                    return None;
+                }
+                values.push(min);
+            }
+            RawShape::UnloadedSchemaType(_)
+            | RawShape::Reference {
+                identity: _,
+                pattern: _,
+                length: _,
+            }
+            | RawShape::String {
+                identity_layer: _,
+                member_layer: _,
+            }
+            | RawShape::Float {
+                identity: _,
+                range: _,
+                validate: _,
+            }
+            | RawShape::Bool
+            | RawShape::Duration
+            | RawShape::Enum {
+                identity: _,
+                base: _,
+                values: _,
+                dsl_aliases: _,
+                validate: _,
+                to_dsl: _,
+            }
+            | RawShape::Struct {
+                name: _,
+                fields: _,
+                field_groups: _,
+                input_rules: _,
+            }
+            | RawShape::Union(_)
+            | RawShape::List {
+                element_type: _,
+                ordered: _,
+                constraints: _,
+            }
+            | RawShape::Map {
+                key: _,
+                value: _,
+                constraints: _,
+            }
+            | RawShape::Ref(_) => return None,
+        }
+    }
+    values.sort_unstable();
+    values.dedup();
+    Some(values)
+}
+
 fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
     ty: &'a PatternAttributeType<R>,
     scope: &H::Scope,
@@ -525,15 +611,25 @@ fn walk<'a, R: PatternForm, H: TypeDocHooks<'a, R>>(
             },
             hooks,
         )?,
-        RawShape::Union(members) => registry.register(
-            scope,
-            Declaration {
-                id: id.clone(),
-                ty,
-                kind: DeclarationKind::Union { members },
-            },
-            hooks,
-        )?,
+        RawShape::Union(members) => match classify_int_one_of(members) {
+            Some(values) => TypeDisplay::code(format!(
+                "Int (one of: {})",
+                values
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            None => registry.register(
+                scope,
+                Declaration {
+                    id: id.clone(),
+                    ty,
+                    kind: DeclarationKind::Union { members },
+                },
+                hooks,
+            )?,
+        },
         RawShape::List {
             element_type,
             ordered,
