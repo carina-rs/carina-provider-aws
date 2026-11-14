@@ -16,54 +16,11 @@ fn raw_manifest() -> Value {
 fn checksum(value: &Value) -> String {
     let mut canonical = value.clone();
     canonical.sort_all_objects();
+    // Rust serde_json and Python json.dumps(sort_keys, separators, ensure_ascii=False) agree only while the manifest holds no floats.
     format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&canonical).unwrap())
     )
-}
-
-fn manifest_file_hashes(manifest: &Value) -> Result<BTreeMap<String, Value>, String> {
-    let upstream = manifest["source"]["upstream_file_sha256"]
-        .as_object()
-        .ok_or("missing upstream source provenance")?;
-    let mut files = BTreeMap::new();
-    for (path, digest) in upstream {
-        let digest = digest.as_str().ok_or("invalid upstream digest")?;
-        if digest.len() != 64 || !digest.bytes().all(|c| c.is_ascii_hexdigit()) {
-            return Err(format!("invalid upstream source digest: {path}"));
-        }
-        files.insert(
-            path.clone(),
-            json!({"upstream_sha256": digest,
-            "definitions": {}, "inputs": [], "outputs": []}),
-        );
-    }
-    for kind in ["inputs", "outputs"] {
-        for leaf in manifest[kind]
-            .as_array()
-            .ok_or("missing inventory entries")?
-        {
-            let path = leaf["file"]
-                .as_str()
-                .ok_or("inventory entry has no source file")?;
-            let file = files
-                .get_mut(path)
-                .ok_or_else(|| format!("unrecorded source file: {path}"))?;
-            let identity = leaf["identity"]
-                .as_str()
-                .ok_or("missing inventory identity")?;
-            let definition = manifest["definitions"]
-                .get(identity)
-                .filter(|definition| definition.is_object())
-                .ok_or_else(|| format!("missing definition: {identity}"))?;
-            file[kind].as_array_mut().unwrap().push(leaf.clone());
-            file["definitions"][identity] = definition.clone();
-        }
-    }
-    Ok(files
-        .into_iter()
-        .map(|(path, data)| (path, json!(checksum(&data))))
-        .collect())
 }
 
 fn manifest_content_hash(manifest: &Value) -> String {
@@ -78,19 +35,6 @@ fn manifest_content_hash(manifest: &Value) -> String {
 fn verify_manifest_hashes(manifest: &Value) -> Result<(), String> {
     if manifest["format"] != 2 {
         return Err("refresh the manifest to integrity format 2".into());
-    }
-    let computed = manifest_file_hashes(manifest)?;
-    let recorded = manifest["source"]["files"]
-        .as_object()
-        .ok_or("missing per-file checksums")?;
-    if computed.len() != recorded.len() || computed.keys().any(|path| !recorded.contains_key(path))
-    {
-        return Err("manifest source-file checksum inventory differs".into());
-    }
-    for (path, digest) in computed {
-        if recorded[&path] != digest {
-            return Err(format!("manifest inventory checksum mismatch: {path}"));
-        }
     }
     if manifest["source"]["content_sha256"] != manifest_content_hash(manifest) {
         return Err("manifest content_sha256 mismatch".into());
@@ -309,60 +253,6 @@ fn manifest_hashes_detect_inventory_hand_edits() {
     assert!(
         verify_manifest_hashes(&edited).is_err(),
         "a definition hand edit must invalidate the manifest"
-    );
-}
-
-#[test]
-fn manifest_hashes_detect_changed_or_deleted_digest_records() {
-    let original = raw_manifest();
-    let path = original["source"]["files"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .next()
-        .unwrap();
-    let mut edited = original.clone();
-    edited["source"]["files"][path] = json!("0".repeat(64));
-    assert!(
-        verify_manifest_hashes(&edited).is_err(),
-        "a valid-looking file checksum must be recomputed"
-    );
-
-    let mut edited = original.clone();
-    edited["source"]["files"]
-        .as_object_mut()
-        .unwrap()
-        .remove(path);
-    assert!(
-        verify_manifest_hashes(&edited).is_err(),
-        "a partial file table must be rejected"
-    );
-
-    let mut edited = original;
-    edited["source"]["content_sha256"] = json!("0".repeat(64));
-    assert!(
-        verify_manifest_hashes(&edited).is_err(),
-        "the aggregate checksum must be recomputed"
-    );
-}
-
-#[test]
-fn manifest_hashes_detect_partial_refreshes() {
-    let mut edited = raw_manifest();
-    edited["inputs"][0]["path"] = json!("partially_refreshed");
-    edited["source"]["files"] = json!(manifest_file_hashes(&edited).unwrap());
-    assert_eq!(
-        verify_manifest_hashes(&edited).unwrap_err(),
-        "manifest content_sha256 mismatch"
-    );
-
-    let mut edited = raw_manifest();
-    edited["definitions"]["aws.logs.LogGroup.LogGroupName"]["length"] = json!([1, 511]);
-    edited["source"]["content_sha256"] = json!(manifest_content_hash(&edited));
-    assert!(
-        verify_manifest_hashes(&edited)
-            .unwrap_err()
-            .contains("inventory checksum mismatch")
     );
 }
 

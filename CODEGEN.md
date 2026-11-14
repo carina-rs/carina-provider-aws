@@ -300,13 +300,12 @@ snapshot of unpublished work. Review the refreshed manifest and update its
 explicit commit/count assertions when the source inventory changes.
 
 The manifest records upstream byte hashes as provenance in
-`source.upstream_file_sha256`. Its `source.files` hashes cover each file's
-checked-in inventory entries, referenced identity definitions, and upstream
-digest. `source.content_sha256` covers the entire manifest except itself.
-Both use SHA-256 over compact, recursively key-sorted UTF-8 JSON. The guard
-recomputes these inventory checksums, so hand edits and partial refreshes fail
-without a sibling checkout or network access. Ordinary CI never runs the
-refresh command; its updater tests use offline Git and Cargo stubs.
+`source.upstream_file_sha256`. Its `source.content_sha256` covers the entire
+manifest except itself, using SHA-256 over compact, recursively key-sorted UTF-8
+JSON. The guard recomputes this checksum to check the manifest's integrity.
+Its freshness depends on following the refresh rule above. Ordinary CI needs
+neither a sibling checkout nor network access for this check and never runs
+the refresh command; its updater tests use offline Git and Cargo stubs.
 
 ## Smithy Model Cache
 

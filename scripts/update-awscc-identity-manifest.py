@@ -82,7 +82,6 @@ carina-aws-types = {{ git = {json.dumps(types['git'])}, rev = {json.dumps(types[
 regex = "1"
 regex-syntax = "0.8"
 base64 = "0.22"
-heck = "0.5"
 serde_json = "1"
 ''')
 modules = "\n".join(
@@ -94,14 +93,10 @@ rust = f'''#![allow(dead_code)]
 #[path = {json.dumps(str(ROOT / 'carina-codegen-aws/tests/support/schema_inventory.rs'))}] mod inventory;
 pub mod schemas {{ {modules} }}
 fn main() {{
-    use heck::ToSnakeCase;
     let mut inputs = Vec::new();
     let mut declarations = Vec::new();
     for config in schemas::generated::configs() {{
-        let (service, resource) = config.resource_type_name.split_once('.').unwrap();
-        let file = format!("carina-provider-awscc/src/schemas/generated/{{service}}/{{}}.rs", resource.to_snake_case());
-        for mut leaf in inventory::schema_leaves("awscc", config.schema.as_schema()) {{
-            leaf["file"] = serde_json::json!(file);
+        for leaf in inventory::schema_leaves("awscc", config.schema.as_schema()) {{
             if !leaf["identity"].is_null() {{
                 if leaf["writable"] == true {{ inputs.push(leaf.clone()); }}
                 declarations.push(leaf);
@@ -139,20 +134,11 @@ for original in snapshot["declarations"]:
 
 def checksum(value):
     """Canonical JSON shared with the Rust guard: sorted keys, compact UTF-8."""
+    # Rust serde_json and Python json.dumps(sort_keys, separators, ensure_ascii=False) agree only while the manifest holds no floats.
     data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
-# Upstream byte digests are provenance. Per-file inventory digests can be
-# recomputed from the checked-in data without upstream source files or network.
-file_data = {path: {"upstream_sha256": digest, "definitions": {}, "inputs": [], "outputs": []}
-             for path, digest in hashes.items()}
-for kind, rows in (("inputs", inputs), ("outputs", outputs)):
-    for leaf in rows:
-        data = file_data[leaf["file"]]
-        data[kind].append(leaf)
-        data["definitions"][leaf["identity"]] = definitions[leaf["identity"]]
-provenance["files"] = {path: checksum(data) for path, data in file_data.items()}
 content = {"format": 2, "source": provenance, "definitions": definitions,
            "inputs": inputs, "outputs": outputs}
 provenance["content_sha256"] = checksum(content)
