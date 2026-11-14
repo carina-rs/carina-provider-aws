@@ -55,7 +55,6 @@ fn audited_identity_producers_are_nominal() {
             "id",
             "aws.organizations.Organization.Id",
         ),
-        ("sqs.Queue", "queue_name", "aws.sqs.Queue.Name"),
     ] {
         let config = generated::configs()
             .into_iter()

@@ -281,8 +281,8 @@ carina-provider-aws/src/
 
 The [identity inventory guard](./carina-codegen-aws/tests/support/identity_inventory_guard.rs)
 uses the checked-in [awscc manifest](./carina-codegen-aws/tests/fixtures/awscc-identified-inputs.json).
-Refresh it whenever awscc changes identified inputs or bumps its carina-aws-types
-dependency, and whenever this repository bumps carina-aws-types.
+Refresh it whenever awscc changes identified inputs or its carina pin, or this
+repository bumps its carina revision.
 
 From this repository's root, with a clean awscc checkout at
 `../carina-provider-awscc`, run:

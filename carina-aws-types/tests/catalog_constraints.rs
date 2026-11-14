@@ -47,11 +47,10 @@ fn standalone_policies_keep_baseline_bounds_and_patterns() {
     use carina_core::schema::{CompiledPattern, PatternMatch, PatternSpec, ValidatedConfigSchema};
     let expected: Value =
         serde_json::from_str(include_str!("fixtures/standalone-63b2a0f.json")).unwrap();
-    // Keep the historical snapshot intact. #700's three additions have their
+    // Keep the historical snapshot intact. #700's two additions have their
     // own exact-definition and boundary regression in identity_layers_tests.
     let additions = [
         AwsType::LogsLogGroupName,
-        AwsType::SqsQueueName,
         AwsType::OrganizationsOrganizationId,
     ];
     assert_eq!(

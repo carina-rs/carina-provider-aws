@@ -979,8 +979,9 @@ Some((Some(1), Some(2048)))),
         constructor: |identity| crate::elbv2_matcher_codes(identity, 0, 99),
     },
     /// CloudWatch Logs log-group name, with AWSCC's exact structural identity.
-    /// Creation-only reserved-prefix policy belongs to the declaring owner;
-    /// FlowLog can select an existing group beginning with aws/.
+    /// Reserved aws/ prefix rules must not be identity-layer callbacks in any
+    /// owner: callbacks merge per identity and annotations conjoin owners.
+    /// AWSCC's current callback is tracked by carina-provider-awscc#624.
     LogsLogGroupName => logs_log_group_name {
         segments: ["logs", "LogGroup"],
         kind: "LogGroupName",
@@ -1004,18 +1005,6 @@ Some((Some(1), Some(2048)))),
         ],
 
         constructor: validated_int_enum_definition,
-    },
-    /// SQS queue name. The optional FIFO suffix counts inside 80 characters.
-    /// CreateQueueRequest$QueueName's documented grammar, without a transform.
-    SqsQueueName => sqs_queue_name {
-        segments: ["sqs", "Queue"],
-        kind: "Name",
-        valid_sample: "example-queue",
-        constructor: |identity| metadata_string(
-            identity,
-            PatternSpec::new(r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z", PatternMatch::Full),
-            Some((Some(1), Some(80))),
-        ),
     },
     /// SQS queue ARN, including the queue-name grammar and FIFO suffix limit.
     /// The service authorization reference's queue resource is
@@ -2218,7 +2207,6 @@ Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|tru
 Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true
 LogsLogGroupName|aws|logs/LogGroup|LogGroupName|/aws/lambda/example|false
 LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true
-SqsQueueName|aws|sqs/Queue|Name|example-queue|false
 SqsQueueArn|aws|sqs/Queue|Arn|arn:aws:sqs:ap-northeast-1:123456789012:example-queue|false
 SqsQueueDeduplicationScope|aws|sqs/Queue|DeduplicationScope|messageGroup|false
 SqsQueueFifoThroughputLimit|aws|sqs/Queue|FifoThroughputLimit|perQueue|false

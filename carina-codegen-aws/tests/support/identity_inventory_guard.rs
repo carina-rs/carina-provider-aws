@@ -1,4 +1,5 @@
 //! #700: an offline schema inventory and obligations created by identified inputs.
+//! It flags only anonymous String producers; a producer typed with a different identity is out of scope.
 use std::collections::{BTreeMap, BTreeSet};
 
 use carina_core::schema::{RawShape, ValidatedConfigSchema, ValidatedProviderSchemaWitness};
@@ -57,6 +58,40 @@ fn allowlist() -> Vec<Value> {
     serde_json::from_str(include_str!("../fixtures/identity-producer-allowlist.json")).unwrap()
 }
 
+fn reviewed_aliases(aliases: Vec<Value>) -> Result<Vec<Value>, String> {
+    let mut seen = BTreeSet::new();
+    for alias in &aliases {
+        for field in [
+            "resource",
+            "property",
+            "destination_service",
+            "destination_property",
+            "reason",
+            "evidence",
+            "review_when",
+        ] {
+            if alias[field].as_str().unwrap_or_default().trim().is_empty() {
+                return Err(format!("alias {alias}: missing {field}"));
+            }
+        }
+        let selector = (
+            alias["resource"].as_str().unwrap(),
+            alias["property"].as_str().unwrap(),
+        );
+        if !seen.insert(selector) {
+            return Err(format!("duplicate alias {selector:?}"));
+        }
+    }
+    Ok(aliases)
+}
+
+fn aliases() -> Vec<Value> {
+    reviewed_aliases(
+        serde_json::from_str(include_str!("../fixtures/identity-producer-aliases.json")).unwrap(),
+    )
+    .unwrap_or_else(|error| panic!("{error}"))
+}
+
 fn leaves() -> Vec<Value> {
     generated::configs()
         .iter()
@@ -75,27 +110,25 @@ fn source(leaf: &Value) -> String {
 }
 
 /// Candidates use service/property semantics, never a blanket *_id/*_name rule.
-/// Cross-service aliases below are the reviewed semantic mappings from #700.
-fn key(leaf: &Value) -> (String, String) {
+/// Cross-service aliases come from the reviewed fixture, with exact resources preferred over `*`.
+fn key(leaf: &Value, aliases: &[Value]) -> (String, String) {
     let resource = leaf["resource"].as_str().unwrap();
     let service = leaf["service"].as_str().unwrap();
     let path = leaf["path"].as_str().unwrap();
     let property = path.rsplit('.').next().unwrap().replace("[]", "");
-    match (resource, property.as_str()) {
-        ("ec2.FlowLog", "log_group_name") => return ("logs".into(), property),
-        ("identitystore.User", "user_id") => return ("sso".into(), "principal_id".into()),
-        ("organizations.Account", "id") => return ("aws".into(), "account_id".into()),
-        ("sso.Assignment", "target_id") => return ("aws".into(), "account_id".into()),
-        _ => {}
-    }
-    if property == "region" {
-        return ("aws".into(), property);
-    }
-    if matches!(
-        property.as_str(),
-        "account_id" | "master_account_id" | "peer_owner_id" | "source_security_group_owner_id"
-    ) {
-        return ("aws".into(), "account_id".into());
+    if let Some(alias) = aliases
+        .iter()
+        .find(|alias| alias["resource"] == resource && alias["property"] == property)
+        .or_else(|| {
+            aliases
+                .iter()
+                .find(|alias| alias["resource"] == "*" && alias["property"] == property)
+        })
+    {
+        return (
+            alias["destination_service"].as_str().unwrap().into(),
+            alias["destination_property"].as_str().unwrap().into(),
+        );
     }
     // A policy's nested `id` is not its containing resource's ID. Keep map-key
     // ancestry too: Condition's inner variable keys are not operator names.
@@ -120,18 +153,22 @@ fn key(leaf: &Value) -> (String, String) {
     (service.into(), property)
 }
 
-fn gaps(leaves: &[Value], sinks: &[Value]) -> BTreeMap<(String, String), BTreeSet<String>> {
+fn gaps(
+    leaves: &[Value],
+    sinks: &[Value],
+    aliases: &[Value],
+) -> BTreeMap<(String, String), BTreeSet<String>> {
     let mut obligations = BTreeMap::<_, BTreeSet<_>>::new();
     for sink in sinks {
         let Some(identity) = sink["identity"].as_str() else {
             continue;
         };
-        let sink_key = key(sink);
+        let sink_key = key(sink, aliases);
         for producer in leaves
             .iter()
             .filter(|leaf| leaf["anonymous_string"] == true)
         {
-            if key(producer) == sink_key {
+            if key(producer, aliases) == sink_key {
                 obligations
                     .entry((source(producer), identity.to_string()))
                     .or_default()
@@ -143,7 +180,7 @@ fn gaps(leaves: &[Value], sinks: &[Value]) -> BTreeMap<(String, String), BTreeSe
 }
 
 fn check(leaves: &[Value], sinks: &[Value], exceptions: &[Value]) -> Result<(), String> {
-    let mut gaps = gaps(leaves, sinks);
+    let mut gaps = gaps(leaves, sinks, &aliases());
     let mut errors = Vec::new();
     let mut seen = BTreeSet::new();
     for exception in exceptions {
@@ -257,6 +294,38 @@ fn manifest_hashes_detect_inventory_hand_edits() {
 }
 
 #[test]
+fn aliases_require_review_metadata() {
+    let original = aliases();
+    for field in ["reason", "evidence", "review_when"] {
+        for replacement in [None, Some(json!(null)), Some(json!("")), Some(json!(" \t"))] {
+            let mut edited = original.clone();
+            if let Some(value) = replacement {
+                edited[0][field] = value;
+            } else {
+                edited[0].as_object_mut().unwrap().remove(field);
+            }
+            let error = reviewed_aliases(edited).unwrap_err();
+            assert!(error.contains(field), "{error}");
+        }
+    }
+}
+
+#[test]
+fn candidate_matching_uses_reviewed_alias_data() {
+    let leaf = json!({"resource": "ec2.FlowLog", "service": "ec2", "path": "log_group_name"});
+    let mut aliases = aliases();
+    assert_eq!(
+        key(&leaf, &aliases),
+        ("logs".into(), "log_group_name".into())
+    );
+    aliases.retain(|alias| alias["resource"] != "ec2.FlowLog");
+    assert_eq!(
+        key(&leaf, &aliases),
+        ("ec2".into(), "log_group_name".into())
+    );
+}
+
+#[test]
 fn schema_inventory_producer_obligations() {
     let leaves = leaves();
     check(&leaves, &sinks(&leaves, &manifest()), &allowlist())
@@ -282,7 +351,7 @@ fn new_manifest_input_creates_an_obligation_and_stale_allowlist_fails() {
         "{error}"
     );
     let exception = json!({"source": "deleted", "destination_identity": "deleted",
-        "reason": "fixture", "evidence": "fixture", "issue": "#700", "review_when": "fixture", "expected": "fixture"});
+        "reason": "fixture", "evidence": "fixture", "issue": "carina-rs/carina-provider-aws#700", "review_when": "fixture", "expected": "fixture"});
     assert!(
         check(&leaves, &[], &[exception])
             .unwrap_err()

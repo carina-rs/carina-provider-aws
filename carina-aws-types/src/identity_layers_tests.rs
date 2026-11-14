@@ -24,13 +24,6 @@ fn issue_700_identity_definitions_preserve_the_reviewed_languages() {
             "o-1234567890",
             "o-123456789A",
         ),
-        (
-            "aws.sqs.Queue.Name",
-            r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
-            Some((Some(1), Some(80))),
-            "queue.fifo",
-            "queue.other",
-        ),
     ] {
         let row = AwsType::ALL
             .iter()
@@ -51,23 +44,10 @@ fn issue_700_identity_definitions_preserve_the_reviewed_languages() {
         assert!(!validator.accepts(bad), "{identity}: {bad:?}");
         assert!(!validator.accepts(""));
     }
-    for (identity, maximum) in [
-        ("aws.logs.LogGroup.LogGroupName", 512),
-        ("aws.sqs.Queue.Name", 80),
-    ] {
-        let row = AwsType::ALL
-            .iter()
-            .find(|row| row.identity().to_string() == identity)
-            .unwrap();
-        let ty = row.attribute_type();
-        let validator = MemberStringValidator::new(&ty).unwrap();
-        assert!(validator.accepts(&"a".repeat(maximum)));
-        assert!(!validator.accepts(&"a".repeat(maximum + 1)));
-        if maximum == 80 {
-            assert!(validator.accepts(&format!("{}.fifo", "a".repeat(75))));
-            assert!(!validator.accepts(&format!("{}.fifo", "a".repeat(76))));
-        }
-    }
+    let ty = AwsType::LogsLogGroupName.attribute_type();
+    let validator = MemberStringValidator::new(&ty).unwrap();
+    assert!(validator.accepts(&"a".repeat(512)));
+    assert!(!validator.accepts(&"a".repeat(513)));
 }
 
 fn id(name: &str) -> TypeIdentity {

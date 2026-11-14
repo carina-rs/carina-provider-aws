@@ -1,0 +1,83 @@
+[
+  {
+    "resource": "ec2.FlowLog",
+    "property": "log_group_name",
+    "destination_service": "logs",
+    "destination_property": "log_group_name",
+    "reason": "A FlowLog's log_group_name selects the same CloudWatch Logs group named by logs.LogGroup.",
+    "evidence": "carina-provider-aws/src/schemas/generated/ec2/flow_log.rs::log_group_name; awscc-identified-inputs.json::logs.LogGroup.log_group_name (aws.logs.LogGroup.LogGroupName)",
+    "review_when": "FlowLog's log destination representation or the LogGroup name identity changes."
+  },
+  {
+    "resource": "identitystore.User",
+    "property": "user_id",
+    "destination_service": "sso",
+    "destination_property": "principal_id",
+    "reason": "An Identity Store user's user_id is the principal ID used for an SSO user assignment; the wider lookup grammar remains separately allowlisted.",
+    "evidence": "carina-provider-aws/src/schemas/generated/identitystore/user.rs::user_id; awscc-identified-inputs.json::sso.Assignment.principal_id; identity-producer-allowlist.json (carina-rs/carina-provider-aws#701)",
+    "review_when": "carina-rs/carina-provider-aws#701 resolves the lookup grammar or SSO changes its principal identity."
+  },
+  {
+    "resource": "organizations.Account",
+    "property": "id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "An Organizations Account's id denotes an AWS account, regardless of the member's abbreviated spelling.",
+    "evidence": "carina-provider-aws/src/schemas/generated/organizations/account.rs::id; carina-aws-types/src/catalog.rs::AccountId; awscc-identified-inputs.json::organizations.Account.account_id",
+    "review_when": "Organizations changes the meaning of Account.id or the shared AWS account identity changes."
+  },
+  {
+    "resource": "sso.Assignment",
+    "property": "target_id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "An SSO Assignment's AWS-account target_id denotes an AWS account, rather than a distinct assignment identity.",
+    "evidence": "awscc-identified-inputs.json::sso.Assignment.target_id (aws.AccountId)",
+    "review_when": "SSO Assignment supports another target kind or changes its target identity."
+  },
+  {
+    "resource": "*",
+    "property": "region",
+    "destination_service": "aws",
+    "destination_property": "region",
+    "reason": "Region members across services denote the shared AWS region; existing S3 state-spelling exceptions remain separately allowlisted.",
+    "evidence": "awscc-identified-inputs.json::sns.Subscription.region (aws.Region); identity-producer-allowlist.json::aws.s3.Bucket region entries",
+    "review_when": "A region member gains service-specific semantics or the shared Region spelling policy changes."
+  },
+  {
+    "resource": "*",
+    "property": "account_id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "Account ID members across services denote the shared AWS account identity.",
+    "evidence": "awscc-identified-inputs.json::cloudwatch.Alarm.metrics[].account_id and organizations.Account.account_id (aws.AccountId)",
+    "review_when": "An account_id member gains another meaning or the shared AccountId identity changes."
+  },
+  {
+    "resource": "*",
+    "property": "master_account_id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "An organization's master_account_id identifies its management AWS account; the role qualifier does not change the identity.",
+    "evidence": "carina-provider-aws/src/schemas/generated/organizations/organization.rs::master_account_id; carina-aws-types/src/catalog.rs::AccountId",
+    "review_when": "The management-account member or shared AccountId identity changes."
+  },
+  {
+    "resource": "*",
+    "property": "peer_owner_id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "A VPC peering connection's peer_owner_id is the peer's AWS account ID.",
+    "evidence": "awscc-identified-inputs.json::ec2.VpcPeeringConnection.peer_owner_id (aws.AccountId)",
+    "review_when": "A peer_owner_id member denotes another kind of owner or the shared AccountId identity changes."
+  },
+  {
+    "resource": "*",
+    "property": "source_security_group_owner_id",
+    "destination_service": "aws",
+    "destination_property": "account_id",
+    "reason": "The source security group's owner ID denotes its AWS account, independent of the service resource containing the ingress rule.",
+    "evidence": "awscc-identified-inputs.json::ec2.SecurityGroup.security_group_ingress[].source_security_group_owner_id and ec2.SecurityGroupIngress.source_security_group_owner_id (aws.AccountId)",
+    "review_when": "The source security-group owner semantics or shared AccountId identity changes."
+  }
+]

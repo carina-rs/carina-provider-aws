@@ -40,7 +40,7 @@ fn sqs_codegen_rust_uses_exact_value_paths_and_preserves_carriers() {
         return;
     };
     for expected in [
-        "carina_aws_types::AwsType::SqsQueueName.definition()",
+        r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z",
         "carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(43200))",
         "carina_aws_types::with_int_range(AttributeType::int(), Some(60), Some(1209600))",
         "carina_aws_types::with_int_range(AttributeType::int(), Some(0), Some(900))",
@@ -92,7 +92,8 @@ fn sqs_codegen_docs_show_ranges_names_arns_and_dsl_enum_spellings() {
         "| `max_receive_count` | `Int (range: 1..=1000)` |",
         "| `dead_letter_target_arn` | `SqsQueueArn (pattern:",
         "| `source_queue_arns` | List\\<`SqsQueueArn (pattern:",
-        r"`SqsQueueName (pattern: /^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z/ (Full), len: 1..=80)`",
+        "`String (len: 1..=80)`",
+        r"| `value at queue_name: must match /^(?:[A-Za-z0-9_-]{1,80}\|[A-Za-z0-9_-]{1,75}\.fifo)\z/ (Full) (on create)` |",
         "SqsQueueArn",
         "message_group",
         "per_queue",

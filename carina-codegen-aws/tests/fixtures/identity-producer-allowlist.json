@@ -5,7 +5,7 @@
     "expected": "no_semantic_producer_match",
     "reason": "Read-side validation metadata can name domains up to 253 characters; the request Common Name identity is limited to 64. This is not a producer of the request-only identity.",
     "evidence": "carina-provider-aws/src/schemas/generated/acm/certificate.rs:139 (read domain 1..253); carina-aws-types/src/catalog.rs::AcmCertificateDomainName (request cap 64)",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "A distinct read-domain identity and an explicit relationship to request Common Names are designed."
   },
   {
@@ -14,7 +14,7 @@
     "expected": "no_semantic_producer_match",
     "reason": "Read-side validation metadata can name domains up to 253 characters; the request Common Name identity is limited to 64. This is not a producer of the request-only identity.",
     "evidence": "carina-provider-aws/src/schemas/generated/acm/certificate.rs:178 (renewal read domain 1..253); carina-aws-types/src/catalog.rs::AcmCertificateDomainName (request cap 64)",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "A distinct read-domain identity and an explicit relationship to request Common Names are designed."
   },
   {
@@ -23,7 +23,7 @@
     "expected": "no_semantic_producer_match",
     "reason": "A user display name is mutable human text, not a Group display-name identity.",
     "evidence": "carina-provider-aws/src/schemas/generated/identitystore/user.rs:38; pinned awscc identitystore.Group.display_name in awscc-identified-inputs.json",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "A User display-name identity and an actual identified consumer are introduced."
   },
   {
@@ -50,7 +50,7 @@
     "expected": "not_a_current_positive_resource_edge",
     "reason": "Preserve the existing output spelling/state normalization contract; no current positive resource edge. The typed-function regression is a separate contract.",
     "evidence": "carina-provider-aws/src/schemas/generated/s3/bucket.rs:45; carina-codegen-aws/src/main.rs:8954 (state spelling policy); carina-provider-aws/tests/s3_infra_references.rs",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "The Region input/output spelling policy changes or an actual nominal resource edge is introduced."
   },
   {
@@ -59,7 +59,7 @@
     "expected": "not_a_current_positive_resource_edge",
     "reason": "Preserve the existing output spelling/state normalization contract; no current positive resource edge. The typed-function regression is a separate contract.",
     "evidence": "carina-provider-aws/src/schemas/generated/s3/bucket_data_source.rs:45; carina-codegen-aws/src/main.rs:8954 (state spelling policy); carina-provider-aws/tests/s3_infra_references.rs",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "The Region input/output spelling policy changes or an actual nominal resource edge is introduced."
   },
   {
@@ -68,7 +68,7 @@
     "expected": "not_a_current_positive_resource_edge",
     "reason": "This existing anonymous replication input echoes a role ARN. The phase-1 audit found no positive source edge from it; changing the shared replication helper is outside the reviewed identity decorations.",
     "evidence": "carina-provider-aws/src/schemas/generated/s3/bucket_replication_configuration.rs:27; phase-1 table, S3 helper structures row (anonymous replication destinations, no reverse positive source edge)",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "The replication helper is audited for nominal typing or a positive source edge is introduced."
   },
   {
@@ -77,7 +77,7 @@
     "expected": "not_a_current_positive_resource_edge",
     "reason": "This existing anonymous replication destination input is not a demonstrated Account.Id producer. Preserve the reviewed helper contract until it is audited separately.",
     "evidence": "carina-aws-types/src/services/s3/replication.rs:29; phase-1 table, S3 helper structures row (anonymous replication destinations, no reverse positive source edge)",
-    "issue": "carina-provider-aws#700",
+    "issue": "carina-rs/carina-provider-aws#700",
     "review_when": "The replication destination helper is audited for nominal typing or a positive source edge is introduced."
   }
 ]

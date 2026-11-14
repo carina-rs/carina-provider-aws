@@ -9355,7 +9355,8 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 (
                     ("logs.LogGroup", "log_group_name"),
                     // Shared with FlowLog and AWSCC, including exact pattern
-                    // mode and bounds. AWSCC keeps its own aws/ prefix callback.
+                    // mode and bounds. Reserved aws/ creation policy cannot be
+                    // an identity callback in any owner (awscc#624).
                     TypeOverride::Identity(AwsType::LogsLogGroupName),
                 ),
                 (
@@ -9376,7 +9377,14 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Protocol 23's scoped input rules cannot express cross-field
                     // conditions. Leave the fifo_queue <-> .fifo condition to AWS;
                     // do not add a provider-local runtime validator.
-                    TypeOverride::Identity(AwsType::SqsQueueName),
+                    TypeOverride::RefinedString {
+                        pattern: PatternSpec::new(
+                            r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+                            PatternMatch::Full,
+                        ),
+                        min_length: 1,
+                        max_length: 80,
+                    },
                 ),
                 // QueueAttributeMap values are wire Strings. The model's
                 // CreateQueueRequest$Attributes prose documents these Int
