@@ -1,26 +1,45 @@
 #!/usr/bin/env python3
 """Explicitly refresh the pinned awscc schema inventory from a clean local checkout.
 
-Usage: python3 scripts/update-awscc-identity-manifest.py /path/to/carina-provider-awscc
+Usage: ./scripts/update-awscc-identity-manifest.py /path/to/carina-provider-awscc
 Compiles only schema modules, offline, under this worktree's target. No AWS access.
 Ordinary tests use the checked-in result and never run this updater.
 """
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(sys.argv[1]).resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("source", type=Path, help="Clean local awscc checkout")
+parser.add_argument("--allow-unpublished", action="store_true",
+                    help="Explicitly allow a commit not reachable from local origin/main")
+arguments = parser.parse_args()
+SOURCE = arguments.source.resolve()
 SCRATCH = ROOT / "target/codex/awscc-identity-manifest"
 OUTPUT = ROOT / "carina-codegen-aws/tests/fixtures/awscc-identified-inputs.json"
 
 
 def git(*args):
     return subprocess.check_output(["git", "-C", str(SOURCE), *args], text=True).strip()
+
+
+commit = git("rev-parse", "HEAD")
+if not arguments.allow_unpublished:
+    ancestry = subprocess.run(
+        ["git", "-C", str(SOURCE), "merge-base", "--is-ancestor", commit, "origin/main"],
+        capture_output=True, text=True,
+    )
+    if ancestry.returncode:
+        raise SystemExit(
+            f"Refusing manifest commit {commit}: not reachable from origin/main "
+            "or ancestry could not be verified. No refs were fetched. "
+            "Use --allow-unpublished only for an intentional unpublished snapshot."
+        )
 
 
 manifest = tomllib.loads((SOURCE / "Cargo.toml").read_text())
@@ -43,11 +62,10 @@ hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest()
           for name, path in zip(relative, files)}
 provenance = {
     "repository": "https://github.com/carina-rs/carina-provider-awscc",
-    "commit": git("rev-parse", "HEAD"),
+    "commit": commit,
     "carina_revision": core["rev"],
     "aws_types_revision": types["rev"],
-    "content_sha256": hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest(),
-    "files": hashes,
+    "upstream_file_sha256": hashes,
 }
 SCRATCH.mkdir(parents=True, exist_ok=True)
 (SCRATCH / "Cargo.toml").write_text(f'''[package]
@@ -64,6 +82,7 @@ carina-aws-types = {{ git = {json.dumps(types['git'])}, rev = {json.dumps(types[
 regex = "1"
 regex-syntax = "0.8"
 base64 = "0.22"
+heck = "0.5"
 serde_json = "1"
 ''')
 modules = "\n".join(
@@ -75,10 +94,14 @@ rust = f'''#![allow(dead_code)]
 #[path = {json.dumps(str(ROOT / 'carina-codegen-aws/tests/support/schema_inventory.rs'))}] mod inventory;
 pub mod schemas {{ {modules} }}
 fn main() {{
+    use heck::ToSnakeCase;
     let mut inputs = Vec::new();
     let mut declarations = Vec::new();
     for config in schemas::generated::configs() {{
-        for leaf in inventory::schema_leaves("awscc", config.schema.as_schema()) {{
+        let (service, resource) = config.resource_type_name.split_once('.').unwrap();
+        let file = format!("carina-provider-awscc/src/schemas/generated/{{service}}/{{}}.rs", resource.to_snake_case());
+        for mut leaf in inventory::schema_leaves("awscc", config.schema.as_schema()) {{
+            leaf["file"] = serde_json::json!(file);
             if !leaf["identity"].is_null() {{
                 if leaf["writable"] == true {{ inputs.push(leaf.clone()); }}
                 declarations.push(leaf);
@@ -112,12 +135,33 @@ for original in snapshot["declarations"]:
         raise SystemExit(f"awscc has conflicting definitions of {identity}")
     definitions[identity] = definition
     (inputs if leaf["writable"] else outputs).append(leaf)
+
+
+def checksum(value):
+    """Canonical JSON shared with the Rust guard: sorted keys, compact UTF-8."""
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+# Upstream byte digests are provenance. Per-file inventory digests can be
+# recomputed from the checked-in data without upstream source files or network.
+file_data = {path: {"upstream_sha256": digest, "definitions": {}, "inputs": [], "outputs": []}
+             for path, digest in hashes.items()}
+for kind, rows in (("inputs", inputs), ("outputs", outputs)):
+    for leaf in rows:
+        data = file_data[leaf["file"]]
+        data[kind].append(leaf)
+        data["definitions"][leaf["identity"]] = definitions[leaf["identity"]]
+provenance["files"] = {path: checksum(data) for path, data in file_data.items()}
+content = {"format": 2, "source": provenance, "definitions": definitions,
+           "inputs": inputs, "outputs": outputs}
+provenance["content_sha256"] = checksum(content)
 # Keep one portable definition per identity and one readable line per occurrence.
 def pretty(value):
     return json.dumps(value, indent=2, sort_keys=True).replace("\n", "\n  ")
 
 
-lines = ['{', '  "format": 1,', '  "source": ' + pretty(provenance) + ',',
+lines = ['{', '  "format": 2,', '  "source": ' + pretty(provenance) + ',',
          '  "definitions": ' + pretty(definitions) + ',']
 for name, rows in (("inputs", inputs), ("outputs", outputs)):
     lines.append(f'  "{name}": [')

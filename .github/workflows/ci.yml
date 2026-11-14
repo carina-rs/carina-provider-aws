@@ -179,6 +179,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@v2
+      - name: Test offline AWSCC identity manifest refresh
+        run: python3 -m unittest discover -s scripts -p 'test_update_awscc_identity_manifest.py'
       - name: Test pinned Smithy model downloads
         run: bash scripts/test-download-smithy-models.sh
       - name: Run schema codegen

@@ -32,8 +32,8 @@
     "expected": "temporary_lookup_compatibility",
     "reason": "The current lookup accepts arn:aws:identitystore::123456789012:identitystore/d-1234567890; Store.Id rejects that ARN. Keep the accepted input grammar until canonicalization/reference forms are explicitly designed.",
     "evidence": "carina-provider-aws/src/schemas/generated/identitystore/user.rs:20; smithy-models.rev 3cd98287b471c106254abd89279cc87308d38bfd: identitystore DescribeUserRequest$IdentityStoreId -> IdentityStoreId; generated_schemas_test.rs::identity_store_arn_lookup_compatibility_is_preserved",
-    "issue": "carina-provider-aws#700",
-    "review_when": "An approved lookup/canonical-output or reference-form contract preserves every currently accepted ARN input."
+    "issue": "carina-rs/carina-provider-aws#701",
+    "review_when": "Remove this entry when carina-rs/carina-provider-aws#701 is resolved."
   },
   {
     "source": "aws.identitystore.User/data_source/user_id",
@@ -41,8 +41,8 @@
     "expected": "temporary_lookup_compatibility",
     "reason": "The current lookup accepts arn:aws:identitystore:::user/12345678-1234-1234-1234-123456789abc (65 characters); Principal.Id rejects it under its 64-character pattern. Do not silently narrow the lookup grammar.",
     "evidence": "carina-provider-aws/src/schemas/generated/identitystore/user.rs:26; smithy-models.rev 3cd98287b471c106254abd89279cc87308d38bfd: identitystore DescribeUserRequest$UserId -> ResourceId; generated_schemas_test.rs::identity_store_arn_lookup_compatibility_is_preserved",
-    "issue": "carina-provider-aws#700",
-    "review_when": "An approved lookup/canonical-output or reference-form contract preserves every currently accepted ARN input."
+    "issue": "carina-rs/carina-provider-aws#701",
+    "review_when": "Remove this entry when carina-rs/carina-provider-aws#701 is resolved."
   },
   {
     "source": "aws.s3.Bucket/resource/region",

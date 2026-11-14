@@ -277,6 +277,37 @@ carina-provider-aws/src/
 - **carina-docgen** — Shared registry-compatible Markdown page builder and checker
 - **carina-smithy** — Smithy 2.0 JSON AST parser
 
+## AWSCC Identity Manifest
+
+The [identity inventory guard](./carina-codegen-aws/tests/support/identity_inventory_guard.rs)
+uses the checked-in [awscc manifest](./carina-codegen-aws/tests/fixtures/awscc-identified-inputs.json).
+Refresh it whenever awscc changes identified inputs or bumps its carina-aws-types
+dependency, and whenever this repository bumps carina-aws-types.
+
+From this repository's root, with a clean awscc checkout at
+`../carina-provider-awscc`, run:
+
+```bash
+CARGO_NET_OFFLINE=true ./scripts/update-awscc-identity-manifest.py ../carina-provider-awscc
+```
+
+When working in a worktree, pass the awscc checkout's absolute path instead.
+The [updater](./scripts/update-awscc-identity-manifest.py) compiles local schema
+modules offline into this checkout's target directory. It requires the recorded
+commit to be reachable from the locally available awscc `origin/main` ref and
+does not fetch refs. Use `--allow-unpublished` only for an intentional local
+snapshot of unpublished work. Review the refreshed manifest and update its
+explicit commit/count assertions when the source inventory changes.
+
+The manifest records upstream byte hashes as provenance in
+`source.upstream_file_sha256`. Its `source.files` hashes cover each file's
+checked-in inventory entries, referenced identity definitions, and upstream
+digest. `source.content_sha256` covers the entire manifest except itself.
+Both use SHA-256 over compact, recursively key-sorted UTF-8 JSON. The guard
+recomputes these inventory checksums, so hand edits and partial refreshes fail
+without a sibling checkout or network access. Ordinary CI never runs the
+refresh command; its updater tests use offline Git and Cargo stubs.
+
 ## Smithy Model Cache
 
 [`smithy-models.rev`](./smithy-models.rev) is the sole source of the full
