@@ -111,7 +111,7 @@ bound_test!(
 );
 
 #[test]
-fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characters() {
+fn sqs_queue_name_is_nominal_and_counts_the_fifo_suffix_within_eighty_characters() {
     for schema in sqs_schemas() {
         let name = schema.effective_attribute("queue_name").unwrap();
         let RawShape::String {
@@ -125,8 +125,11 @@ fn sqs_queue_name_is_anonymous_and_counts_the_fifo_suffix_within_eighty_characte
         let pattern = member_layer.pattern.or(identity_layer.pattern);
         let length =
             carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
-        assert!(identity.is_none());
-        assert_eq!(pattern.map(carina_core::schema::PatternSpec::as_str), None);
+        assert_eq!(identity.unwrap().to_string(), "aws.sqs.Queue.Name");
+        assert_eq!(
+            pattern.map(carina_core::schema::PatternSpec::as_str),
+            Some(r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z")
+        );
         assert_eq!(length, Some((Some(1), Some(80))));
         for valid in [
             "a".to_string(),

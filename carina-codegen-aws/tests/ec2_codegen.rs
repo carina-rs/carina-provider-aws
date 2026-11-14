@@ -52,7 +52,8 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
                 "AttributeType::refined_list(",
                 "Some(3)",
                 "Some(2)",
-                "AttributeSchema::provider_populated(\"flow_log_id\", AttributeType::string())",
+                "carina_aws_types::AwsType::FlowLogId.definition()",
+                "carina_aws_types::AwsType::LogsLogGroupName.definition()",
             ],
         ),
         (
@@ -78,6 +79,10 @@ fn ec2_codegen_exact_paths_refine_all_candidates_and_keep_siblings() {
                 "carina_aws_types::AwsType::Ec2AmazonSideAsn.definition()",
                 "carina_aws_types::AwsType::Ec2TransitGatewayCidrBlock.definition()",
             ],
+        ),
+        (
+            "TransitGatewayAttachment",
+            vec!["carina_aws_types::AwsType::TransitGatewayAttachmentId.definition()"],
         ),
         (
             "Vpc",

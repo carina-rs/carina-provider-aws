@@ -7,6 +7,69 @@ use carina_core::schema::{
 };
 use std::collections::BTreeMap;
 
+#[test]
+fn issue_700_identity_definitions_preserve_the_reviewed_languages() {
+    for (identity, pattern, length, good, bad) in [
+        (
+            "aws.logs.LogGroup.LogGroupName",
+            r"^[.\-_/#A-Za-z0-9]{1,512}\z",
+            Some((Some(1), Some(512))),
+            "aws/existing-group",
+            "has space",
+        ),
+        (
+            "aws.organizations.Organization.Id",
+            r"^o-[a-z0-9]{10,32}$",
+            None,
+            "o-1234567890",
+            "o-123456789A",
+        ),
+        (
+            "aws.sqs.Queue.Name",
+            r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
+            Some((Some(1), Some(80))),
+            "queue.fifo",
+            "queue.other",
+        ),
+    ] {
+        let row = AwsType::ALL
+            .iter()
+            .find(|row| row.identity().to_string() == identity)
+            .unwrap_or_else(|| panic!("missing shared catalog identity {identity}"));
+        let ty = row.attribute_type();
+        let RawShape::String { identity_layer, .. } = ty.raw_shape() else {
+            panic!("String identity");
+        };
+        assert_eq!(
+            identity_layer.pattern,
+            Some(&PatternSpec::new(pattern, PatternMatch::Full))
+        );
+        assert_eq!(identity_layer.length, length);
+        assert!(identity_layer.to_dsl.is_none() && identity_layer.validate.is_none());
+        let validator = MemberStringValidator::new(&ty).unwrap();
+        assert!(validator.accepts(good), "{identity}: {good:?}");
+        assert!(!validator.accepts(bad), "{identity}: {bad:?}");
+        assert!(!validator.accepts(""));
+    }
+    for (identity, maximum) in [
+        ("aws.logs.LogGroup.LogGroupName", 512),
+        ("aws.sqs.Queue.Name", 80),
+    ] {
+        let row = AwsType::ALL
+            .iter()
+            .find(|row| row.identity().to_string() == identity)
+            .unwrap();
+        let ty = row.attribute_type();
+        let validator = MemberStringValidator::new(&ty).unwrap();
+        assert!(validator.accepts(&"a".repeat(maximum)));
+        assert!(!validator.accepts(&"a".repeat(maximum + 1)));
+        if maximum == 80 {
+            assert!(validator.accepts(&format!("{}.fifo", "a".repeat(75))));
+            assert!(!validator.accepts(&format!("{}.fifo", "a".repeat(76))));
+        }
+    }
+}
+
 fn id(name: &str) -> TypeIdentity {
     carina_core::schema::enum_identity(name, Some("test"))
 }

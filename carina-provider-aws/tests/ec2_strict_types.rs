@@ -112,13 +112,15 @@ fn ec2_flow_log_group_accepts_existing_aws_groups_and_checks_cloudwatch_name_bou
         &["", "has space", "bad:name", "valid\n", &"a".repeat(513)],
     );
     let schema = schema("FlowLog");
-    assert!(matches!(
-        field(&schema, "log_group_name").as_type().raw_shape(),
-        RawShape::String {
-            identity_layer: carina_core::schema::StringIdentityParts { identity: None, .. },
-            ..
-        }
-    ));
+    let RawShape::String { identity_layer, .. } =
+        field(&schema, "log_group_name").as_type().raw_shape()
+    else {
+        panic!("log group name");
+    };
+    assert_eq!(
+        identity_layer.identity.unwrap().to_string(),
+        "aws.logs.LogGroup.LogGroupName"
+    );
 }
 
 #[test]
@@ -624,7 +626,7 @@ fn ec2_infra_network_shapes_and_existing_id_references_remain_valid() {
 }
 
 #[test]
-fn ec2_anonymous_names_accept_plain_string_refs_and_named_cidrs_require_matching_refs() {
+fn ec2_identified_inputs_require_matching_reference_identities() {
     use std::{collections::HashSet, path::Path, sync::Arc};
     let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
         Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
@@ -644,6 +646,10 @@ fn ec2_anonymous_names_accept_plain_string_refs_and_named_cidrs_require_matching
         ),
         (
             "aws.ec2.FlowLog { resource_type = vpc resource_ids = ['vpc-12345678'] traffic_type = all log_group_name = source.description }",
+            false,
+        ),
+        (
+            "let group = aws.logs.LogGroup { log_group_name = '/aws/vpc/flow-logs' } aws.ec2.FlowLog { resource_type = vpc resource_ids = ['vpc-12345678'] traffic_type = all log_group_name = group.log_group_name }",
             true,
         ),
     ] {

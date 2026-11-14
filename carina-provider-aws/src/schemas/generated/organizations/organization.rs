@@ -49,7 +49,7 @@ pub fn organizations_organization_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("id", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^o-[a-z0-9]{10,32}$", carina_core::schema::PatternMatch::Full)), None)))
+            AttributeSchema::provider_populated("id", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^o-[a-z0-9]{10,32}$", carina_core::schema::PatternMatch::Full)), None)), carina_aws_types::AwsType::OrganizationsOrganizationId.definition()))
                 .with_description("The unique identifier (ID) of an organization. The regex pattern for an organization ID string requires \"o-\" followed by from 10 to 32 lowercase lette... (read-only)")
                 .with_provider_name("Id")
                 .build(),

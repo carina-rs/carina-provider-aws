@@ -9022,14 +9022,19 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // group. Apply cloudwatchlogs.json LogGroupName's grammar,
                     // without imposing CreateLogGroup's create-only aws/ rule.
                     // https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(
-                            r"^[.\-_/#A-Za-z0-9]{1,512}\z",
-                            PatternMatch::Full,
-                        ),
-                        min_length: 1,
-                        max_length: 512,
-                    },
+                    TypeOverride::Identity(AwsType::LogsLogGroupName),
+                ),
+                (
+                    ("ec2.FlowLog", "flow_log_id"),
+                    // FlowLog$FlowLogId: use the same identity as AWSCC.
+                    TypeOverride::Identity(AwsType::FlowLogId),
+                ),
+                (
+                    (
+                        "ec2.TransitGatewayAttachment",
+                        "transit_gateway_attachment_id",
+                    ),
+                    TypeOverride::Identity(AwsType::TransitGatewayAttachmentId),
                 ),
                 (
                     ("ec2.FlowLog", "tag_field_specifications"),
@@ -9334,6 +9339,11 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     TypeOverride::Identity(AwsType::OrganizationsAccountArn),
                 ),
                 (
+                    ("organizations.Organization", "id"),
+                    // Organization$Id is an organization ID, not an account ID.
+                    TypeOverride::Identity(AwsType::OrganizationsOrganizationId),
+                ),
+                (
                     ("organizations.Organization", "master_account_id"),
                     // Organization$MasterAccountId -> the same AccountId
                     // shape as Account$Id. Preserve its existing shared type
@@ -9342,6 +9352,12 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                 ),
                 // Account$JoinedTimestamp -> Timestamp stays String pending
                 // a real-AWS read and a decision about SDK DateTime formatting.
+                (
+                    ("logs.LogGroup", "log_group_name"),
+                    // Shared with FlowLog and AWSCC, including exact pattern
+                    // mode and bounds. AWSCC keeps its own aws/ prefix callback.
+                    TypeOverride::Identity(AwsType::LogsLogGroupName),
+                ),
                 (
                     ("logs.LogGroup", "retention_in_days"),
                     // PutRetentionPolicyRequest$retentionInDays -> Days:
@@ -9360,14 +9376,7 @@ fn resource_type_overrides() -> &'static HashMap<(&'static str, &'static str), T
                     // Protocol 23's scoped input rules cannot express cross-field
                     // conditions. Leave the fifo_queue <-> .fifo condition to AWS;
                     // do not add a provider-local runtime validator.
-                    TypeOverride::RefinedString {
-                        pattern: PatternSpec::new(
-                            r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z",
-                            PatternMatch::Full,
-                        ),
-                        min_length: 1,
-                        max_length: 80,
-                    },
+                    TypeOverride::Identity(AwsType::SqsQueueName),
                 ),
                 // QueueAttributeMap values are wire Strings. The model's
                 // CreateQueueRequest$Attributes prose documents these Int
@@ -10942,7 +10951,7 @@ mod tests {
         let generated = generate_resource(&resource, &model).expect("generate Logs schema");
         assert!(
             generated.contains(
-                "AttributeSchema::required(\"log_group_name\", AttributeType::string_member("
+                "AttributeSchema::required(\"log_group_name\", carina_aws_types::with_member_identity(AttributeType::string_member("
             ),
             "{generated}"
         );
@@ -10952,8 +10961,9 @@ mod tests {
         );
         assert!(
             generated.contains(r#"Some(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]+$", carina_core::schema::PatternMatch::Full))"#),
-            "match AWSCC's exact anonymous name refinement: {generated}"
+            "preserve Smithy member constraints beneath the shared identity: {generated}"
         );
+        assert!(generated.contains("carina_aws_types::AwsType::LogsLogGroupName.definition()"));
         assert!(
             generated.contains(
                 "StructField::optional(\"log_group_name\", AttributeType::string_member("
@@ -11050,7 +11060,7 @@ mod tests {
         )
         .expect("generate Logs markdown");
         assert!(
-            markdown.contains("`String (pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)`"),
+            markdown.contains("`LogsLogGroupName (identity constraints: pattern: /^[.\\-_/#A-Za-z0-9]{1,512}\\z/ (Full), len: 1..=512, member constraints: pattern: /^[.\\-_/#A-Za-z0-9]+$/ (Full), len: 1..=512)`"),
             "{markdown}"
         );
         assert!(
@@ -11349,7 +11359,10 @@ mod tests {
             .unwrap()
             .attrs;
         for (field, constructor) in [
-            ("id", "AttributeType::string_member("),
+            (
+                "id",
+                "carina_aws_types::with_member_identity(AttributeType::string_member(",
+            ),
             (
                 "arn",
                 "carina_aws_types::with_member_identity(AttributeType::string_member(",
@@ -11389,7 +11402,7 @@ mod tests {
         )
         .unwrap();
         for expected in [
-            r"`String (pattern: /^o-[a-z0-9]{10,32}$/ (Full))`",
+            r"`OrganizationsOrganizationId (identity constraints: pattern: /^o-[a-z0-9]{10,32}$/ (Full), member constraints: pattern: /^o-[a-z0-9]{10,32}$/ (Full))`",
             // #638: Management-account ARN docs pin all eight supported partitions.
             "OrganizationsAccountArn (identity constraints: pattern:",
             // #638: Organization ARN docs pin all eight supported partitions.

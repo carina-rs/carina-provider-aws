@@ -65,7 +65,7 @@ pub fn ec2_transit_gateway_attachment_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("transit_gateway_attachment_id", AttributeType::string())
+            AttributeSchema::provider_populated("transit_gateway_attachment_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::TransitGatewayAttachmentId.definition()))
                 .with_description("The ID of the attachment. (read-only)")
                 .with_provider_name("TransitGatewayAttachmentId")
                 .build(),

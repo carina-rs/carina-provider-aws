@@ -20,7 +20,7 @@ fn organizations_organization_schemas() -> [ValidatedResourceSchema; 2] {
 }
 
 #[test]
-fn organizations_organization_id_is_anonymous_and_validates_smithy_bounds() {
+fn organizations_organization_id_is_nominal_and_validates_smithy_bounds() {
     for schema in organizations_organization_schemas() {
         let id = schema.effective_attribute("id").unwrap();
         let RawShape::String {
@@ -34,7 +34,10 @@ fn organizations_organization_id_is_anonymous_and_validates_smithy_bounds() {
         let pattern = member_layer.pattern.or(identity_layer.pattern);
         let length =
             carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
-        assert!(identity.is_none());
+        assert_eq!(
+            identity.unwrap().to_string(),
+            "aws.organizations.Organization.Id"
+        );
         assert_eq!(
             pattern.map(carina_core::schema::PatternSpec::as_str),
             Some(r"^o-[a-z0-9]{10,32}$")

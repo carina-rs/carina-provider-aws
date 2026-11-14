@@ -1,0 +1,74 @@
+[
+  {
+    "identity": "aws.Arn",
+    "aws": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:[^:\\n]*:[^:\\n]*:.*$"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "awscc": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):[^:]+:.*$"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "reason": "Pre-existing cross-owner pattern difference at the pinned revisions. Owner policies are conjoined; #700 does not change these identities.",
+    "evidence": "carina-aws-types/src/catalog.rs and pinned awscc schemas/catalog.rs; awscc-identified-inputs.json source provenance",
+    "review_when": "The providers agree an ARN grammar migration or their shared catalog pin changes."
+  },
+  {
+    "identity": "aws.organizations.Account.Arn",
+    "aws": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\\z"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "awscc": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations:.*$"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "reason": "Pre-existing cross-owner pattern difference at the pinned revisions. Owner policies are conjoined; #700 does not change these identities.",
+    "evidence": "carina-aws-types/src/catalog.rs and pinned awscc schemas/catalog.rs; awscc-identified-inputs.json source provenance",
+    "review_when": "The providers agree an ARN grammar migration or their shared catalog pin changes."
+  },
+  {
+    "identity": "aws.organizations.Organization.Arn",
+    "aws": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations::[0-9]{12}:organization/o-[a-z0-9]{10,32}\\z"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "awscc": {
+      "length": null,
+      "pattern": {
+        "mode": "Full",
+        "text": "^arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f|aws-eusc):organizations:.*$"
+      },
+      "shape": "string",
+      "transform": null
+    },
+    "reason": "Pre-existing cross-owner pattern difference at the pinned revisions. Owner policies are conjoined; #700 does not change these identities.",
+    "evidence": "carina-aws-types/src/catalog.rs and pinned awscc schemas/catalog.rs; awscc-identified-inputs.json source provenance",
+    "review_when": "The providers agree an ARN grammar migration or their shared catalog pin changes."
+  }
+]

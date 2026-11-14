@@ -978,6 +978,19 @@ Some((Some(1), Some(2048)))),
         valid_sample: "12",
         constructor: |identity| crate::elbv2_matcher_codes(identity, 0, 99),
     },
+    /// CloudWatch Logs log-group name, with AWSCC's exact structural identity.
+    /// Creation-only reserved-prefix policy belongs to the declaring owner;
+    /// FlowLog can select an existing group beginning with aws/.
+    LogsLogGroupName => logs_log_group_name {
+        segments: ["logs", "LogGroup"],
+        kind: "LogGroupName",
+        valid_sample: "/aws/lambda/example",
+        constructor: |identity| metadata_string(
+            identity,
+            PatternSpec::new(r"^[.\-_/#A-Za-z0-9]{1,512}\z", PatternMatch::Full),
+            Some((Some(1), Some(512))),
+        ),
+    },
     /// CloudWatch Logs retention days, sharing AWSCC's established identity.
     /// Source: PutRetentionPolicyRequest$retentionInDays -> Days.
     /// https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html
@@ -991,6 +1004,18 @@ Some((Some(1), Some(2048)))),
         ],
 
         constructor: validated_int_enum_definition,
+    },
+    /// SQS queue name. The optional FIFO suffix counts inside 80 characters.
+    /// CreateQueueRequest$QueueName's documented grammar, without a transform.
+    SqsQueueName => sqs_queue_name {
+        segments: ["sqs", "Queue"],
+        kind: "Name",
+        valid_sample: "example-queue",
+        constructor: |identity| metadata_string(
+            identity,
+            PatternSpec::new(r"^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\.fifo)\z", PatternMatch::Full),
+            Some((Some(1), Some(80))),
+        ),
     },
     /// SQS queue ARN, including the queue-name grammar and FIFO suffix limit.
     /// The service authorization reference's queue resource is
@@ -1158,6 +1183,18 @@ None),
         constructor: |identity| metadata_string(
             identity,
             PatternSpec::new(arn_regex(r"organizations::[0-9]{12}:account/o-[a-z0-9]{10,32}/[0-9]{12}\z"), PatternMatch::Full),
+            None,
+        ),
+    },
+    /// Organizations organization ID. Organization$Id -> OrganizationId.
+    /// Keep length absent: the pattern already expresses the 12..34 bound.
+    OrganizationsOrganizationId => organizations_organization_id {
+        segments: ["organizations", "Organization"],
+        kind: "Id",
+        valid_sample: "o-exampleorgid",
+        constructor: |identity| metadata_string(
+            identity,
+            PatternSpec::new(r"^o-[a-z0-9]{10,32}$", PatternMatch::Full),
             None,
         ),
     },
@@ -2179,7 +2216,9 @@ AcmCertificateValidationUrl|aws|acm/Certificate|ValidationUrl|http://example.com
 AcmCertificateResourceRecordType|aws|acm/Certificate|ResourceRecordType|CNAME|false
 Elbv2TargetGroupHttpCode|aws|elasticloadbalancingv2/TargetGroup|HttpCode|200|true
 Elbv2TargetGroupGrpcCode|aws|elasticloadbalancingv2/TargetGroup|GrpcCode|12|true
+LogsLogGroupName|aws|logs/LogGroup|LogGroupName|/aws/lambda/example|false
 LogsLogGroupRetentionInDays|aws|logs/LogGroup|RetentionInDays|30|true
+SqsQueueName|aws|sqs/Queue|Name|example-queue|false
 SqsQueueArn|aws|sqs/Queue|Arn|arn:aws:sqs:ap-northeast-1:123456789012:example-queue|false
 SqsQueueDeduplicationScope|aws|sqs/Queue|DeduplicationScope|messageGroup|false
 SqsQueueFifoThroughputLimit|aws|sqs/Queue|FifoThroughputLimit|perQueue|false
@@ -2194,6 +2233,7 @@ S3BucketArn|aws|s3/Bucket|Arn|arn:aws:s3:::example-bucket|false
 StsCallerIdentityArn|aws|sts/CallerIdentity|Arn|arn:aws:sts::123456789012:assumed-role/example-role/example-session|false
 OrganizationsAccountEmail|aws|organizations/Account|Email|user@example.com|true
 OrganizationsAccountArn|aws|organizations/Account|Arn|arn:aws:organizations::123456789012:account/o-exampleorgid/123456789012|false
+OrganizationsOrganizationId|aws|organizations/Organization|Id|o-exampleorgid|false
 OrganizationsOrganizationArn|aws|organizations/Organization|Arn|arn:aws:organizations::123456789012:organization/o-exampleorgid|false
 Ec2AmazonSideAsn|aws|ec2|AmazonSideAsn|64512|true
 Ec2VpnGatewayAmazonSideAsn|aws||AmazonSideAsn|64512|true

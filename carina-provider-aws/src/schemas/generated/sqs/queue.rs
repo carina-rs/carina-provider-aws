@@ -19,7 +19,7 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
         .with_description("")
         .with_conflicting_replacement()
         .attribute(
-            AttributeSchema::required("queue_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(80))))))
+            AttributeSchema::required("queue_name", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::SqsQueueName.definition()))
                 .create_only()
                 .identity()
                 .with_description("The name of the new queue. The following limits apply to this name: A queue name can have up to 80 characters. Valid values: alphanumeric characters, ...")
@@ -161,7 +161,6 @@ pub fn sqs_queue_config() -> AwsSchemaConfig {
                 .with_provider_name("Tags")
                 .build(),
         )
-        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("queue_name").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^(?:[A-Za-z0-9_-]{1,80}|[A-Za-z0-9_-]{1,75}\\.fifo)\\z", carina_core::schema::PatternMatch::Full))))
         .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }
