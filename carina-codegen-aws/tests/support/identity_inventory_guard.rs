@@ -82,6 +82,24 @@ fn reviewed_aliases(aliases: Vec<Value>) -> Result<Vec<Value>, String> {
             return Err(format!("duplicate alias {selector:?}"));
         }
     }
+    let aws = leaves();
+    let manifest = raw_manifest();
+    let inventory = aws
+        .iter()
+        .chain(manifest["inputs"].as_array().unwrap())
+        .chain(manifest["outputs"].as_array().unwrap());
+    for alias in &aliases {
+        if !inventory.clone().any(|leaf| {
+            (alias["resource"] == "*" || alias["resource"] == leaf["resource"])
+                && alias["property"] == property_name(leaf)
+        }) {
+            return Err(format!(
+                "stale alias: {}/{}",
+                alias["resource"].as_str().unwrap(),
+                alias["property"].as_str().unwrap()
+            ));
+        }
+    }
     Ok(aliases)
 }
 
@@ -109,13 +127,23 @@ fn source(leaf: &Value) -> String {
     )
 }
 
+fn property_name(leaf: &Value) -> String {
+    leaf["path"]
+        .as_str()
+        .unwrap()
+        .rsplit('.')
+        .next()
+        .unwrap()
+        .replace("[]", "")
+}
+
 /// Candidates use service/property semantics, never a blanket *_id/*_name rule.
 /// Cross-service aliases come from the reviewed fixture, with exact resources preferred over `*`.
 fn key(leaf: &Value, aliases: &[Value]) -> (String, String) {
     let resource = leaf["resource"].as_str().unwrap();
     let service = leaf["service"].as_str().unwrap();
     let path = leaf["path"].as_str().unwrap();
-    let property = path.rsplit('.').next().unwrap().replace("[]", "");
+    let property = property_name(leaf);
     if let Some(alias) = aliases
         .iter()
         .find(|alias| alias["resource"] == resource && alias["property"] == property)
@@ -180,6 +208,31 @@ fn gaps(
 }
 
 fn check(leaves: &[Value], sinks: &[Value], exceptions: &[Value]) -> Result<(), String> {
+    for exception in exceptions {
+        let pair = (
+            exception["source"].as_str().unwrap(),
+            exception["destination_identity"].as_str().unwrap(),
+        );
+        for field in ["reason", "evidence", "issue", "review_when", "expected"] {
+            if exception[field]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                return Err(format!("{pair:?}: missing {field}"));
+            }
+        }
+        let expected = exception["expected"].as_str().unwrap();
+        if !matches!(
+            expected,
+            "no_semantic_producer_match"
+                | "temporary_lookup_compatibility"
+                | "not_a_current_positive_resource_edge"
+        ) {
+            return Err(format!("{pair:?}: invalid expected {expected:?}"));
+        }
+    }
     let mut gaps = gaps(leaves, sinks, &aliases());
     let mut errors = Vec::new();
     let mut seen = BTreeSet::new();
@@ -191,12 +244,6 @@ fn check(leaves: &[Value], sinks: &[Value], exceptions: &[Value]) -> Result<(), 
             seen.insert(pair.clone()),
             "duplicate allowlist entry {pair:?}"
         );
-        for field in ["reason", "evidence", "issue", "review_when", "expected"] {
-            assert!(
-                !exception[field].as_str().unwrap_or_default().is_empty(),
-                "{pair:?}: missing {field}"
-            );
-        }
         if gaps.remove(&pair).is_none() {
             errors.push(format!("stale allowlist: {source} -> {identity}"));
         }
@@ -326,6 +373,55 @@ fn candidate_matching_uses_reviewed_alias_data() {
 }
 
 #[test]
+fn allowlist_requires_nonblank_review_metadata() {
+    let leaves = leaves();
+    let sinks = sinks(&leaves, &manifest());
+    for field in ["reason", "evidence", "issue", "review_when", "expected"] {
+        for replacement in [Some(json!(" \t")), None, Some(json!(null)), Some(json!(""))] {
+            let mut edited = allowlist();
+            if let Some(value) = replacement {
+                edited[0][field] = value;
+            } else {
+                edited[0].as_object_mut().unwrap().remove(field);
+            }
+            let error = check(&leaves, &sinks, &edited).unwrap_err();
+            assert!(error.contains(field), "{error}");
+        }
+    }
+}
+
+#[test]
+fn allowlist_expected_categories_are_closed() {
+    let leaves = leaves();
+    let sinks = sinks(&leaves, &manifest());
+    for expected in ["unreviewed_category", "no_semantic_producer_match "] {
+        let mut edited = allowlist();
+        edited[0]["expected"] = json!(expected);
+        let error = check(&leaves, &sinks, &edited).unwrap_err();
+        assert!(
+            error.contains("expected") && error.contains(expected),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn stale_alias_selectors_are_rejected() {
+    for (field, value) in [
+        ("resource", "ec2.DeletedResource"),
+        ("property", "deleted_log_group_name"),
+    ] {
+        let mut edited = aliases();
+        edited[0][field] = json!(value);
+        let error = reviewed_aliases(edited).unwrap_err();
+        assert!(
+            error.contains("stale alias") && error.contains(value),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn schema_inventory_producer_obligations() {
     let leaves = leaves();
     check(&leaves, &sinks(&leaves, &manifest()), &allowlist())
@@ -351,7 +447,7 @@ fn new_manifest_input_creates_an_obligation_and_stale_allowlist_fails() {
         "{error}"
     );
     let exception = json!({"source": "deleted", "destination_identity": "deleted",
-        "reason": "fixture", "evidence": "fixture", "issue": "carina-rs/carina-provider-aws#700", "review_when": "fixture", "expected": "fixture"});
+        "reason": "fixture", "evidence": "fixture", "issue": "carina-rs/carina-provider-aws#700", "review_when": "fixture", "expected": "no_semantic_producer_match"});
     assert!(
         check(&leaves, &[], &[exception])
             .unwrap_err()
