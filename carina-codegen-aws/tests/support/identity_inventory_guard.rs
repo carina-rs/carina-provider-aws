@@ -58,22 +58,43 @@ fn allowlist() -> Vec<Value> {
     serde_json::from_str(include_str!("../fixtures/identity-producer-allowlist.json")).unwrap()
 }
 
+fn require_nonblank(entry: &Value, fields: &[&str]) -> Result<(), String> {
+    for field in fields {
+        if entry[*field].as_str().unwrap_or_default().trim().is_empty() {
+            return Err(format!("missing nonblank string {field}: {entry}"));
+        }
+    }
+    Ok(())
+}
+
+fn expected_identity_differences(reviewed: &[Value]) -> Result<BTreeSet<String>, String> {
+    reviewed
+        .iter()
+        .map(|entry| {
+            require_nonblank(entry, &["identity", "reason", "evidence", "review_when"])?;
+            Ok(
+                json!({"identity": entry["identity"], "aws": entry["aws"], "awscc": entry["awscc"]})
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
 fn reviewed_aliases(aliases: Vec<Value>) -> Result<Vec<Value>, String> {
     let mut seen = BTreeSet::new();
     for alias in &aliases {
-        for field in [
-            "resource",
-            "property",
-            "destination_service",
-            "destination_property",
-            "reason",
-            "evidence",
-            "review_when",
-        ] {
-            if alias[field].as_str().unwrap_or_default().trim().is_empty() {
-                return Err(format!("alias {alias}: missing {field}"));
-            }
-        }
+        require_nonblank(
+            alias,
+            &[
+                "resource",
+                "property",
+                "destination_service",
+                "destination_property",
+                "reason",
+                "evidence",
+                "review_when",
+            ],
+        )?;
         let selector = (
             alias["resource"].as_str().unwrap(),
             alias["property"].as_str().unwrap(),
@@ -138,7 +159,7 @@ fn property_name(leaf: &Value) -> String {
 }
 
 /// Candidates use service/property semantics, never a blanket *_id/*_name rule.
-/// Cross-service aliases come from the reviewed fixture, with exact resources preferred over `*`.
+/// Aliases come from the reviewed fixture, with exact resources preferred over `*`.
 fn key(leaf: &Value, aliases: &[Value]) -> (String, String) {
     let resource = leaf["resource"].as_str().unwrap();
     let service = leaf["service"].as_str().unwrap();
@@ -169,11 +190,6 @@ fn key(leaf: &Value, aliases: &[Value]) -> (String, String) {
             other => other,
         };
         let name = resource.split('.').nth(1).unwrap().to_snake_case();
-        let name = if resource == "iam.Roles" {
-            "role"
-        } else {
-            &name
-        };
         format!("{name}_{kind}")
     } else {
         property
@@ -209,20 +225,22 @@ fn gaps(
 
 fn check(leaves: &[Value], sinks: &[Value], exceptions: &[Value]) -> Result<(), String> {
     for exception in exceptions {
+        require_nonblank(
+            exception,
+            &[
+                "source",
+                "destination_identity",
+                "reason",
+                "evidence",
+                "issue",
+                "review_when",
+                "expected",
+            ],
+        )?;
         let pair = (
             exception["source"].as_str().unwrap(),
             exception["destination_identity"].as_str().unwrap(),
         );
-        for field in ["reason", "evidence", "issue", "review_when", "expected"] {
-            if exception[field]
-                .as_str()
-                .unwrap_or_default()
-                .trim()
-                .is_empty()
-            {
-                return Err(format!("{pair:?}: missing {field}"));
-            }
-        }
         let expected = exception["expected"].as_str().unwrap();
         if !matches!(
             expected,
@@ -240,10 +258,9 @@ fn check(leaves: &[Value], sinks: &[Value], exceptions: &[Value]) -> Result<(), 
         let source = exception["source"].as_str().unwrap();
         let identity = exception["destination_identity"].as_str().unwrap();
         let pair = (source.to_string(), identity.to_string());
-        assert!(
-            seen.insert(pair.clone()),
-            "duplicate allowlist entry {pair:?}"
-        );
+        if !seen.insert(pair.clone()) {
+            return Err(format!("duplicate allowlist entry {pair:?}"));
+        }
         if gaps.remove(&pair).is_none() {
             errors.push(format!("stale allowlist: {source} -> {identity}"));
         }
@@ -359,17 +376,71 @@ fn aliases_require_review_metadata() {
 
 #[test]
 fn candidate_matching_uses_reviewed_alias_data() {
-    let leaf = json!({"resource": "ec2.FlowLog", "service": "ec2", "path": "log_group_name"});
-    let mut aliases = aliases();
-    assert_eq!(
-        key(&leaf, &aliases),
-        ("logs".into(), "log_group_name".into())
-    );
-    aliases.retain(|alias| alias["resource"] != "ec2.FlowLog");
-    assert_eq!(
-        key(&leaf, &aliases),
-        ("ec2".into(), "log_group_name".into())
-    );
+    for (resource, service, path, destination_service, destination_property, unaliased_property) in [
+        (
+            "ec2.FlowLog",
+            "ec2",
+            "log_group_name",
+            "logs",
+            "log_group_name",
+            "log_group_name",
+        ),
+        ("iam.Roles", "iam", "arns[]", "iam", "role_arn", "roles_arn"),
+        (
+            "iam.Roles",
+            "iam",
+            "names[]",
+            "iam",
+            "role_name",
+            "roles_name",
+        ),
+    ] {
+        let leaf = json!({"resource": resource, "service": service, "path": path});
+        let mut aliases = aliases();
+        assert_eq!(
+            key(&leaf, &aliases),
+            (destination_service.into(), destination_property.into())
+        );
+        aliases.retain(|alias| alias["resource"] != resource);
+        assert_eq!(
+            key(&leaf, &aliases),
+            (service.into(), unaliased_property.into())
+        );
+    }
+}
+
+#[test]
+fn differences_require_review_metadata() {
+    let original: Vec<Value> =
+        serde_json::from_str(include_str!("../fixtures/awscc-identity-differences.json")).unwrap();
+    for field in ["reason", "evidence", "review_when"] {
+        for replacement in [
+            Some(json!(" \t")),
+            None,
+            Some(json!(null)),
+            Some(json!("")),
+            Some(json!(42)),
+        ] {
+            let mut edited = original.clone();
+            if let Some(value) = replacement {
+                edited[0][field] = value;
+            } else {
+                edited[0].as_object_mut().unwrap().remove(field);
+            }
+            let error = expected_identity_differences(&edited).unwrap_err();
+            assert!(error.contains(field), "{error}");
+        }
+    }
+}
+
+#[test]
+fn duplicate_allowlist_entries_return_errors() {
+    let leaves = leaves();
+    let sinks = sinks(&leaves, &manifest());
+    let mut exceptions = allowlist();
+    exceptions.push(exceptions[0].clone());
+    let error = check(&leaves, &sinks, &exceptions).unwrap_err();
+    assert!(error.contains("duplicate allowlist entry"), "{error}");
 }
 
 #[test]
@@ -583,16 +654,8 @@ fn cross_owner_identity_definitions_agree_with_pinned_awscc() {
     assert!(comparisons > 0);
     let reviewed: Vec<Value> =
         serde_json::from_str(include_str!("../fixtures/awscc-identity-differences.json")).unwrap();
-    let expected = reviewed
-        .iter()
-        .map(|entry| {
-            for field in ["reason", "evidence", "review_when"] {
-                assert!(!entry[field].as_str().unwrap_or_default().is_empty());
-            }
-            json!({"identity": entry["identity"], "aws": entry["aws"], "awscc": entry["awscc"]})
-                .to_string()
-        })
-        .collect();
+    let expected =
+        expected_identity_differences(&reviewed).unwrap_or_else(|error| panic!("{error}"));
     assert_eq!(
         mismatches, expected,
         "cross-owner differences require review"

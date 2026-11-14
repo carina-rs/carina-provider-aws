@@ -18,6 +18,24 @@
     "review_when": "carina-rs/carina-provider-aws#701 resolves the lookup grammar or SSO changes its principal identity."
   },
   {
+    "resource": "iam.Roles",
+    "property": "arns",
+    "destination_service": "iam",
+    "destination_property": "role_arn",
+    "reason": "Each ARN returned by the plural Roles data source denotes an individual IAM role, so it matches role ARN consumers.",
+    "evidence": "carina-provider-aws/src/schemas/generated/iam/roles.rs::arns (list elements use IamRoleArn); carina-aws-types/src/catalog.rs::IamRoleArn",
+    "review_when": "The Roles ARN collection output or the IAM role ARN identity changes."
+  },
+  {
+    "resource": "iam.Roles",
+    "property": "names",
+    "destination_service": "iam",
+    "destination_property": "role_name",
+    "reason": "Each name returned by the plural Roles data source denotes an individual IAM role, so it matches role name consumers.",
+    "evidence": "carina-provider-aws/src/schemas/generated/iam/roles.rs::names (list elements use IamRoleName); carina-aws-types/src/catalog.rs::IamRoleName",
+    "review_when": "The Roles name collection output or the IAM role name identity changes."
+  },
+  {
     "resource": "organizations.Account",
     "property": "id",
     "destination_service": "aws",
