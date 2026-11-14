@@ -41,7 +41,7 @@ pub fn logs_log_group_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::required("log_group_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\.\\-_/#A-Za-z0-9]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(512))))))
+            AttributeSchema::required("log_group_name", carina_aws_types::with_member_identity(AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(Some(carina_core::schema::PatternSpec::new("^[\\.\\-_/#A-Za-z0-9]+$", carina_core::schema::PatternMatch::Full)), Some((Some(1), Some(512))))), carina_aws_types::AwsType::LogsLogGroupName.definition()))
                 .create_only()
                 .identity()
                 .with_description("A name for the log group.")

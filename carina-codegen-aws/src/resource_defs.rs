@@ -2194,6 +2194,9 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 provider_name: "IdentityStoreId",
                 description: "The globally unique identifier for the identity store.",
                 required: true,
+                // #700: the lookup's Smithy grammar also accepts store ARNs,
+                // which aws.identitystore.Store.Id rejects. Preserve inputs
+                // until a compatible reference/canonical-output contract exists.
                 type_override: None,
                 representation: Representation::String,
             },
@@ -2202,6 +2205,9 @@ pub fn identitystore_data_sources() -> Vec<DataSourceDef> {
                 provider_name: "UserId",
                 description: "The identifier for the user. Provide either user_id or user_name.",
                 required: false,
+                // #700: ResourceId admits user ARNs longer than Principal.Id's
+                // 64-character pattern. See the per-source guard allowlist and
+                // identity_store_arn_lookup_compatibility_is_preserved test.
                 type_override: None,
                 representation: Representation::String,
             },

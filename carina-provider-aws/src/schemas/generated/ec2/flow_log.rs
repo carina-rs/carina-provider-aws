@@ -65,7 +65,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::optional("log_group_name", AttributeType::string_member(carina_core::schema::StringIdentityLayer::new(None, None, None, None), carina_core::schema::StringMemberConstraints::new(None, Some((Some(1), Some(512))))))
+            AttributeSchema::optional("log_group_name", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::LogsLogGroupName.definition()))
                 .create_only()
                 .with_description("The name of a new or existing CloudWatch Logs log group where Amazon EC2 publishes your flow logs. This parameter is valid only if the destination typ...")
                 .with_provider_name("LogGroupName")
@@ -113,7 +113,7 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .attribute(
-            AttributeSchema::provider_populated("flow_log_id", AttributeType::string())
+            AttributeSchema::provider_populated("flow_log_id", carina_aws_types::with_member_identity(AttributeType::string(), carina_aws_types::AwsType::FlowLogId.definition()))
                 .with_description("The ID of the flow log. (read-only)")
                 .with_provider_name("FlowLogId")
                 .build(),
@@ -125,7 +125,6 @@ pub fn ec2_flow_log_config() -> AwsSchemaConfig {
                 .build(),
         )
         .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("log_format").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\}(?: +\\$\\{[a-z0-9]+(?:-[a-z0-9]+)*\\})*\\z", carina_core::schema::PatternMatch::Full))))
-        .input_rule(carina_core::schema::InputRule::new(carina_core::schema::InputRuleScope::CreateOnly, carina_core::schema::InputRuleTarget::Value(carina_core::schema::InputPath::new("log_group_name").expect("valid input path")), carina_core::schema::InputRuleCode::new("aws.additional_pattern.pattern_0").expect("valid input rule code"), carina_core::schema::InputPredicate::Matches(carina_core::schema::PatternSpec::new("^[.\\-_/#A-Za-z0-9]{1,512}\\z", carina_core::schema::PatternMatch::Full))))
         .with_declared_validators(vec![ValidatorType::TagsKeyValueCheck])
     }
 }

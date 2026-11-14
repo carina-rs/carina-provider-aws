@@ -21,15 +21,14 @@ fn logs_schemas() -> [ValidatedResourceSchema; 2] {
 }
 
 fn awscc_log_group_name_fixture() -> ValidatedResourceSchema {
-    // Exact anonymous refinement from carina-provider-awscc origin/main:
-    // carina-provider-awscc/src/schemas/generated/logs/log_group.rs,
-    // build_log_group_name_attribute. Keep the pattern and length literal.
+    // Structural identity from pinned awscc a1bed434, also recorded in the
+    // codegen manifest. Its owner-local reserved-prefix callback is separate.
     ResourceSchema::new("logs.LogGroup")
         .attribute(
             AttributeSchema::optional(
                 "log_group_name",
                 AttributeType::refined_string(
-                    None,
+                    Some(carina_aws_types::AwsType::LogsLogGroupName.identity()),
                     Some(carina_core::schema::PatternSpec::new(
                         r"^[.\-_/#A-Za-z0-9]{1,512}\z",
                         carina_core::schema::PatternMatch::Full,
@@ -43,6 +42,49 @@ fn awscc_log_group_name_fixture() -> ValidatedResourceSchema {
         )
         .validate()
         .expect("AWSCC name fixture schema")
+}
+
+struct AwsccLogGroupFixture;
+
+impl carina_core::provider::ProviderFactory for AwsccLogGroupFixture {
+    fn name(&self) -> &str {
+        "awscc"
+    }
+    fn display_name(&self) -> &str {
+        "Pinned AWSCC log-group schema fixture"
+    }
+    fn provider_config_attribute_types(&self) -> carina_core::schema::ValidatedConfigSchema {
+        Default::default()
+    }
+    fn validate_config(
+        &self,
+        _: &carina_core::provider::CanonicalProviderConfigAttributes,
+        _: &carina_core::provider::ProviderValidationInputs,
+    ) -> carina_core::provider::ProviderResult<()> {
+        Ok(())
+    }
+    fn create_provider(
+        &self,
+        _: &carina_core::provider::ProviderSession,
+        _: carina_core::provider::InitializeOutcomeMint,
+    ) -> carina_core::provider::BoxFuture<
+        '_,
+        carina_core::provider::ProviderResult<carina_core::provider::ProviderInitialization>,
+    > {
+        panic!("schema-only fixture must never create an AWS client")
+    }
+    fn schemas(&self) -> Vec<ValidatedResourceSchema> {
+        vec![awscc_log_group_name_fixture()]
+    }
+    fn schema_witness(&self) -> carina_core::schema::ValidatedProviderSchemaWitness {
+        carina_core::schema::ValidatedProviderSchemaWitness::new(
+            self.schemas(),
+            self.provider_config_attribute_types(),
+            Default::default(),
+            vec![],
+        )
+        .unwrap()
+    }
 }
 
 #[test]
@@ -80,11 +122,12 @@ fn logs_log_group_name_refinement_equals_awscc_literal() {
 
 #[test]
 fn logs_log_group_name_typed_references_pass_in_both_provider_directions() {
-    let mut registry = SchemaRegistry::new();
-    registry.insert("awscc", awscc_log_group_name_fixture());
     let snapshot = carina_core::provider::loaded_provider_snapshot_from_factories(
-        Arc::new(vec![Box::new(carina_provider_aws::AwsProviderFactory)]),
-        registry,
+        Arc::new(vec![
+            Box::new(carina_provider_aws::AwsProviderFactory),
+            Box::new(AwsccLogGroupFixture),
+        ]),
+        SchemaRegistry::new(),
         carina_core::EnvironmentSnapshot::empty(),
     );
     let context = snapshot.provider_context();
@@ -107,6 +150,23 @@ fn logs_log_group_name_typed_references_pass_in_both_provider_directions() {
             result.is_ok(),
             "{source_provider} -> {sink_provider}: {result:?}"
         );
+        let bindings = carina_core::binding_index::BindingIndex::from_parsed(
+            &parsed,
+            snapshot.schema_registry(),
+            context,
+        );
+        let configuration = carina_core::config_loader::load_buffer_configuration(
+            &parsed,
+            snapshot.schema_registry(),
+            context,
+        );
+        carina_core::validation::validate_resource_ref_types(
+            configuration.judged(),
+            &HashSet::new(),
+            &bindings,
+            &mut Vec::new(),
+        )
+        .expect("both owners must expose the same nominal log-group name");
     }
 }
 
@@ -123,9 +183,13 @@ fn logs_log_group_name_validates_length_and_whole_string_pattern() {
     let identity = identity_layer.identity;
     let pattern = member_layer.pattern.or(identity_layer.pattern);
     let length = carina_core::schema::intersect_bounds(identity_layer.length, member_layer.length);
-    assert!(
-        identity.is_none(),
-        "value constraints must not add an identity"
+    assert_eq!(
+        identity.unwrap().to_string(),
+        "aws.logs.LogGroup.LogGroupName"
+    );
+    assert_eq!(
+        identity_layer.pattern.unwrap().as_str(),
+        r"^[.\-_/#A-Za-z0-9]{1,512}\z"
     );
     assert_eq!(
         pattern.map(carina_core::schema::PatternSpec::as_str),
@@ -228,9 +292,9 @@ fn logs_log_group_retention_schema_reports_allowed_values() {
 }
 
 #[test]
-fn logs_log_group_name_accepts_a_typed_string_reference() {
-    // carina#4230: an identified String output can flow into an anonymous
-    // length/pattern sink; validate its concrete value when it becomes known.
+fn logs_log_group_name_rejects_an_unrelated_typed_string_reference() {
+    // #700: log-group names now require their own identity, including when the
+    // referenced value is unknown and its literal spelling could be valid.
     let source = r#"
         let role = aws.iam.Role {
             role_name = 'log-name-source'
@@ -263,7 +327,28 @@ fn logs_log_group_name_accepts_a_typed_string_reference() {
         context,
         &mut Vec::new(),
     )
-    .expect("typed IAM role ID must be assignable to log_group_name");
+    .expect("resource inputs validate before reference types");
+    let bindings = carina_core::binding_index::BindingIndex::from_parsed(
+        &parsed,
+        snapshot.schema_registry(),
+        context,
+    );
+    let configuration = carina_core::config_loader::load_buffer_configuration(
+        &parsed,
+        snapshot.schema_registry(),
+        context,
+    );
+    let error = carina_core::validation::validate_resource_ref_types(
+        configuration.judged(),
+        &HashSet::new(),
+        &bindings,
+        &mut Vec::new(),
+    )
+    .expect_err("IAM Role.Id is not a log-group name");
+    assert!(
+        error.to_string().contains("aws.logs.LogGroup.LogGroupName"),
+        "{error}"
+    );
 }
 
 #[test]

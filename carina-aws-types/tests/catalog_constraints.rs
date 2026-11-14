@@ -47,8 +47,21 @@ fn standalone_policies_keep_baseline_bounds_and_patterns() {
     use carina_core::schema::{CompiledPattern, PatternMatch, PatternSpec, ValidatedConfigSchema};
     let expected: Value =
         serde_json::from_str(include_str!("fixtures/standalone-63b2a0f.json")).unwrap();
-    assert_eq!(expected.as_object().unwrap().len(), AwsType::ALL.len());
+    // Keep the historical snapshot intact. #700's two additions have their
+    // own exact-definition and boundary regression in identity_layers_tests.
+    let additions = [
+        AwsType::LogsLogGroupName,
+        AwsType::OrganizationsOrganizationId,
+    ];
+    assert_eq!(
+        expected.as_object().unwrap().len() + additions.len(),
+        AwsType::ALL.len()
+    );
     for row in AwsType::ALL {
+        if additions.contains(row) {
+            assert!(expected.get(row.rust_variant_name()).is_none());
+            continue;
+        }
         let ty = row.attribute_type();
         let actual = metadata(&ty).unwrap();
         let mut declaration = expected[row.rust_variant_name()].clone();

@@ -277,6 +277,38 @@ carina-provider-aws/src/
 - **carina-docgen** — Shared registry-compatible Markdown page builder and checker
 - **carina-smithy** — Smithy 2.0 JSON AST parser
 
+## AWSCC Identity Manifest
+
+The [identity inventory guard](./carina-codegen-aws/tests/support/identity_inventory_guard.rs)
+uses the checked-in [awscc manifest](./carina-codegen-aws/tests/fixtures/awscc-identified-inputs.json).
+Refresh it whenever awscc changes identified inputs or its carina pin, or the
+[schema inventory walker](./carina-codegen-aws/tests/support/schema_inventory.rs)
+changes. The walker produces both inventories; path-spelling changes can silently
+drop producer obligations.
+
+From this repository's root, with a clean awscc checkout at
+`../carina-provider-awscc`, run:
+
+```bash
+CARGO_NET_OFFLINE=true ./scripts/update-awscc-identity-manifest.py ../carina-provider-awscc
+```
+
+When working in a worktree, pass the awscc checkout's absolute path instead.
+The [updater](./scripts/update-awscc-identity-manifest.py) compiles local schema
+modules offline into this checkout's target directory. It requires the recorded
+commit to be reachable from the locally available awscc `origin/main` ref and
+does not fetch refs. Use `--allow-unpublished` only for an intentional local
+snapshot of unpublished work. Review the refreshed manifest and update its
+explicit commit/count assertions when the source inventory changes.
+
+The manifest records upstream byte hashes as provenance in
+`source.upstream_file_sha256`. Its `source.content_sha256` covers the entire
+manifest except itself, using SHA-256 over compact, recursively key-sorted UTF-8
+JSON. The guard recomputes this checksum to check the manifest's integrity.
+Its freshness depends on following the refresh rule above. Ordinary CI needs
+neither a sibling checkout nor network access for this check and never runs
+the refresh command; its updater tests use offline Git and Cargo stubs.
+
 ## Smithy Model Cache
 
 [`smithy-models.rev`](./smithy-models.rev) is the sole source of the full

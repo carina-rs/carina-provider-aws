@@ -25,6 +25,91 @@ mod generated;
 
 #[path = "support/identity_dispatch.rs"]
 mod identity_dispatch;
+#[path = "support/identity_inventory_guard.rs"]
+mod identity_inventory_guard;
+#[path = "support/schema_inventory.rs"]
+mod schema_inventory;
+
+#[test]
+fn audited_identity_producers_are_nominal() {
+    use carina_core::schema::RawShape;
+    for (resource, path, expected) in [
+        (
+            "ec2.FlowLog",
+            "log_group_name",
+            "aws.logs.LogGroup.LogGroupName",
+        ),
+        (
+            "logs.LogGroup",
+            "log_group_name",
+            "aws.logs.LogGroup.LogGroupName",
+        ),
+        ("ec2.FlowLog", "flow_log_id", "aws.ec2.FlowLog.Id"),
+        (
+            "ec2.TransitGatewayAttachment",
+            "transit_gateway_attachment_id",
+            "aws.ec2.TransitGatewayAttachment.Id",
+        ),
+        (
+            "organizations.Organization",
+            "id",
+            "aws.organizations.Organization.Id",
+        ),
+    ] {
+        let config = generated::configs()
+            .into_iter()
+            .find(|config| config.resource_type_name == resource)
+            .unwrap();
+        let RawShape::String { identity_layer, .. } =
+            config.schema.attributes()[path].attr_type().raw_shape()
+        else {
+            panic!("{resource}.{path} must be String-valued");
+        };
+        assert_eq!(
+            identity_layer.identity.map(ToString::to_string).as_deref(),
+            Some(expected),
+            "aws.{resource}.{path}"
+        );
+    }
+}
+
+#[test]
+fn identity_store_arn_lookup_compatibility_is_preserved() {
+    use carina_aws_types::{AwsType, MemberStringValidator};
+    use carina_core::schema::RawShape;
+    let config = generated::identitystore::user::identitystore_user_config();
+    for (path, identity, arn) in [
+        (
+            "identity_store_id",
+            AwsType::IdentityStoreId,
+            "arn:aws:identitystore::123456789012:identitystore/d-1234567890",
+        ),
+        (
+            "user_id",
+            AwsType::SsoPrincipalId,
+            "arn:aws:identitystore:::user/12345678-1234-1234-1234-123456789abc",
+        ),
+    ] {
+        let ty = config.schema.attributes()[path].attr_type();
+        let RawShape::String { identity_layer, .. } = ty.raw_shape() else {
+            panic!("String lookup");
+        };
+        assert!(
+            identity_layer.identity.is_none(),
+            "{path} must preserve the wider lookup grammar"
+        );
+        assert!(
+            MemberStringValidator::new(ty).unwrap().accepts(arn),
+            "main accepts {arn:?}"
+        );
+        assert!(
+            !MemberStringValidator::new(&identity.attribute_type())
+                .unwrap()
+                .accepts(arn),
+            "typing {path} would newly reject {arn:?}"
+        );
+    }
+}
 
 #[test]
 fn arn_helpers_match_the_attribute_declaration() {

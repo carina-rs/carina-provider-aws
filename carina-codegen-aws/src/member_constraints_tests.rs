@@ -652,14 +652,25 @@ fn arn_partition_note_reaches_attribute_docs() {
 
 #[test]
 fn only_truly_equivalent_pattern_overrides_are_absent() {
-    for site in [
-        ("iam.Roles", "path_prefix"),
-        ("organizations.Organization", "id"),
-        ("logs.LogGroup", "log_group_name"),
+    let site = ("iam.Roles", "path_prefix");
+    assert!(
+        !resource_type_overrides().contains_key(&site),
+        "{site:?}: derive these constraints from Smithy"
+    );
+    for (site, identity) in [
+        (
+            ("organizations.Organization", "id"),
+            AwsType::OrganizationsOrganizationId,
+        ),
+        (
+            ("logs.LogGroup", "log_group_name"),
+            AwsType::LogsLogGroupName,
+        ),
     ] {
-        assert!(
-            !resource_type_overrides().contains_key(&site),
-            "{site:?}: derive these constraints from Smithy"
+        assert_eq!(
+            resource_type_overrides().get(&site),
+            Some(&TypeOverride::Identity(identity)),
+            "identity decoration must preserve the Smithy member constraints"
         );
     }
     assert!(resource_type_overrides().contains_key(&("organizations.Account", "account_name")));
